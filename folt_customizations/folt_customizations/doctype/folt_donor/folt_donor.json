@@ -1,0 +1,19 @@
+{
+  "doctype": "DocType",
+  "name": "FoLT Donor",
+  "module": "Folt Customizations",
+  "custom": 0,
+  "autoname": "field:donor_name",
+  "naming_rule": "By fieldname",
+  "sort_field": "modified",
+  "sort_order": "DESC",
+  "fields": [
+    { "fieldname": "donor_name", "fieldtype": "Data", "label": "Donor name", "reqd": 1, "unique": 1, "in_list_view": 1 },
+    { "fieldname": "donor_code", "fieldtype": "Data", "label": "Donor code" },
+    { "fieldname": "is_active", "fieldtype": "Check", "label": "Active", "default": "1" }
+  ],
+  "permissions": [
+    { "role": "System Manager", "read": 1, "write": 1, "create": 1, "delete": 1 },
+    { "role": "Accounts Manager", "read": 1, "write": 1, "create": 1 }
+  ]
+}

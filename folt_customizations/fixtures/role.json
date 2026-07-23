@@ -1,0 +1,9 @@
+[
+  {
+    "doctype": "Role",
+    "name": "Finance Manager",
+    "role_name": "Finance Manager",
+    "desk_access": 1,
+    "is_custom": 1
+  }
+]

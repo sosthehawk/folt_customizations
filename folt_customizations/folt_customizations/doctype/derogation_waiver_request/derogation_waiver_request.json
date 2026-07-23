@@ -1,0 +1,37 @@
+{
+  "doctype": "DocType",
+  "name": "Derogation Waiver Request",
+  "module": "Folt Customizations",
+  "custom": 0,
+  "is_submittable": 1,
+  "autoname": "format:WVR-{YYYY}-{#####}",
+  "sort_field": "modified",
+  "sort_order": "DESC",
+  "track_changes": 1,
+  "fields": [
+    { "fieldname": "organisation_project_name", "fieldtype": "Data", "label": "Organisation & Project Name", "reqd": 1, "in_list_view": 1 },
+    { "fieldname": "estimated_value", "fieldtype": "Currency", "label": "Estimated Procurement Value", "reqd": 1, "in_list_view": 1 },
+    { "fieldname": "column_break_head", "fieldtype": "Column Break" },
+    { "fieldname": "project", "fieldtype": "Link", "options": "Project", "label": "Project" },
+    { "fieldname": "cost_center", "fieldtype": "Link", "options": "Cost Center", "label": "Cost Center" },
+    { "fieldname": "supplier", "fieldtype": "Link", "options": "Supplier", "label": "Proposed Supplier" },
+    { "fieldname": "period_of_derogation", "fieldtype": "Data", "label": "Period of Derogation" },
+    { "fieldname": "section_break_items", "fieldtype": "Section Break", "label": "Scope" },
+    { "fieldname": "items_service", "fieldtype": "Small Text", "label": "Items / Service to be Purchased", "reqd": 1 },
+    { "fieldname": "procedure_should_have", "fieldtype": "Small Text", "label": "Procedure That Should Have Been Followed" },
+    { "fieldname": "requested_procedure", "fieldtype": "Small Text", "label": "Requested Procedure" },
+    { "fieldname": "section_break_justify", "fieldtype": "Section Break", "label": "Justification" },
+    { "fieldname": "reasons", "fieldtype": "Text", "label": "Reasons for the Waiver", "reqd": 1 },
+    { "fieldname": "risks_created", "fieldtype": "Text", "label": "Risks Created" },
+    { "fieldname": "mitigating_actions", "fieldtype": "Text", "label": "Mitigating Actions" },
+    { "fieldname": "section_break_status", "fieldtype": "Section Break" },
+    { "fieldname": "workflow_state", "fieldtype": "Link", "options": "Workflow State", "label": "Workflow State", "read_only": 1, "no_copy": 1, "in_standard_filter": 1 }
+  ],
+  "permissions": [
+    { "role": "System Manager", "read": 1, "write": 1, "create": 1, "delete": 1, "submit": 1, "cancel": 1, "amend": 1 },
+    { "role": "Operations Support Officer", "read": 1, "write": 1, "create": 1 },
+    { "role": "Procurement Committee", "read": 1 },
+    { "role": "Finance Officer", "read": 1, "write": 1, "submit": 1 },
+    { "role": "Executive Director", "read": 1, "write": 1, "submit": 1 }
+  ]
+}

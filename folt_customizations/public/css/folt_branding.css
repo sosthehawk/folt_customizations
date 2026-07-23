@@ -1,0 +1,19 @@
+/* FoLT branding — enlarge and center the logo on the login / signup / reset cards.
+   Scoped to .for-login so the Desk navbar logo is unaffected.
+
+   Note: frappe's login.bundle.css loads AFTER this file and sets
+   `.app-logo { max-height: 32px; width: auto }`. This rule wins on specificity
+   (three classes vs one) and explicitly clears max-height, so the logo is sized
+   purely by width here. The logo is allowed to grow beyond the login card (hence
+   the card must not clip it) and is capped by the viewport so it stays responsive. */
+.for-login .page-card {
+  overflow: visible;
+}
+.for-login .page-card-head .app-logo {
+  width: 300px;
+  max-width: 90vw;
+  max-height: none;
+  height: auto;
+  display: block;
+  margin: 0 auto 24px;
+}

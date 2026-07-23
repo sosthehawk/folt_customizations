@@ -1,0 +1,34 @@
+[
+  {
+    "doctype": "Accounting Dimension",
+    "name": "Donor",
+    "document_type": "FoLT Donor",
+    "label": "Donor",
+    "disabled": 0,
+    "fieldname": "donor"
+  },
+  {
+    "doctype": "Accounting Dimension",
+    "name": "Grant / Project",
+    "document_type": "FoLT Grant Project",
+    "label": "Grant / Project",
+    "disabled": 0,
+    "fieldname": "grant_project"
+  },
+  {
+    "doctype": "Accounting Dimension",
+    "name": "Program",
+    "document_type": "FoLT Program",
+    "label": "Program",
+    "disabled": 0,
+    "fieldname": "program"
+  },
+  {
+    "doctype": "Accounting Dimension",
+    "name": "Location",
+    "document_type": "FoLT Location",
+    "label": "Location",
+    "disabled": 0,
+    "fieldname": "location"
+  }
+]

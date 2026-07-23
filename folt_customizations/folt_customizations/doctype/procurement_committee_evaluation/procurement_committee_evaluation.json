@@ -1,0 +1,33 @@
+{
+  "doctype": "DocType",
+  "name": "Procurement Committee Evaluation",
+  "module": "Folt Customizations",
+  "custom": 0,
+  "is_submittable": 1,
+  "autoname": "format:PCE-{YYYY}-{#####}",
+  "sort_field": "modified",
+  "sort_order": "DESC",
+  "track_changes": 1,
+  "fields": [
+    { "fieldname": "request_for_quotation", "fieldtype": "Link", "options": "Request for Quotation", "label": "Request for Quotation", "in_list_view": 1 },
+    { "fieldname": "activity_requisition", "fieldtype": "Link", "options": "Activity Requisition", "label": "Activity Requisition" },
+    { "fieldname": "column_break_head", "fieldtype": "Column Break" },
+    { "fieldname": "requested_by", "fieldtype": "Link", "options": "User", "label": "Requested By (excluded from committee)", "reqd": 1, "description": "Conflict-of-interest subject: this user must not appear in the committee." },
+    { "fieldname": "quorum", "fieldtype": "Int", "label": "Quorum (0 = all members)", "default": "0" },
+    { "fieldname": "section_break_members", "fieldtype": "Section Break", "label": "Committee Members" },
+    { "fieldname": "members", "fieldtype": "Table", "options": "Procurement Committee Member", "label": "Members" },
+    { "fieldname": "section_break_award", "fieldtype": "Section Break", "label": "Award Recommendation" },
+    { "fieldname": "recommended_supplier", "fieldtype": "Link", "options": "Supplier", "label": "Recommended Supplier" },
+    { "fieldname": "recommended_supplier_quotation", "fieldtype": "Link", "options": "Supplier Quotation", "label": "Winning Supplier Quotation" },
+    { "fieldname": "recommendation_notes", "fieldtype": "Text", "label": "Recommendation Notes" },
+    { "fieldname": "section_break_status", "fieldtype": "Section Break" },
+    { "fieldname": "workflow_state", "fieldtype": "Link", "options": "Workflow State", "label": "Workflow State", "read_only": 1, "no_copy": 1, "in_standard_filter": 1 }
+  ],
+  "permissions": [
+    { "role": "System Manager", "read": 1, "write": 1, "create": 1, "delete": 1, "submit": 1, "cancel": 1, "amend": 1 },
+    { "role": "Purchase User", "read": 1, "write": 1, "create": 1 },
+    { "role": "Purchase Manager", "read": 1, "write": 1, "create": 1 },
+    { "role": "Procurement Committee", "read": 1, "write": 1 },
+    { "role": "Head of Finance", "read": 1, "write": 1, "submit": 1 }
+  ]
+}

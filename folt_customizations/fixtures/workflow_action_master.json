@@ -82,5 +82,19 @@
   "modified": "2026-07-23 19:15:01.750572",
   "name": "Check",
   "workflow_action_name": "Check"
+ },
+ {
+  "docstatus": 0,
+  "doctype": "Workflow Action Master",
+  "modified": "2026-07-24 12:11:29.985667",
+  "name": "Submit for approval",
+  "workflow_action_name": "Submit for approval"
+ },
+ {
+  "docstatus": 0,
+  "doctype": "Workflow Action Master",
+  "modified": "2026-07-24 12:33:08.185411",
+  "name": "Submit Payroll for Approval",
+  "workflow_action_name": "Submit Payroll for Approval"
  }
 ]

@@ -106,5 +106,23 @@
   "name": "Checked",
   "style": "Info",
   "workflow_state_name": "Checked"
+ },
+ {
+  "docstatus": 0,
+  "doctype": "Workflow State",
+  "icon": "",
+  "modified": "2026-07-24 12:11:29.962125",
+  "name": "Pending Approval",
+  "style": "Warning",
+  "workflow_state_name": "Pending Approval"
+ },
+ {
+  "docstatus": 0,
+  "doctype": "Workflow State",
+  "icon": "",
+  "modified": "2026-07-24 12:21:47.810760",
+  "name": "Pending Payroll Approval",
+  "style": "Warning",
+  "workflow_state_name": "Pending Payroll Approval"
  }
 ]

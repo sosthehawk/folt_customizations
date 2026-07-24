@@ -1,9 +1,106 @@
 [
-  {
-    "doctype": "Role",
-    "name": "Finance Manager",
-    "role_name": "Finance Manager",
-    "desk_access": 1,
-    "is_custom": 1
-  }
+ {
+  "desk_access": 1,
+  "disabled": 0,
+  "docstatus": 0,
+  "doctype": "Role",
+  "home_page": null,
+  "is_custom": 1,
+  "modified": "2026-07-23 19:09:57.191674",
+  "name": "Head of Programs",
+  "restrict_to_domain": null,
+  "role_name": "Head of Programs",
+  "two_factor_auth": 0
+ },
+ {
+  "desk_access": 1,
+  "disabled": 0,
+  "docstatus": 0,
+  "doctype": "Role",
+  "home_page": null,
+  "is_custom": 1,
+  "modified": "2026-07-23 19:09:57.312693",
+  "name": "Head of Finance",
+  "restrict_to_domain": null,
+  "role_name": "Head of Finance",
+  "two_factor_auth": 0
+ },
+ {
+  "desk_access": 1,
+  "disabled": 0,
+  "docstatus": 0,
+  "doctype": "Role",
+  "home_page": null,
+  "is_custom": 1,
+  "modified": "2026-07-23 19:09:57.314165",
+  "name": "Procurement Committee",
+  "restrict_to_domain": null,
+  "role_name": "Procurement Committee",
+  "two_factor_auth": 0
+ },
+ {
+  "desk_access": 1,
+  "disabled": 0,
+  "docstatus": 0,
+  "doctype": "Role",
+  "home_page": null,
+  "is_custom": 1,
+  "modified": "2026-07-23 19:09:57.315380",
+  "name": "Finance Officer",
+  "restrict_to_domain": null,
+  "role_name": "Finance Officer",
+  "two_factor_auth": 0
+ },
+ {
+  "desk_access": 1,
+  "disabled": 0,
+  "docstatus": 0,
+  "doctype": "Role",
+  "home_page": null,
+  "is_custom": 1,
+  "modified": "2026-07-23 19:09:57.316517",
+  "name": "Executive Director",
+  "restrict_to_domain": null,
+  "role_name": "Executive Director",
+  "two_factor_auth": 0
+ },
+ {
+  "desk_access": 1,
+  "disabled": 0,
+  "docstatus": 0,
+  "doctype": "Role",
+  "home_page": null,
+  "is_custom": 1,
+  "modified": "2026-07-23 19:09:57.317570",
+  "name": "Finance Assistant",
+  "restrict_to_domain": null,
+  "role_name": "Finance Assistant",
+  "two_factor_auth": 0
+ },
+ {
+  "desk_access": 1,
+  "disabled": 0,
+  "docstatus": 0,
+  "doctype": "Role",
+  "home_page": null,
+  "is_custom": 1,
+  "modified": "2026-07-23 19:09:57.318656",
+  "name": "Operations Support Officer",
+  "restrict_to_domain": null,
+  "role_name": "Operations Support Officer",
+  "two_factor_auth": 0
+ },
+ {
+  "desk_access": 1,
+  "disabled": 0,
+  "docstatus": 0,
+  "doctype": "Role",
+  "home_page": null,
+  "is_custom": 1,
+  "modified": "2026-07-23 19:10:15.043464",
+  "name": "Finance Manager",
+  "restrict_to_domain": null,
+  "role_name": "Finance Manager",
+  "two_factor_auth": 0
+ }
 ]

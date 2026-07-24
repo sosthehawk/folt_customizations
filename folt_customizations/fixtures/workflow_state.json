@@ -1,0 +1,110 @@
+[
+ {
+  "docstatus": 0,
+  "doctype": "Workflow State",
+  "icon": "ok-sign",
+  "modified": "2026-07-13 16:01:14.093367",
+  "name": "Approved",
+  "style": "Success",
+  "workflow_state_name": "Approved"
+ },
+ {
+  "docstatus": 0,
+  "doctype": "Workflow State",
+  "icon": "remove",
+  "modified": "2026-07-13 16:01:14.093715",
+  "name": "Rejected",
+  "style": "Danger",
+  "workflow_state_name": "Rejected"
+ },
+ {
+  "docstatus": 0,
+  "doctype": "Workflow State",
+  "icon": "",
+  "modified": "2026-07-23 19:15:01.706385",
+  "name": "Draft",
+  "style": "Danger",
+  "workflow_state_name": "Draft"
+ },
+ {
+  "docstatus": 0,
+  "doctype": "Workflow State",
+  "icon": "",
+  "modified": "2026-07-23 19:15:01.733165",
+  "name": "Pending Head of Programs",
+  "style": "Warning",
+  "workflow_state_name": "Pending Head of Programs"
+ },
+ {
+  "docstatus": 0,
+  "doctype": "Workflow State",
+  "icon": "",
+  "modified": "2026-07-23 19:15:01.734832",
+  "name": "Pending Head of Finance",
+  "style": "Warning",
+  "workflow_state_name": "Pending Head of Finance"
+ },
+ {
+  "docstatus": 0,
+  "doctype": "Workflow State",
+  "icon": "",
+  "modified": "2026-07-23 19:15:01.737041",
+  "name": "Committee Reviewing",
+  "style": "Warning",
+  "workflow_state_name": "Committee Reviewing"
+ },
+ {
+  "docstatus": 0,
+  "doctype": "Workflow State",
+  "icon": "",
+  "modified": "2026-07-23 19:15:01.737643",
+  "name": "Pending Head of Finance Approval",
+  "style": "Warning",
+  "workflow_state_name": "Pending Head of Finance Approval"
+ },
+ {
+  "docstatus": 0,
+  "doctype": "Workflow State",
+  "icon": "",
+  "modified": "2026-07-23 19:15:01.738563",
+  "name": "Pending Committee Review",
+  "style": "Warning",
+  "workflow_state_name": "Pending Committee Review"
+ },
+ {
+  "docstatus": 0,
+  "doctype": "Workflow State",
+  "icon": "",
+  "modified": "2026-07-23 19:15:01.739150",
+  "name": "Pending Finance Officer Review",
+  "style": "Warning",
+  "workflow_state_name": "Pending Finance Officer Review"
+ },
+ {
+  "docstatus": 0,
+  "doctype": "Workflow State",
+  "icon": "",
+  "modified": "2026-07-23 19:15:01.739655",
+  "name": "Pending Executive Director Approval",
+  "style": "Warning",
+  "workflow_state_name": "Pending Executive Director Approval"
+ },
+ {
+  "docstatus": 0,
+  "doctype": "Workflow State",
+  "icon": "",
+  "modified": "2026-07-23 19:15:01.740173",
+  "name": "Requested",
+  "style": "Warning",
+  "workflow_state_name": "Requested"
+ },
+ {
+  "docstatus": 0,
+  "doctype": "Workflow State",
+  "icon": "",
+  "modified": "2026-07-23 19:15:01.740692",
+  "name": "Checked",
+  "style": "Info",
+  "workflow_state_name": "Checked"
+ }
+]

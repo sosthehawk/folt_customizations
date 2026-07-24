@@ -33,22 +33,64 @@ after_migrate = "folt_customizations.branding.apply_branding"
 # database on every run -- so this file on disk is the source of truth. If you edit a
 # Workflow, Custom Field or Property Setter in the Desk UI, re-export it here
 # (`bench --site <site> export-fixtures`) before the next migrate, or the edit is lost.
+# Custom roles required by FoLT's approval chain (Section 7 of the Implementation Guide).
+FOLT_ROLES = [
+    "Finance Manager",
+    "Head of Programs",
+    "Head of Finance",
+    "Procurement Committee",
+    "Finance Officer",
+    "Executive Director",
+    "Finance Assistant",
+    "Operations Support Officer",
+]
+
+# Workflows attached to the procurement / finance doctypes.
+FOLT_WORKFLOWS = [
+    "FoLT Purchase Order Approval",
+    "Activity Requisition Approval",
+    "Procurement Committee Evaluation Approval",
+    "Derogation Waiver Request Approval",
+    "Employee Advance Float Approval",
+]
+
+# Workflow State / Action masters referenced by the workflows above. ERPNext 16 validates
+# that these master records exist before a Workflow can be imported, so they must ship as
+# fixtures too (otherwise `bench migrate` fails on a fresh build with a LinkValidationError).
+FOLT_WORKFLOW_STATES = [
+    "Draft", "Pending Head of Programs", "Pending Head of Finance", "Committee Reviewing",
+    "Pending Head of Finance Approval", "Pending Committee Review",
+    "Pending Finance Officer Review", "Pending Executive Director Approval",
+    "Requested", "Checked", "Approved", "Rejected", "Pending Approval",
+]
+FOLT_WORKFLOW_ACTIONS = [
+    "Submit for Review", "Approve", "Reject", "Send to Committee",
+    "Submit for Award Approval", "Approve (Intent to Award)", "Submit for Committee Review",
+    "Submit for Finance Review", "Endorse", "Review & Forward", "Authorise", "Check",
+    "Submit for approval",
+]
+
+# FoLT Supplier Groups acting as the pre-qualified supplier register (Section 4.1).
+FOLT_SUPPLIER_GROUPS = ["Catering", "Car Hire", "Travel & Accommodation", "ICT"]
+
+# Custom print formats matched to FoLT's existing paper forms.
+FOLT_PRINT_FORMATS = [
+    "FoLT Intent to Award",
+    "FoLT Derogation Waiver Request",
+    "FoLT Float Expense Report",
+]
+
+# Order matters: masters and Custom Fields (e.g. the Employee Advance `workflow_state` field)
+# must import before the Workflows that reference them, so a fresh `bench migrate` on an empty
+# database does not fail with a LinkValidationError.
 fixtures = [
     "Accounting Dimension",
-    {
-        "doctype": "Role",
-        "filters": [["name", "in", ["Finance Manager"]]],
-    },
-    {
-        "doctype": "Workflow",
-        "filters": [["name", "in", ["FoLT Purchase Order Approval"]]],
-    },
-    {
-        "doctype": "Custom Field",
-        "filters": [["module", "=", "Folt Customizations"]],
-    },
-    {
-        "doctype": "Property Setter",
-        "filters": [["module", "=", "Folt Customizations"]],
-    },
+    {"doctype": "Role", "filters": [["name", "in", FOLT_ROLES]]},
+    {"doctype": "Custom Field", "filters": [["module", "=", "Folt Customizations"]]},
+    {"doctype": "Property Setter", "filters": [["module", "=", "Folt Customizations"]]},
+    {"doctype": "Supplier Group", "filters": [["name", "in", FOLT_SUPPLIER_GROUPS]]},
+    {"doctype": "Workflow State", "filters": [["name", "in", FOLT_WORKFLOW_STATES]]},
+    {"doctype": "Workflow Action Master", "filters": [["name", "in", FOLT_WORKFLOW_ACTIONS]]},
+    {"doctype": "Workflow", "filters": [["name", "in", FOLT_WORKFLOWS]]},
+    {"doctype": "Print Format", "filters": [["name", "in", FOLT_PRINT_FORMATS]]},
 ]

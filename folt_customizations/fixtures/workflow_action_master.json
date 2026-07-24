@@ -1,0 +1,86 @@
+[
+ {
+  "docstatus": 0,
+  "doctype": "Workflow Action Master",
+  "modified": "2026-07-13 16:01:14.097013",
+  "name": "Approve",
+  "workflow_action_name": "Approve"
+ },
+ {
+  "docstatus": 0,
+  "doctype": "Workflow Action Master",
+  "modified": "2026-07-13 16:01:14.097515",
+  "name": "Reject",
+  "workflow_action_name": "Reject"
+ },
+ {
+  "docstatus": 0,
+  "doctype": "Workflow Action Master",
+  "modified": "2026-07-23 19:15:01.743137",
+  "name": "Submit for Review",
+  "workflow_action_name": "Submit for Review"
+ },
+ {
+  "docstatus": 0,
+  "doctype": "Workflow Action Master",
+  "modified": "2026-07-23 19:15:01.747082",
+  "name": "Send to Committee",
+  "workflow_action_name": "Send to Committee"
+ },
+ {
+  "docstatus": 0,
+  "doctype": "Workflow Action Master",
+  "modified": "2026-07-23 19:15:01.747862",
+  "name": "Submit for Award Approval",
+  "workflow_action_name": "Submit for Award Approval"
+ },
+ {
+  "docstatus": 0,
+  "doctype": "Workflow Action Master",
+  "modified": "2026-07-23 19:15:01.748258",
+  "name": "Approve (Intent to Award)",
+  "workflow_action_name": "Approve (Intent to Award)"
+ },
+ {
+  "docstatus": 0,
+  "doctype": "Workflow Action Master",
+  "modified": "2026-07-23 19:15:01.748639",
+  "name": "Submit for Committee Review",
+  "workflow_action_name": "Submit for Committee Review"
+ },
+ {
+  "docstatus": 0,
+  "doctype": "Workflow Action Master",
+  "modified": "2026-07-23 19:15:01.749044",
+  "name": "Submit for Finance Review",
+  "workflow_action_name": "Submit for Finance Review"
+ },
+ {
+  "docstatus": 0,
+  "doctype": "Workflow Action Master",
+  "modified": "2026-07-23 19:15:01.749427",
+  "name": "Endorse",
+  "workflow_action_name": "Endorse"
+ },
+ {
+  "docstatus": 0,
+  "doctype": "Workflow Action Master",
+  "modified": "2026-07-23 19:15:01.749811",
+  "name": "Review & Forward",
+  "workflow_action_name": "Review & Forward"
+ },
+ {
+  "docstatus": 0,
+  "doctype": "Workflow Action Master",
+  "modified": "2026-07-23 19:15:01.750201",
+  "name": "Authorise",
+  "workflow_action_name": "Authorise"
+ },
+ {
+  "docstatus": 0,
+  "doctype": "Workflow Action Master",
+  "modified": "2026-07-23 19:15:01.750572",
+  "name": "Check",
+  "workflow_action_name": "Check"
+ }
+]

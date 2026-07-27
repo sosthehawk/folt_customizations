@@ -26,8 +26,14 @@ website_context = {
 # app_logo_url alone isn't enough for the Desk navbar / login logo (see branding.py),
 # so apply_branding() writes the logo into Website Settings on install and on every
 # migrate — keeping the branding reproducible instead of a one-off Desk edit.
-after_install = "folt_customizations.branding.apply_branding"
-after_migrate = "folt_customizations.branding.apply_branding"
+after_install = [
+    "folt_customizations.branding.apply_branding",
+    "folt_customizations.workspaces.hide_workspaces",
+]
+after_migrate = [
+    "folt_customizations.branding.apply_branding",
+    "folt_customizations.workspaces.hide_workspaces",
+]
 
 # Fixtures shipped with this app. `bench migrate` re-syncs these from disk into the
 # database on every run -- so this file on disk is the source of truth. If you edit a

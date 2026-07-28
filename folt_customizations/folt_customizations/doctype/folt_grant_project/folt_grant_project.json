@@ -17,6 +17,7 @@
   ],
   "permissions": [
     { "role": "System Manager", "read": 1, "write": 1, "create": 1, "delete": 1 },
-    { "role": "Accounts Manager", "read": 1, "write": 1, "create": 1 }
+    { "role": "Accounts Manager", "read": 1, "write": 1, "create": 1 },
+    { "role": "Employee", "read": 1 }
   ]
 }

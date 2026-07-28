@@ -26,13 +26,19 @@ website_context = {
 # app_logo_url alone isn't enough for the Desk navbar / login logo (see branding.py),
 # so apply_branding() writes the logo into Website Settings on install and on every
 # migrate — keeping the branding reproducible instead of a one-off Desk edit.
+# apply_role_permissions() grants FoLT's custom roles the permissions their workflow steps
+# need on standard doctypes (Purchase Order, Employee Advance, Salary Slip). It runs here
+# rather than as a Custom DocPerm fixture so the grants are additive and idempotent -- see
+# permissions.py for why a fixture would be the wrong tool.
 after_install = [
     "folt_customizations.branding.apply_branding",
     "folt_customizations.workspaces.hide_workspaces",
+    "folt_customizations.permissions.apply_role_permissions",
 ]
 after_migrate = [
     "folt_customizations.branding.apply_branding",
     "folt_customizations.workspaces.hide_workspaces",
+    "folt_customizations.permissions.apply_role_permissions",
 ]
 
 # Fixtures shipped with this app. `bench migrate` re-syncs these from disk into the

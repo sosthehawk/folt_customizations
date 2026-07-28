@@ -1,0 +1,238 @@
+{
+ "app": "folt_customizations",
+ "charts": [],
+ "content": "[{\"id\":\"foltHdrFlow\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\"><b>Approval Workflows</b></span>\",\"col\":12}},{\"id\":\"foltScActReq\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Activity Requisition\",\"col\":3}},{\"id\":\"foltScPurOrd\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Purchase Order\",\"col\":3}},{\"id\":\"foltScDerWvr\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Derogation Waiver Request\",\"col\":3}},{\"id\":\"foltScEmpAdv\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Employee Advance\",\"col\":3}},{\"id\":\"foltSpacer01\",\"type\":\"spacer\",\"data\":{\"col\":12}},{\"id\":\"foltHdrDocs\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\"><b>Documents &amp; Masters</b></span>\",\"col\":12}},{\"id\":\"foltCardReq\",\"type\":\"card\",\"data\":{\"card_name\":\"Requests\",\"col\":4}},{\"id\":\"foltCardPro\",\"type\":\"card\",\"data\":{\"card_name\":\"Procurement\",\"col\":4}},{\"id\":\"foltCardPay\",\"type\":\"card\",\"data\":{\"card_name\":\"Payroll\",\"col\":4}},{\"id\":\"foltCardMst\",\"type\":\"card\",\"data\":{\"card_name\":\"FoLT Masters\",\"col\":4}}]",
+ "creation": "2026-07-28 09:00:00.000000",
+ "custom_blocks": [],
+ "docstatus": 0,
+ "doctype": "Workspace",
+ "for_user": "",
+ "hide_custom": 0,
+ "icon": "waves",
+ "idx": 0,
+ "indicator_color": "",
+ "is_hidden": 0,
+ "label": "FoLT",
+ "links": [
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Requests",
+   "link_count": 0,
+   "onboard": 0,
+   "type": "Card Break"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Activity Requisition",
+   "link_count": 0,
+   "link_to": "Activity Requisition",
+   "link_type": "DocType",
+   "onboard": 1,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Employee Advance",
+   "link_count": 0,
+   "link_to": "Employee Advance",
+   "link_type": "DocType",
+   "onboard": 1,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Participant Reimbursement List",
+   "link_count": 0,
+   "link_to": "Participant Reimbursement List",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Procurement",
+   "link_count": 0,
+   "onboard": 0,
+   "type": "Card Break"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Purchase Order",
+   "link_count": 0,
+   "link_to": "Purchase Order",
+   "link_type": "DocType",
+   "onboard": 1,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Procurement Committee Evaluation",
+   "link_count": 0,
+   "link_to": "Procurement Committee Evaluation",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Derogation Waiver Request",
+   "link_count": 0,
+   "link_to": "Derogation Waiver Request",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Supplier",
+   "link_count": 0,
+   "link_to": "Supplier",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Supplier Group",
+   "link_count": 0,
+   "link_to": "Supplier Group",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Payroll",
+   "link_count": 0,
+   "onboard": 0,
+   "type": "Card Break"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Salary Slip",
+   "link_count": 0,
+   "link_to": "Salary Slip",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Salary Structure",
+   "link_count": 0,
+   "link_to": "Salary Structure",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "FoLT Masters",
+   "link_count": 0,
+   "onboard": 0,
+   "type": "Card Break"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "FoLT Donor",
+   "link_count": 0,
+   "link_to": "FoLT Donor",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "FoLT Grant Project",
+   "link_count": 0,
+   "link_to": "FoLT Grant Project",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "FoLT Program",
+   "link_count": 0,
+   "link_to": "FoLT Program",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "FoLT Location",
+   "link_count": 0,
+   "link_to": "FoLT Location",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  }
+ ],
+ "modified": "2026-07-28 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Folt Customizations",
+ "name": "FoLT",
+ "number_cards": [],
+ "owner": "Administrator",
+ "parent_page": "",
+ "public": 1,
+ "quick_lists": [],
+ "restrict_to_domain": "",
+ "roles": [],
+ "sequence_id": 1.5,
+ "shortcuts": [
+  {
+   "color": "Grey",
+   "doc_view": "List",
+   "label": "Activity Requisition",
+   "link_to": "Activity Requisition",
+   "stats_filter": "[]",
+   "type": "DocType"
+  },
+  {
+   "color": "Grey",
+   "doc_view": "List",
+   "label": "Purchase Order",
+   "link_to": "Purchase Order",
+   "stats_filter": "[]",
+   "type": "DocType"
+  },
+  {
+   "color": "Grey",
+   "doc_view": "List",
+   "label": "Derogation Waiver Request",
+   "link_to": "Derogation Waiver Request",
+   "stats_filter": "[]",
+   "type": "DocType"
+  },
+  {
+   "color": "Grey",
+   "doc_view": "List",
+   "label": "Employee Advance",
+   "link_to": "Employee Advance",
+   "stats_filter": "[]",
+   "type": "DocType"
+  }
+ ],
+ "title": "FoLT",
+ "type": "Workspace"
+}

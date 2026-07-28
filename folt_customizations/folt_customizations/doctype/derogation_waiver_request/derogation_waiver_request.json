@@ -32,6 +32,7 @@
     { "role": "Operations Support Officer", "read": 1, "write": 1, "create": 1 },
     { "role": "Procurement Committee", "read": 1 },
     { "role": "Finance Officer", "read": 1, "write": 1, "submit": 1 },
-    { "role": "Executive Director", "read": 1, "write": 1, "submit": 1 }
+    { "role": "Executive Director", "read": 1, "write": 1, "submit": 1 },
+    { "role": "Purchase User", "read": 1 }
   ]
 }

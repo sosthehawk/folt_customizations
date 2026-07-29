@@ -30,7 +30,7 @@
   "permissions": [
     { "role": "System Manager", "read": 1, "write": 1, "create": 1, "delete": 1, "submit": 1, "cancel": 1, "amend": 1 },
     { "role": "Operations Support Officer", "read": 1, "write": 1, "create": 1 },
-    { "role": "Procurement Committee", "read": 1 },
+    { "role": "Procurement Committee", "read": 1, "write": 1 },
     { "role": "Finance Officer", "read": 1, "write": 1, "submit": 1 },
     { "role": "Executive Director", "read": 1, "write": 1, "submit": 1 },
     { "role": "Purchase User", "read": 1 }

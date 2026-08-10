@@ -68,10 +68,19 @@ NAVBAR_BRANDING = {
 # Desk app tiles (Desktop Icon, icon_type "App") that ship Frappe/ERPNext wording.
 # Rename the `label` only -- `name` is what other records link to.
 #
-# "Framework" is deliberately absent: its label carries no Frappe wording, and renaming it
-# to "FoLT" would collide with our own FoLT icon. frappe's get_desktop_icon_by_label()
-# resolves icons *by label*, so two icons sharing one label makes the lookup ambiguous.
-# Its Frappe wordmark logo is still replaced, via DESKTOP_ICON_LOGOS below.
+# ONLY icon_type "App" icons are safe to rename. For an icon_type "Link" icon whose
+# link_type is "Workspace Sidebar", the label is load-bearing for navigation: both
+# desktop.js:get_route() and utils.js:get_route_for_icon() resolve the target with
+# `frappe.boot.workspace_sidebar_item[desktop_icon.label.toLowerCase()]`, and boot.py:450
+# keys that dict by the Workspace Sidebar's `name`. Rename the label and the lookup misses,
+# `route` stays undefined and the tile becomes a dead link that msgprints "Icon is not
+# correctly configured". That is why "ERPNext Settings" is not in this map -- see the note
+# in the module docstring of this section below.
+#
+# "Framework" is deliberately absent for a different reason: its label carries no Frappe
+# wording, and renaming it to "FoLT" would collide with our own FoLT icon, since
+# get_desktop_icon_by_label() resolves icons *by label*. Its Frappe wordmark logo is still
+# replaced, via DESKTOP_ICON_LOGOS below.
 DESKTOP_ICON_LABELS = {
     "Frappe HR": "FoLT HR",
     "ERPNext": "FoLT ERP",
@@ -170,6 +179,33 @@ def _apply_desktop_icons():
             continue
         frappe.db.set_value("Desktop Icon", name, to_set, update_modified=False)
         changed = True
+    return changed | _reparent_desktop_icons()
+
+
+def _reparent_desktop_icons():
+    """Re-point child icons at their parent's new label after a rename.
+
+    An "App" tile groups its workspaces into a folder, and the grouping is keyed by
+    *label*, not by name: children carry `parent_icon = "<parent label>"`, and
+    sidebar_header.js:build_folder_map()/desktop.js match that against the parent icon's
+    label. So renaming "Frappe HR" -> "FoLT HR" on its own silently orphans all nine HR
+    workspaces -- the folder reports 0 workspaces and the children scatter across the
+    /desk grid as loose tiles. frappe does this reparenting itself when a folder is
+    renamed in the UI (desktop.js:add_icons_to_folder); we have to do it here because we
+    rename in the database.
+
+    Idempotent: once the children point at the new label there is nothing left to match,
+    and migrate resets both fields together so the pair is always re-applied as a unit.
+    """
+    changed = False
+    for old_label, new_label in DESKTOP_ICON_LABELS.items():
+        for child in frappe.get_all(
+            "Desktop Icon", filters={"parent_icon": old_label}, pluck="name"
+        ):
+            frappe.db.set_value(
+                "Desktop Icon", child, "parent_icon", new_label, update_modified=False
+            )
+            changed = True
     return changed
 
 

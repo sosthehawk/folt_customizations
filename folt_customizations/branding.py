@@ -86,6 +86,29 @@ DESKTOP_ICON_LABELS = {
     "ERPNext": "FoLT ERP",
 }
 
+# "ERPNext Settings" is the one Link-type icon we do rename, and it takes an extra step
+# because of the label->sidebar coupling described above. We ship our own Workspace Sidebar
+# named "FoLT Settings" (workspace_sidebar/folt_settings.json, mirroring erpnext's
+# ERPNext Settings items) so that workspace_sidebar_item["folt settings"] exists, then point
+# both the label and link_to at it. erpnext's own sidebar doc is left untouched -- it simply
+# ends up with no Desktop Icon referencing it, which makes it invisible rather than broken.
+#
+# Trade-off worth knowing: the item list in folt_settings.json is a snapshot taken from
+# erpnext 16.30.0, so settings pages ERPNext adds later will not appear until it is
+# re-synced by hand.
+#
+# logo_url reuses erpnext's existing gear asset so the tile looks exactly as it did. The
+# filename route cannot serve it: get_desktop_icon() builds the path from the icon's `app`
+# (still "erpnext") plus frappe.scrub(label), and there is no erpnext_settings ->
+# folt_settings.svg to find.
+RELINKED_DESKTOP_ICONS = {
+    "ERPNext Settings": {
+        "label": "FoLT Settings",
+        "link_to": "FoLT Settings",
+        "logo_url": "/assets/erpnext/icons/desktop_icons/subtle/erpnext_settings.svg",
+    },
+}
+
 # Desktop Icon -> logo_url. Two jobs here:
 #
 # 1. The top-left mark in the Desk. Frappe v16 has no navbar brand at all (the old
@@ -166,6 +189,8 @@ def _apply_desktop_icons():
         updates.setdefault(name, {})["label"] = label
     for name, logo_url in DESKTOP_ICON_LOGOS.items():
         updates.setdefault(name, {})["logo_url"] = logo_url
+    for name, values in RELINKED_DESKTOP_ICONS.items():
+        updates.setdefault(name, {}).update(values)
 
     changed = False
     for name, values in updates.items():

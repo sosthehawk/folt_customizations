@@ -12,6 +12,18 @@ EMBLEM = "/assets/folt_customizations/images/folt-emblem.svg"
 # are what every Desk-side logo field points at.
 ICON_SOLID = "/assets/folt_customizations/icons/desktop_icons/solid/folt.svg"
 
+# The loading mark for the login/boot wait. A separate file from EMBLEM on purpose: EMBLEM
+# is also the favicon, and an animated favicon is both wrong and wasteful.
+#
+# It carries explicit width/height attributes, and that is load-bearing rather than
+# cosmetic. frappe's splash is `.centered > img{width:auto;max-width:200px}` and `.centered`
+# is `position:absolute` (global.scss:137), i.e. a shrink-to-fit box. An SVG with only a
+# viewBox has no intrinsic width, contributes 0 to that box, and renders at **0x0** -- the
+# splash was showing nothing at all. Measured in Chrome: with no width/height the image
+# reports natural=115x150 but RENDERED=0x0, and frappe's own default splash logo behaves
+# identically. Keep the width/height attributes on any asset used as splash_image.
+SPLASH = "/assets/folt_customizations/images/folt-emblem-animated.svg"
+
 # What the product is called once Frappe/ERPNext branding is replaced.
 #   Frappe Framework -> FoLT      ERPNext -> FoLT ERP      Frappe HR -> FoLT HR
 APP_NAME = "FoLT ERP"
@@ -30,7 +42,7 @@ BRANDING = {
     "app_logo": LOGO,
     "banner_image": LOGO,
     "favicon": EMBLEM,
-    "splash_image": EMBLEM,
+    "splash_image": SPLASH,
     "footer_powered": "Friends of Lake Turkana",
 }
 

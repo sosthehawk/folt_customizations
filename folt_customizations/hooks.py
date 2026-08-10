@@ -36,9 +36,12 @@ add_to_apps_screen = [
 # from any hook we can declare -- see branding.rebrand_bootinfo for why.
 extend_bootinfo = ["folt_customizations.branding.rebrand_bootinfo"]
 
+# splash_image is the animated mark, not the plain emblem: it is what shows during the
+# login wait, and it needs intrinsic width/height to render at all inside frappe's
+# shrink-to-fit `.centered` splash box. See branding.SPLASH. favicon stays static.
 website_context = {
     "favicon": "/assets/folt_customizations/images/folt-emblem.svg",
-    "splash_image": "/assets/folt_customizations/images/folt-emblem.svg",
+    "splash_image": "/assets/folt_customizations/images/folt-emblem-animated.svg",
     "brand_html": "<img src='/assets/folt_customizations/images/folt-logo.svg' alt='Friends of Lake Turkana' style='height:28px'>",
 }
 

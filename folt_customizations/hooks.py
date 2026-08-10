@@ -17,6 +17,25 @@ app_logo_url = "/assets/folt_customizations/images/folt-logo.svg"
 # untouched). Served on website/login pages via the head include.
 web_include_css = "/assets/folt_customizations/css/folt_branding.css"
 
+# Without this, frappe's boot.py falls through to the raw `app_logo_url` hook list and
+# app_data["folt_customizations"].app_logo_url ends up a *list* where every other app's is
+# a string -- it only survives because JS coerces a one-element array to its element.
+# Declaring the app properly also gives FoLT a correct tile on the /apps screen. The logo
+# is the square desktop-icon tile, not the wordmark: the Desk renders these in a 32x32 box.
+add_to_apps_screen = [
+    {
+        "name": "folt_customizations",
+        "logo": "/assets/folt_customizations/icons/desktop_icons/solid/folt.svg",
+        "title": "FoLT",
+        "route": "/desk/folt",
+    }
+]
+
+# Replace the Frappe/ERPNext/Frappe HR app titles and logos in the boot payload. These
+# drive the Desk sidebar header subtitle and the /apps screen, and they are unreachable
+# from any hook we can declare -- see branding.rebrand_bootinfo for why.
+extend_bootinfo = ["folt_customizations.branding.rebrand_bootinfo"]
+
 website_context = {
     "favicon": "/assets/folt_customizations/images/folt-emblem.svg",
     "splash_image": "/assets/folt_customizations/images/folt-emblem.svg",
@@ -25,7 +44,10 @@ website_context = {
 
 # app_logo_url alone isn't enough for the Desk navbar / login logo (see branding.py),
 # so apply_branding() writes the logo into Website Settings on install and on every
-# migrate — keeping the branding reproducible instead of a one-off Desk edit.
+# migrate — keeping the branding reproducible instead of a one-off Desk edit. It also
+# de-brands System Settings, the help dropdown and the Desk app tiles; several of those
+# rows are re-synced from frappe/erpnext/hrms by migrate itself, so re-applying *after*
+# migrate is what makes the change durable rather than a one-off.
 # apply_role_permissions() grants FoLT's custom roles the permissions their workflow steps
 # need on standard doctypes (Purchase Order, Employee Advance, Salary Slip). It runs here
 # rather than as a Custom DocPerm fixture so the grants are additive and idempotent -- see

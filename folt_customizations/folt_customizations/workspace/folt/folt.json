@@ -45,6 +45,16 @@
   {
    "hidden": 0,
    "is_query_report": 0,
+   "label": "Activity Participant List",
+   "link_count": 0,
+   "link_to": "Activity Participant List",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
    "label": "Participant Reimbursement List",
    "link_count": 0,
    "link_to": "Participant Reimbursement List",
@@ -182,6 +192,26 @@
    "label": "FoLT Location",
    "link_count": 0,
    "link_to": "FoLT Location",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "FoLT Participant",
+   "link_count": 0,
+   "link_to": "FoLT Participant",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Participant Rate Schedule",
+   "link_count": 0,
+   "link_to": "Participant Rate Schedule",
    "link_type": "DocType",
    "onboard": 0,
    "type": "Link"

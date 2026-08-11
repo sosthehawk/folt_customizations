@@ -99,6 +99,8 @@ FOLT_WORKFLOWS = [
     "Derogation Waiver Request Approval",
     "Employee Advance Float Approval",
     "FoLT Payroll Approval",
+    "Activity Participant List Verification",
+    "Participant Reimbursement List Verification",
 ]
 
 # Workflow State / Action masters referenced by the workflows above. ERPNext 16 validates
@@ -110,12 +112,15 @@ FOLT_WORKFLOW_STATES = [
     "Pending Finance Officer Review", "Pending Executive Director Approval",
     "Requested", "Checked", "Approved", "Rejected", "Pending Approval",
     "Pending Payroll Approval",
+    "Pending Verification", "Verified", "Paid", "Partly Paid", "Disputed",
 ]
 FOLT_WORKFLOW_ACTIONS = [
     "Submit for Review", "Approve", "Reject", "Send to Committee",
     "Submit for Award Approval", "Approve (Intent to Award)", "Submit for Committee Review",
     "Submit for Finance Review", "Endorse", "Review & Forward", "Authorise", "Check",
     "Submit for approval", "Submit Payroll for Approval",
+    "Submit for Verification", "Verify", "Return for Correction",
+    "Mark Paid", "Mark Partly Paid", "Raise Dispute", "Resolve Dispute",
 ]
 
 # Kenyan statutory payroll salary components (NSSF, SHIF, Housing Levy, PAYE + helpers).

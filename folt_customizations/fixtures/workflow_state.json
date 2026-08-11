@@ -124,5 +124,50 @@
   "name": "Pending Payroll Approval",
   "style": "Warning",
   "workflow_state_name": "Pending Payroll Approval"
+ },
+ {
+  "docstatus": 0,
+  "doctype": "Workflow State",
+  "icon": "",
+  "modified": "2026-08-11 17:37:59.191520",
+  "name": "Pending Verification",
+  "style": "Warning",
+  "workflow_state_name": "Pending Verification"
+ },
+ {
+  "docstatus": 0,
+  "doctype": "Workflow State",
+  "icon": "",
+  "modified": "2026-08-11 17:37:59.225527",
+  "name": "Verified",
+  "style": "Success",
+  "workflow_state_name": "Verified"
+ },
+ {
+  "docstatus": 0,
+  "doctype": "Workflow State",
+  "icon": "",
+  "modified": "2026-08-11 17:37:59.226135",
+  "name": "Paid",
+  "style": "Success",
+  "workflow_state_name": "Paid"
+ },
+ {
+  "docstatus": 0,
+  "doctype": "Workflow State",
+  "icon": "",
+  "modified": "2026-08-11 17:37:59.226705",
+  "name": "Partly Paid",
+  "style": "Warning",
+  "workflow_state_name": "Partly Paid"
+ },
+ {
+  "docstatus": 0,
+  "doctype": "Workflow State",
+  "icon": "",
+  "modified": "2026-08-11 17:37:59.227236",
+  "name": "Disputed",
+  "style": "Danger",
+  "workflow_state_name": "Disputed"
  }
 ]

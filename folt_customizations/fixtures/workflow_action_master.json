@@ -96,5 +96,54 @@
   "modified": "2026-07-24 12:33:08.185411",
   "name": "Submit Payroll for Approval",
   "workflow_action_name": "Submit Payroll for Approval"
+ },
+ {
+  "docstatus": 0,
+  "doctype": "Workflow Action Master",
+  "modified": "2026-08-11 17:37:59.230912",
+  "name": "Submit for Verification",
+  "workflow_action_name": "Submit for Verification"
+ },
+ {
+  "docstatus": 0,
+  "doctype": "Workflow Action Master",
+  "modified": "2026-08-11 17:37:59.233212",
+  "name": "Verify",
+  "workflow_action_name": "Verify"
+ },
+ {
+  "docstatus": 0,
+  "doctype": "Workflow Action Master",
+  "modified": "2026-08-11 17:37:59.233635",
+  "name": "Return for Correction",
+  "workflow_action_name": "Return for Correction"
+ },
+ {
+  "docstatus": 0,
+  "doctype": "Workflow Action Master",
+  "modified": "2026-08-11 17:37:59.234053",
+  "name": "Mark Paid",
+  "workflow_action_name": "Mark Paid"
+ },
+ {
+  "docstatus": 0,
+  "doctype": "Workflow Action Master",
+  "modified": "2026-08-11 17:37:59.234443",
+  "name": "Mark Partly Paid",
+  "workflow_action_name": "Mark Partly Paid"
+ },
+ {
+  "docstatus": 0,
+  "doctype": "Workflow Action Master",
+  "modified": "2026-08-11 17:37:59.234836",
+  "name": "Raise Dispute",
+  "workflow_action_name": "Raise Dispute"
+ },
+ {
+  "docstatus": 0,
+  "doctype": "Workflow Action Master",
+  "modified": "2026-08-11 17:37:59.235232",
+  "name": "Resolve Dispute",
+  "workflow_action_name": "Resolve Dispute"
  }
 ]

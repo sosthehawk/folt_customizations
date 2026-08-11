@@ -1,0 +1,27 @@
+{
+  "doctype": "DocType",
+  "name": "Activity Participant Entry",
+  "module": "Folt Customizations",
+  "custom": 0,
+  "istable": 1,
+  "sort_field": "modified",
+  "sort_order": "DESC",
+  "fields": [
+    { "fieldname": "participant", "fieldtype": "Link", "options": "FoLT Participant", "label": "Participant", "in_list_view": 1, "columns": 2, "description": "Leave blank for a walk-in; a participant record is created on save from the name and mobile number." },
+    { "fieldname": "participant_name", "fieldtype": "Data", "label": "Name", "reqd": 1, "in_list_view": 1, "columns": 2 },
+    { "fieldname": "mobile_number", "fieldtype": "Data", "label": "Mobile number", "in_list_view": 1, "columns": 1 },
+    { "fieldname": "location", "fieldtype": "Link", "options": "FoLT Location", "label": "Location", "in_list_view": 1, "columns": 1 },
+    { "fieldname": "category", "fieldtype": "Select", "options": "Community Participant\nElected Representative\nCounty Official\nPartner Organisation\nFoLT Staff\nOther", "label": "Category", "default": "Community Participant", "in_list_view": 1, "columns": 1, "reqd": 1 },
+    { "fieldname": "attended", "fieldtype": "Check", "label": "Attended", "default": "1", "in_list_view": 1, "columns": 1 },
+    { "fieldname": "eligible_for_reimbursement", "fieldtype": "Check", "label": "Eligible for reimbursement", "default": "1", "in_list_view": 1, "columns": 1, "description": "Set from the category on save; may be overridden so that an exclusion is a recorded decision." },
+    { "fieldname": "section_break_detail", "fieldtype": "Section Break" },
+    { "fieldname": "id_number", "fieldtype": "Data", "label": "ID number" },
+    { "fieldname": "gender", "fieldtype": "Select", "options": "\nFemale\nMale\nOther\nPrefer not to say", "label": "Gender" },
+    { "fieldname": "is_pwd", "fieldtype": "Check", "label": "Person with disability" },
+    { "fieldname": "column_break_detail", "fieldtype": "Column Break" },
+    { "fieldname": "photo_consent", "fieldtype": "Check", "label": "Photo consent" },
+    { "fieldname": "acknowledgement", "fieldtype": "Select", "options": "\nSignature\nThumbprint\nNone", "label": "Acknowledgement of attendance", "default": "Signature" },
+    { "fieldname": "remarks", "fieldtype": "Small Text", "label": "Remarks" }
+  ],
+  "permissions": []
+}

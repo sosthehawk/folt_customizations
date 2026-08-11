@@ -1,0 +1,35 @@
+{
+  "doctype": "DocType",
+  "name": "Activity Participant List",
+  "module": "Folt Customizations",
+  "custom": 0,
+  "is_submittable": 1,
+  "autoname": "format:APL-{YYYY}-{#####}",
+  "sort_field": "modified",
+  "sort_order": "DESC",
+  "track_changes": 1,
+  "title_field": "activity_title",
+  "fields": [
+    { "fieldname": "activity", "fieldtype": "Link", "options": "Project", "label": "Activity (Project)", "reqd": 1, "in_list_view": 1, "in_standard_filter": 1, "description": "The project that represents this activity. Everything downstream — the reimbursement list and the float retirement — is scoped by it." },
+    { "fieldname": "activity_title", "fieldtype": "Data", "label": "Activity title", "fetch_from": "activity.project_name", "read_only": 1 },
+    { "fieldname": "session_date", "fieldtype": "Date", "label": "Session date", "reqd": 1, "in_list_view": 1, "description": "One register per session. A participant may legitimately appear on more than one session of the same project." },
+    { "fieldname": "column_break_head", "fieldtype": "Column Break" },
+    { "fieldname": "venue", "fieldtype": "Data", "label": "Venue" },
+    { "fieldname": "total_attendees", "fieldtype": "Int", "label": "Attendees", "read_only": 1, "in_list_view": 1 },
+    { "fieldname": "total_eligible", "fieldtype": "Int", "label": "Eligible for reimbursement", "read_only": 1 },
+    { "fieldname": "attendance_sheet", "fieldtype": "Attach", "label": "Signed attendance sheet", "description": "Mandatory before verification: the scanned sheet signed at the activity." },
+    { "fieldname": "section_break_participants", "fieldtype": "Section Break", "label": "Attendees" },
+    { "fieldname": "participants", "fieldtype": "Table", "options": "Activity Participant Entry", "label": "Attendees" },
+    { "fieldname": "section_break_status", "fieldtype": "Section Break" },
+    { "fieldname": "workflow_state", "fieldtype": "Link", "options": "Workflow State", "label": "Workflow State", "read_only": 1, "no_copy": 1, "in_standard_filter": 1, "in_list_view": 1 },
+    { "fieldname": "amended_from", "fieldtype": "Link", "options": "Activity Participant List", "label": "Amended From", "read_only": 1, "no_copy": 1, "print_hide": 1 }
+  ],
+  "permissions": [
+    { "role": "System Manager", "read": 1, "write": 1, "create": 1, "delete": 1, "submit": 1, "cancel": 1, "amend": 1, "report": 1, "export": 1 },
+    { "role": "Head of Programs", "read": 1, "write": 1, "create": 1, "submit": 1, "cancel": 1, "amend": 1, "report": 1 },
+    { "role": "Employee", "read": 1, "write": 1, "create": 1, "report": 1 },
+    { "role": "Finance Officer", "read": 1, "report": 1 },
+    { "role": "Finance Assistant", "read": 1, "report": 1 },
+    { "role": "Head of Finance", "read": 1, "report": 1 }
+  ]
+}

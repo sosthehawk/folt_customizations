@@ -9,20 +9,147 @@
   "sort_order": "DESC",
   "track_changes": 1,
   "fields": [
-    { "fieldname": "employee_advance", "fieldtype": "Link", "options": "Employee Advance", "label": "Employee Advance", "in_list_view": 1 },
-    { "fieldname": "activity", "fieldtype": "Link", "options": "Project", "label": "Activity" },
-    { "fieldname": "column_break_head", "fieldtype": "Column Break" },
-    { "fieldname": "attendance_reference", "fieldtype": "Data", "label": "Attendance List Reference" },
-    { "fieldname": "total_amount", "fieldtype": "Currency", "label": "Total Amount", "read_only": 1, "in_list_view": 1 },
-    { "fieldname": "section_break_participants", "fieldtype": "Section Break", "label": "Participants" },
-    { "fieldname": "participants", "fieldtype": "Table", "options": "Participant Reimbursement Entry", "label": "Participants" },
-    { "fieldname": "section_break_status", "fieldtype": "Section Break" },
-    { "fieldname": "workflow_state", "fieldtype": "Link", "options": "Workflow State", "label": "Workflow State", "read_only": 1, "no_copy": 1, "in_standard_filter": 1 }
+    {
+      "fieldname": "employee_advance",
+      "fieldtype": "Link",
+      "options": "Employee Advance",
+      "label": "Employee Advance",
+      "in_list_view": 1,
+      "reqd": 1
+    },
+    {
+      "fieldname": "activity",
+      "fieldtype": "Link",
+      "options": "Project",
+      "label": "Activity (Project)",
+      "reqd": 1,
+      "in_standard_filter": 1,
+      "description": "Inherited from the float. Every register and every payee on this list must belong to this project."
+    },
+    {
+      "fieldname": "attendance_reference",
+      "fieldtype": "Link",
+      "options": "Activity Participant List",
+      "label": "Attendance register",
+      "in_list_view": 1,
+      "link_filters": "[[\"Activity Participant List\",\"activity\",\"=\",\"eval:doc.activity\"],[\"Activity Participant List\",\"docstatus\",\"=\",1]]",
+      "description": "Only verified registers for this project can be selected."
+    },
+    {
+      "fieldname": "column_break_head",
+      "fieldtype": "Column Break"
+    },
+    {
+      "fieldname": "total_amount",
+      "fieldtype": "Currency",
+      "label": "Total Amount",
+      "read_only": 1,
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "total_paid",
+      "fieldtype": "Currency",
+      "label": "Total Paid",
+      "read_only": 1,
+      "allow_on_submit": 1
+    },
+    {
+      "fieldname": "advance_disbursed",
+      "fieldtype": "Currency",
+      "label": "Float disbursed",
+      "read_only": 1,
+      "description": "The amount actually paid out on the linked float. This list cannot exceed it."
+    },
+    {
+      "fieldname": "section_break_participants",
+      "fieldtype": "Section Break",
+      "label": "Participants"
+    },
+    {
+      "fieldname": "fetch_help",
+      "fieldtype": "HTML",
+      "options": "<p class='text-muted small'>Use <b>Fetch participants from register</b> to pull eligible attendees from the verified attendance register for this project. Payees are derived, not typed.</p>"
+    },
+    {
+      "fieldname": "participants",
+      "fieldtype": "Table",
+      "options": "Participant Reimbursement Entry",
+      "label": "Participants",
+      "allow_on_submit": 1
+    },
+    {
+      "fieldname": "section_break_status",
+      "fieldtype": "Section Break"
+    },
+    {
+      "fieldname": "workflow_state",
+      "fieldtype": "Link",
+      "options": "Workflow State",
+      "label": "Workflow State",
+      "read_only": 1,
+      "no_copy": 1,
+      "in_standard_filter": 1,
+      "in_list_view": 1,
+      "allow_on_submit": 1
+    },
+    {
+      "fieldname": "amended_from",
+      "fieldtype": "Link",
+      "options": "Participant Reimbursement List",
+      "label": "Amended From",
+      "read_only": 1,
+      "no_copy": 1,
+      "print_hide": 1
+    }
   ],
   "permissions": [
-    { "role": "System Manager", "read": 1, "write": 1, "create": 1, "delete": 1, "submit": 1, "cancel": 1, "amend": 1 },
-    { "role": "Employee", "read": 1, "write": 1, "create": 1 },
-    { "role": "Finance Assistant", "read": 1, "write": 1, "submit": 1 },
-    { "role": "Finance Officer", "read": 1, "write": 1 }
+    {
+      "role": "System Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "delete": 1,
+      "submit": 1,
+      "cancel": 1,
+      "amend": 1,
+      "report": 1,
+      "export": 1
+    },
+    {
+      "role": "Employee",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "report": 1
+    },
+    {
+      "role": "Finance Assistant",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "submit": 1,
+      "amend": 1,
+      "report": 1
+    },
+    {
+      "role": "Finance Officer",
+      "read": 1,
+      "write": 1,
+      "submit": 1,
+      "cancel": 1,
+      "amend": 1,
+      "report": 1
+    },
+    {
+      "role": "Head of Finance",
+      "read": 1,
+      "write": 1,
+      "report": 1
+    },
+    {
+      "role": "Head of Programs",
+      "read": 1,
+      "report": 1
+    }
   ]
 }

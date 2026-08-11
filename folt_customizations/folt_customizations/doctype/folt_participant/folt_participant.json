@@ -1,0 +1,33 @@
+{
+  "doctype": "DocType",
+  "name": "FoLT Participant",
+  "module": "Folt Customizations",
+  "custom": 0,
+  "autoname": "format:PTP-{#####}",
+  "sort_field": "modified",
+  "sort_order": "DESC",
+  "track_changes": 1,
+  "title_field": "participant_name",
+  "search_fields": "mobile_number,location",
+  "fields": [
+    { "fieldname": "participant_name", "fieldtype": "Data", "label": "Participant name", "reqd": 1, "in_list_view": 1 },
+    { "fieldname": "mobile_number", "fieldtype": "Data", "label": "Mobile number", "reqd": 1, "unique": 1, "in_list_view": 1, "in_standard_filter": 1, "description": "Kenyan mobile number. Stored normalised as 07XXXXXXXX / 01XXXXXXXX; this is the payout destination and the key used to recognise a repeat participant." },
+    { "fieldname": "id_number", "fieldtype": "Data", "label": "ID number" },
+    { "fieldname": "column_break_profile", "fieldtype": "Column Break" },
+    { "fieldname": "location", "fieldtype": "Link", "options": "FoLT Location", "label": "Location", "in_list_view": 1, "in_standard_filter": 1 },
+    { "fieldname": "gender", "fieldtype": "Select", "options": "\nFemale\nMale\nOther\nPrefer not to say", "label": "Gender" },
+    { "fieldname": "is_pwd", "fieldtype": "Check", "label": "Person with disability" },
+    { "fieldname": "section_break_consent", "fieldtype": "Section Break", "label": "Consent and status" },
+    { "fieldname": "photo_consent", "fieldtype": "Check", "label": "Photo consent given" },
+    { "fieldname": "is_active", "fieldtype": "Check", "label": "Active", "default": "1" },
+    { "fieldname": "column_break_consent", "fieldtype": "Column Break" },
+    { "fieldname": "notes", "fieldtype": "Small Text", "label": "Notes" }
+  ],
+  "permissions": [
+    { "role": "System Manager", "read": 1, "write": 1, "create": 1, "delete": 1, "report": 1, "export": 1 },
+    { "role": "Head of Programs", "read": 1, "write": 1, "create": 1, "report": 1 },
+    { "role": "Finance Officer", "read": 1, "report": 1 },
+    { "role": "Finance Assistant", "read": 1, "report": 1 },
+    { "role": "Employee", "read": 1, "write": 1, "create": 1 }
+  ]
+}

@@ -7,10 +7,162 @@
   "sort_field": "modified",
   "sort_order": "DESC",
   "fields": [
-    { "fieldname": "participant_name", "fieldtype": "Data", "label": "Name", "reqd": 1, "in_list_view": 1 },
-    { "fieldname": "id_number", "fieldtype": "Data", "label": "ID No.", "in_list_view": 1 },
-    { "fieldname": "amount", "fieldtype": "Currency", "label": "Amount", "in_list_view": 1 },
-    { "fieldname": "signed", "fieldtype": "Check", "label": "Signed", "in_list_view": 1 }
+    {
+      "fieldname": "participant",
+      "fieldtype": "Link",
+      "options": "FoLT Participant",
+      "label": "Participant",
+      "in_list_view": 1,
+      "columns": 2
+    },
+    {
+      "fieldname": "participant_name",
+      "fieldtype": "Data",
+      "label": "Name",
+      "reqd": 1,
+      "in_list_view": 1,
+      "columns": 2
+    },
+    {
+      "fieldname": "mobile_number",
+      "fieldtype": "Data",
+      "label": "Destination",
+      "in_list_view": 1,
+      "columns": 1
+    },
+    {
+      "fieldname": "location",
+      "fieldtype": "Link",
+      "options": "FoLT Location",
+      "label": "Location",
+      "in_list_view": 1,
+      "columns": 1
+    },
+    {
+      "fieldname": "amount",
+      "fieldtype": "Currency",
+      "label": "Amount",
+      "in_list_view": 1,
+      "columns": 1,
+      "read_only": 1
+    },
+    {
+      "fieldname": "payment_status",
+      "fieldtype": "Select",
+      "options": "Pending\nPaid\nFailed\nNot Paid",
+      "label": "Payment",
+      "default": "Pending",
+      "in_list_view": 1,
+      "columns": 1,
+      "allow_on_submit": 1
+    },
+    {
+      "fieldname": "acknowledgement",
+      "fieldtype": "Select",
+      "options": "\nSignature\nThumbprint\nNone",
+      "label": "Acknowledgement",
+      "default": "Signature",
+      "in_list_view": 1,
+      "columns": 1,
+      "allow_on_submit": 1
+    },
+    {
+      "fieldname": "section_break_components",
+      "fieldtype": "Section Break",
+      "label": "Components"
+    },
+    {
+      "fieldname": "transport",
+      "fieldtype": "Currency",
+      "label": "Transport"
+    },
+    {
+      "fieldname": "sustenance",
+      "fieldtype": "Currency",
+      "label": "Sustenance"
+    },
+    {
+      "fieldname": "column_break_components",
+      "fieldtype": "Column Break"
+    },
+    {
+      "fieldname": "accommodation",
+      "fieldtype": "Currency",
+      "label": "Accommodation"
+    },
+    {
+      "fieldname": "rate_basis",
+      "fieldtype": "Select",
+      "options": "Schedule\nAdjusted\nOff-schedule",
+      "label": "Rate basis",
+      "default": "Schedule",
+      "read_only": 1
+    },
+    {
+      "fieldname": "section_break_source",
+      "fieldtype": "Section Break",
+      "label": "Source and justification"
+    },
+    {
+      "fieldname": "source_attendance_list",
+      "fieldtype": "Link",
+      "options": "Activity Participant List",
+      "label": "From register",
+      "read_only": 1,
+      "description": "The verified attendance register this payee was drawn from."
+    },
+    {
+      "fieldname": "category",
+      "fieldtype": "Select",
+      "options": "Community Participant\nElected Representative\nCounty Official\nPartner Organisation\nFoLT Staff\nOther",
+      "label": "Category",
+      "read_only": 1
+    },
+    {
+      "fieldname": "column_break_source",
+      "fieldtype": "Column Break"
+    },
+    {
+      "fieldname": "off_register",
+      "fieldtype": "Check",
+      "label": "Not on a verified register"
+    },
+    {
+      "fieldname": "justification",
+      "fieldtype": "Small Text",
+      "label": "Justification",
+      "depends_on": "eval:doc.off_register || doc.rate_basis != 'Schedule'",
+      "description": "Required for a payee who is not on a register, and for any amount that differs from the rate schedule.",
+      "allow_on_submit": 1
+    },
+    {
+      "fieldname": "section_break_payment",
+      "fieldtype": "Section Break",
+      "label": "Payment"
+    },
+    {
+      "fieldname": "payment_reference",
+      "fieldtype": "Data",
+      "label": "Transaction reference",
+      "allow_on_submit": 1
+    },
+    {
+      "fieldname": "column_break_payment",
+      "fieldtype": "Column Break"
+    },
+    {
+      "fieldname": "id_number",
+      "fieldtype": "Data",
+      "label": "ID No."
+    },
+    {
+      "fieldname": "signed",
+      "fieldtype": "Check",
+      "label": "Signed",
+      "read_only": 1,
+      "description": "Set from the acknowledgement; retained for continuity with the paper list.",
+      "allow_on_submit": 1
+    }
   ],
   "permissions": []
 }

@@ -66,6 +66,15 @@ after_migrate = [
     "folt_customizations.permissions.apply_role_permissions",
 ]
 
+# A supplier pre-qualified for several FoLT categories carries the extras in the
+# `folt_additional_supplier_groups` Table MultiSelect (Custom Field fixture). The hook
+# keeps that table consistent with the primary `supplier_group` -- see supplier.py.
+doc_events = {
+    "Supplier": {
+        "validate": "folt_customizations.supplier.validate",
+    },
+}
+
 # Fixtures shipped with this app. `bench migrate` re-syncs these from disk into the
 # database on every run -- so this file on disk is the source of truth. If you edit a
 # Workflow, Custom Field or Property Setter in the Desk UI, re-export it here

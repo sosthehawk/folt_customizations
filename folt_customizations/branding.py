@@ -12,6 +12,13 @@ EMBLEM = "/assets/folt_customizations/images/folt-emblem.svg"
 # are what every Desk-side logo field points at.
 ICON_SOLID = "/assets/folt_customizations/icons/desktop_icons/solid/folt.svg"
 
+# The settings-flavoured variant of the tile above: FoLT's blue square with frappe's own
+# gear glyph, so the FoLT Settings tile still reads as "settings" rather than as a second
+# FoLT app. Solid, because System Settings.desktop_icon_style is "Solid" here and every
+# neighbouring tile renders solid; the subtle twin ships alongside it for a site that flips
+# that setting.
+ICON_SETTINGS_SOLID = "/assets/folt_customizations/icons/desktop_icons/solid/folt_settings.svg"
+
 # The loading mark for the login/boot wait. A separate file from EMBLEM on purpose: EMBLEM
 # is also the favicon, and an animated favicon is both wrong and wasteful.
 #
@@ -109,15 +116,18 @@ DESKTOP_ICON_LABELS = {
 # erpnext 16.30.0, so settings pages ERPNext adds later will not appear until it is
 # re-synced by hand.
 #
-# logo_url reuses erpnext's existing gear asset so the tile looks exactly as it did. The
-# filename route cannot serve it: get_desktop_icon() builds the path from the icon's `app`
-# (still "erpnext") plus frappe.scrub(label), and there is no erpnext_settings ->
-# folt_settings.svg to find.
+# logo_url has to carry the icon, and it is the one field that survives the rename: the
+# filename route cannot serve this tile, because get_desktop_icon() builds the path from the
+# icon's `app` (still "erpnext") plus frappe.scrub(label), and erpnext ships no
+# folt_settings.svg. So the FoLT gear lives in *this* app's public/icons and is named
+# explicitly here. `app` is deliberately left as "erpnext" -- it is what migrate re-syncs the
+# row against, and changing it buys only style-following (solid/subtle) that a single
+# explicit path already covers.
 RELINKED_DESKTOP_ICONS = {
     "ERPNext Settings": {
         "label": "FoLT Settings",
         "link_to": "FoLT Settings",
-        "logo_url": "/assets/erpnext/icons/desktop_icons/subtle/erpnext_settings.svg",
+        "logo_url": ICON_SETTINGS_SOLID,
     },
 }
 

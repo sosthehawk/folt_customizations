@@ -1,7 +1,7 @@
 {
  "app": "folt_customizations",
  "charts": [],
- "content": "[{\"id\":\"foltHdrFlow\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\"><b>Approval Workflows</b></span>\",\"col\":12}},{\"id\":\"foltScActReq\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Activity Requisition\",\"col\":3}},{\"id\":\"foltScPurOrd\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Purchase Order\",\"col\":3}},{\"id\":\"foltScDerWvr\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Derogation Waiver Request\",\"col\":3}},{\"id\":\"foltScEmpAdv\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Employee Advance\",\"col\":3}},{\"id\":\"foltSpacer01\",\"type\":\"spacer\",\"data\":{\"col\":12}},{\"id\":\"foltHdrDocs\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\"><b>Documents &amp; Masters</b></span>\",\"col\":12}},{\"id\":\"foltCardReq\",\"type\":\"card\",\"data\":{\"card_name\":\"Requests\",\"col\":4}},{\"id\":\"foltCardPro\",\"type\":\"card\",\"data\":{\"card_name\":\"Procurement\",\"col\":4}},{\"id\":\"foltCardPay\",\"type\":\"card\",\"data\":{\"card_name\":\"Payroll\",\"col\":4}},{\"id\":\"foltCardMst\",\"type\":\"card\",\"data\":{\"card_name\":\"FoLT Masters\",\"col\":4}}]",
+ "content": "[{\"id\":\"foltHdrFlow\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\"><b>Approval Workflows</b></span>\",\"col\":12}},{\"id\":\"foltScActReq\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Activity Requisition\",\"col\":3}},{\"id\":\"foltScPurOrd\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Purchase Order\",\"col\":3}},{\"id\":\"foltScDerWvr\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Derogation Waiver Request\",\"col\":3}},{\"id\":\"foltScEmpAdv\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Employee Advance\",\"col\":3}},{\"id\":\"foltScComEvl\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Committee Evaluation\",\"col\":3}},{\"id\":\"foltScActPar\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Activity Participant List\",\"col\":3}},{\"id\":\"foltScParRem\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Participant Reimbursement\",\"col\":3}},{\"id\":\"foltScSalSlp\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Salary Slip\",\"col\":3}},{\"id\":\"foltSpacer01\",\"type\":\"spacer\",\"data\":{\"col\":12}},{\"id\":\"foltHdrDocs\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\"><b>Documents &amp; Masters</b></span>\",\"col\":12}},{\"id\":\"foltCardReq\",\"type\":\"card\",\"data\":{\"card_name\":\"Requests\",\"col\":4}},{\"id\":\"foltCardPro\",\"type\":\"card\",\"data\":{\"card_name\":\"Procurement\",\"col\":4}},{\"id\":\"foltCardPay\",\"type\":\"card\",\"data\":{\"card_name\":\"Payroll\",\"col\":4}},{\"id\":\"foltCardMst\",\"type\":\"card\",\"data\":{\"card_name\":\"FoLT Masters\",\"col\":4}}]",
  "creation": "2026-07-28 09:00:00.000000",
  "custom_blocks": [],
  "docstatus": 0,
@@ -217,7 +217,7 @@
    "type": "Link"
   }
  ],
- "modified": "2026-07-28 09:00:00.000000",
+ "modified": "2026-08-12 09:00:00.000000",
  "modified_by": "Administrator",
  "module": "Folt Customizations",
  "name": "FoLT",
@@ -259,6 +259,38 @@
    "doc_view": "List",
    "label": "Employee Advance",
    "link_to": "Employee Advance",
+   "stats_filter": "[]",
+   "type": "DocType"
+  },
+  {
+   "color": "Grey",
+   "doc_view": "List",
+   "label": "Committee Evaluation",
+   "link_to": "Procurement Committee Evaluation",
+   "stats_filter": "[]",
+   "type": "DocType"
+  },
+  {
+   "color": "Grey",
+   "doc_view": "List",
+   "label": "Activity Participant List",
+   "link_to": "Activity Participant List",
+   "stats_filter": "[]",
+   "type": "DocType"
+  },
+  {
+   "color": "Grey",
+   "doc_view": "List",
+   "label": "Participant Reimbursement",
+   "link_to": "Participant Reimbursement List",
+   "stats_filter": "[]",
+   "type": "DocType"
+  },
+  {
+   "color": "Grey",
+   "doc_view": "List",
+   "label": "Salary Slip",
+   "link_to": "Salary Slip",
    "stats_filter": "[]",
    "type": "DocType"
   }

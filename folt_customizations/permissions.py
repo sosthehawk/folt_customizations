@@ -9,6 +9,8 @@ from frappe.permissions import add_permission, update_permission_property
 # who needs what:
 #
 #   FoLT Purchase Order Approval      Finance Manager approves Pending Approval -> Approved (submit)
+#                                     ...and needs read on Supplier to do it: ERPNext re-reads
+#                                     party details on every save, so submit alone is unusable.
 #   Employee Advance Float Approval   Finance Officer checks (draft), Executive Director approves (submit)
 #   FoLT Payroll Approval             Finance Assistant drafts, Finance Officer rejects, ED approves (submit)
 #
@@ -25,6 +27,38 @@ from frappe.permissions import add_permission, update_permission_property
 WORKFLOW_PERMISSIONS = {
 	"Purchase Order": {
 		"Finance Manager": ("read", "write", "submit"),
+	},
+	# Not decoration on the grant above -- its prerequisites. ERPNext re-derives party, item and
+	# account details on every Purchase Order save, and several of those reads are
+	# permission-checked and THROW rather than degrade. Miss any one and the Finance Manager's
+	# Approve step dies with a bare PermissionError partway through validation, so the `submit`
+	# granted above can never be exercised:
+	#
+	#   Supplier   party.py:142            has_permission(party_type, "read", party, throw=True)
+	#   Address    party.py:225/245        render_address() -> Address.check_permission()
+	#   Item       get_item_details.py:87  get_cached_doc("Item", ...).check_permission()
+	#   Account    party.py:432            account_perm_check() -- accepts "select" OR "read"
+	#
+	# Account gets `select` rather than `read`, which account_perm_check() treats as equivalent:
+	# the lookup is internal to the save, so an approver has no reason to browse the chart of
+	# accounts. Everything else here is read-only and only on masters the order being approved
+	# already displays.
+	#
+	# This list was arrived at by running an approval as a Finance Manager and following the
+	# tracebacks, one grant at a time -- the checks live in four different modules and no single
+	# grep finds them all. If ERPNext adds one, the symptom is the same bare PermissionError, so
+	# reproduce it the same way rather than guessing.
+	"Supplier": {
+		"Finance Manager": ("read",),
+	},
+	"Address": {
+		"Finance Manager": ("read",),
+	},
+	"Item": {
+		"Finance Manager": ("read",),
+	},
+	"Account": {
+		"Finance Manager": ("select",),
 	},
 	"Employee Advance": {
 		"Finance Officer": ("read", "write"),

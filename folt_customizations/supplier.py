@@ -1,5 +1,6 @@
 import frappe
 from frappe import _
+from frappe.utils import getdate, nowdate
 
 # A FoLT supplier can be pre-qualified for more than one category -- a travel firm that
 # also hires out vehicles sits in both "Travel & Accommodation" and "Car Hire". ERPNext's
@@ -13,6 +14,7 @@ from frappe import _
 # reading `supplier_group` directly when you need "is this supplier qualified for X".
 
 ADDITIONAL_GROUPS_FIELD = "folt_additional_supplier_groups"
+EXPIRY_FIELD = "folt_qualified_until"
 
 
 def validate(doc, method=None):
@@ -81,3 +83,74 @@ def suppliers_in_group(supplier_group: str) -> list[str]:
         pluck="parent",
     )
     return sorted(set(primary) | set(additional))
+
+
+def qualification_expiry(supplier: str):
+    """The date `supplier`'s pre-qualification lapsed, or None if it is still current.
+
+    A blank `folt_qualified_until` means "no expiry recorded", NOT "expired" -- the register
+    predates the field, so an undated supplier has to stay biddable.
+    """
+    until = frappe.db.get_value("Supplier", supplier, EXPIRY_FIELD)
+    return until if until and getdate(until) < getdate() else None
+
+
+def expired_suppliers() -> list[str]:
+    """Every supplier whose pre-qualification has lapsed, for excluding in bulk.
+
+    The `is set` filter is load-bearing, not belt-and-braces: frappe renders a comparison as
+    `ifnull(`folt_qualified_until`, '') < '2026-08-19'`, so on its own the `<` would coerce
+    every undated supplier to '' and sweep the entire register into this list.
+    """
+    return frappe.get_all(
+        "Supplier",
+        filters=[[EXPIRY_FIELD, "is", "set"], [EXPIRY_FIELD, "<", nowdate()]],
+        pluck="name",
+    )
+
+
+@frappe.whitelist()
+@frappe.validate_and_sanitize_search_inputs
+def qualified_supplier_query(doctype, txt, searchfield, start, page_len, filters):
+    """Link query for `supplier` fields that must stay inside one pre-qualified category.
+
+    Passed `supplier_group` in `filters` it returns only suppliers qualified for that group
+    -- primary or additional, which is why this cannot be a plain `{"supplier_group": ...}`
+    link filter. With no group it degrades to a normal supplier search, so a form that has
+    not picked a category yet is not left with an empty dropdown.
+    """
+    filters = dict(filters or {})
+    group = filters.pop("supplier_group", None)
+
+    conditions = [["disabled", "=", 0]]
+    if group:
+        qualified = suppliers_in_group(group)
+        if not qualified:
+            return []
+        conditions.append(["name", "in", qualified])
+
+    # A lapsed pre-qualification takes a supplier out of the register until it is renewed.
+    lapsed = expired_suppliers()
+    if lapsed:
+        conditions.append(["name", "not in", lapsed])
+
+    return frappe.get_all(
+        "Supplier",
+        fields=["name", "supplier_group"],
+        filters=conditions,
+        or_filters=[["name", "like", f"%{txt}%"], ["supplier_name", "like", f"%{txt}%"]] if txt else None,
+        order_by="name",
+        start=start,
+        page_length=page_len,
+        as_list=True,
+    )
+
+
+@frappe.whitelist()
+def is_qualified(supplier: str, supplier_group: str) -> bool:
+    """Whether `supplier` may be awarded work in `supplier_group` right now -- filed under
+    the group AND still within its pre-qualification period. Used by the PO form to decide
+    if a supplier already on the document survives a change of category."""
+    if qualification_expiry(supplier):
+        return False
+    return supplier_group in get_supplier_groups(supplier)

@@ -73,7 +73,18 @@ doc_events = {
     "Supplier": {
         "validate": "folt_customizations.supplier.validate",
     },
+    # FoLT competes every order inside a pre-qualified category, so a Purchase Order carries
+    # `folt_supplier_group` and its `supplier` has to be qualified for it -- enforced here as
+    # well as in the form script, since a link query only guards the dropdown. See
+    # purchase_order.py.
+    "Purchase Order": {
+        "validate": "folt_customizations.purchase_order.validate",
+    },
 }
+
+# Client-side half of the same rule: leads the form with the category and restricts the
+# Supplier dropdown to that category's pre-qualified register.
+doctype_js = {"Purchase Order": "public/js/purchase_order.js"}
 
 # Fixtures shipped with this app. `bench migrate` re-syncs these from disk into the
 # database on every run -- so this file on disk is the source of truth. If you edit a

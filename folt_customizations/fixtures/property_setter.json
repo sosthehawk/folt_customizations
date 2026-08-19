@@ -1,1 +1,34 @@
-[]
+[
+ {
+  "default_value": null,
+  "doc_type": "Purchase Order",
+  "docstatus": 0,
+  "doctype": "Property Setter",
+  "doctype_or_field": "DocField",
+  "field_name": "supplier",
+  "is_system_generated": 1,
+  "modified": "2026-08-19 09:00:00.000000",
+  "module": "Folt Customizations",
+  "name": "Purchase Order-supplier-depends_on",
+  "property": "depends_on",
+  "property_type": "Data",
+  "row_name": null,
+  "value": "eval:doc.folt_supplier_group || doc.folt_waiver_request"
+ },
+ {
+  "default_value": null,
+  "doc_type": "Purchase Order",
+  "docstatus": 0,
+  "doctype": "Property Setter",
+  "doctype_or_field": "DocField",
+  "field_name": "supplier",
+  "is_system_generated": 1,
+  "modified": "2026-08-19 09:00:00.000000",
+  "module": "Folt Customizations",
+  "name": "Purchase Order-supplier-description",
+  "property": "description",
+  "property_type": "Text",
+  "row_name": null,
+  "value": "Awarded from the pre-qualified suppliers in the selected Supplier Group. Suppliers whose Qualified Until date has passed are excluded."
+ }
+]

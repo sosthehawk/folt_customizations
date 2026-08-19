@@ -70,7 +70,7 @@
   "transitions": [
    {
     "action": "Submit for approval",
-    "allow_self_approval": 0,
+    "allow_self_approval": 1,
     "allowed": "Purchase User",
     "condition": null,
     "next_state": "Pending Approval",

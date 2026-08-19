@@ -80,6 +80,13 @@ doc_events = {
     "Purchase Order": {
         "validate": "folt_customizations.purchase_order.validate",
     },
+    # Notify the role that can make the next move whenever a document enters a state that
+    # waits on somebody. Frappe writes one Workflow Action per transition, so hooking its
+    # insert covers all eight FoLT workflows at once -- see notifications.py for why the
+    # Desk bell is used rather than relying on the workflows' own email alert.
+    "Workflow Action": {
+        "after_insert": "folt_customizations.notifications.notify_pending_approvers",
+    },
 }
 
 # Client-side half of the same rule: leads the form with the category and restricts the

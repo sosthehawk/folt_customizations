@@ -96,13 +96,22 @@ NAVBAR_BRANDING = {
 # correctly configured". That is why "ERPNext Settings" is not in this map -- see the note
 # in the module docstring of this section below.
 #
-# "Framework" is deliberately absent for a different reason: its label carries no Frappe
-# wording, and renaming it to "FoLT" would collide with our own FoLT icon, since
-# get_desktop_icon_by_label() resolves icons *by label*. Its Frappe wordmark logo is still
-# replaced, via DESKTOP_ICON_LOGOS below.
+# "Framework" carries no Frappe wording, but it is developer-facing jargon for what is, to
+# a FoLT user, the administration folder (System, Users, Email, Printing, Integrations,
+# Website, Data, Automation, Build) -- so it is renamed to "System Admin". Renaming it to
+# "FoLT" would NOT be safe: get_desktop_icon_by_label() resolves icons *by label* and that
+# would collide with our own FoLT icon. "System Admin" is unique across the icon set.
+#
+# It is an icon_type "App" tile, so the label->Workspace Sidebar coupling above does not
+# apply; what does apply is the parent_icon coupling -- its nine children are re-pointed by
+# _reparent_desktop_icons() below, same as Frappe HR's. Its logo is replaced via
+# DESKTOP_ICON_LOGOS (keyed by docname, which the rename leaves as "Framework"); after the
+# rename the sidebar-header cascade no longer finds frappe's own framework.svg by label and
+# falls through to that logo_url, which is what we want.
 DESKTOP_ICON_LABELS = {
     "Frappe HR": "FoLT HR",
     "ERPNext": "FoLT ERP",
+    "Framework": "System Admin",
 }
 
 # "ERPNext Settings" is the one Link-type icon we do rename, and it takes an extra step

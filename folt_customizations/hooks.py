@@ -60,15 +60,21 @@ website_context = {
 # need on standard doctypes (Purchase Order, Employee Advance, Salary Slip). It runs here
 # rather than as a Custom DocPerm fixture so the grants are additive and idempotent -- see
 # permissions.py for why a fixture would be the wrong tool.
+# apply_print_formats() upserts the Print Formats whose Jinja templates FoLT keeps as files
+# under print_format_templates/ (currently the salary slip) and points their doctype's
+# preview and PDF at them. Same reasoning: a fixture would bury a 350-line template in a
+# JSON string -- see print_formats.py.
 after_install = [
     "folt_customizations.branding.apply_branding",
     "folt_customizations.workspaces.hide_workspaces",
     "folt_customizations.permissions.apply_role_permissions",
+    "folt_customizations.print_formats.apply_print_formats",
 ]
 after_migrate = [
     "folt_customizations.branding.apply_branding",
     "folt_customizations.workspaces.hide_workspaces",
     "folt_customizations.permissions.apply_role_permissions",
+    "folt_customizations.print_formats.apply_print_formats",
 ]
 
 # A supplier pre-qualified for several FoLT categories carries the extras in the
@@ -156,7 +162,10 @@ FOLT_SALARY_STRUCTURES = ["FoLT Kenya Payroll"]
 # FoLT Supplier Groups acting as the pre-qualified supplier register (Section 4.1).
 FOLT_SUPPLIER_GROUPS = ["Catering", "Car Hire", "Travel & Accommodation", "ICT"]
 
-# Custom print formats matched to FoLT's existing paper forms.
+# Custom print formats matched to FoLT's existing paper forms. "FoLT Salary Slip" is
+# deliberately absent: its template is a file applied by the after_migrate hook above, and
+# listing it here would have `bench export-fixtures` write a second copy of that template
+# into print_format.json for the two to drift apart.
 FOLT_PRINT_FORMATS = [
     "FoLT Intent to Award",
     "FoLT Derogation Waiver Request",

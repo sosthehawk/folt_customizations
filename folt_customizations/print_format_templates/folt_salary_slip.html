@@ -1,0 +1,352 @@
+{#-
+  FoLT Salary Slip — one-page A4 payslip.
+
+  Built to replace the auto-generated layout, which spilled a single slip over 3-4
+  pages: wkhtmltopdf renders the print view at a narrow viewport, so the Desk form's
+  bootstrap `col-xs-4` columns collapse and every label/value pair costs two full
+  lines, and the Salary Detail child tables print all six internal columns (including
+  `tax_on_flexible_benefit` / `tax_on_additional_salary`) squeezed side by side.
+
+  Everything here is plain tables with explicit widths -- no grid classes and no
+  flexbox -- because that is the only layout wkhtmltopdf reproduces identically to
+  the browser preview. Sections that carry no data (foreign currency, timesheets,
+  statutory employer contributions, the income-tax slab block, leave balances) are
+  skipped rather than printed as rows of zeros, which is what keeps the slip on one
+  page as the payroll grows components.
+-#}
+{%- macro money(v) -%}{{ frappe.utils.fmt_money(v or 0) }}{%- endmacro -%}
+{%- macro num(v) -%}{{ frappe.utils.flt(v) | int if frappe.utils.flt(v) % 1 == 0 else frappe.utils.flt(v) }}{%- endmacro -%}
+
+{%- set earnings = doc.earnings | rejectattr("statistical_component") | list -%}
+{%- set deductions = doc.deductions | rejectattr("statistical_component") | list -%}
+{%- set statistical = (doc.earnings | selectattr("statistical_component") | list)
+                      + (doc.deductions | selectattr("statistical_component") | list) -%}
+{%- set show_ytd = doc.gross_year_to_date or doc.year_to_date -%}
+{#- The base_* fields duplicate every total in company currency. They only say
+    something when the slip is not already in that currency. -#}
+{%- set multi_currency = doc.exchange_rate and frappe.utils.flt(doc.exchange_rate) != 1.0 -%}
+{%- set tax_block = doc.ctc or doc.annual_taxable_amount or doc.total_income_tax
+                    or doc.income_tax_deducted_till_date or doc.tax_exemption_declaration -%}
+
+{#- A `custom_format` template renders on its own -- frappe's standard.html wrapper
+    (letterhead, draft/cancelled stamp, repeating PDF header/footer) is bypassed, so the
+    pieces worth keeping are reproduced here. The id="header-html" / id="footer-html"
+    divs are what frappe.utils.pdf lifts out and hands to wkhtmltopdf as --header-html /
+    --footer-html, which is what repeats the letterhead on a slip that runs to two pages. -#}
+<div class="page-break">
+
+  <div {% if print_settings.repeat_header_footer %}id="header-html" class="hidden-pdf"{% endif %}>
+    {%- if letter_head and not no_letterhead %}
+    <div class="letter-head">{{ letter_head }}</div>
+    {%- endif %}
+    {%- if doc.docstatus == 0 %}
+    <div class="text-center" document-status="draft"><h4 style="margin: 0px;">{{ _("DRAFT") }}</h4></div>
+    {%- endif %}
+    {%- if doc.docstatus == 2 %}
+    <div class="text-center" document-status="cancelled"><h4 style="margin: 0px;">{{ _("CANCELLED") }}</h4></div>
+    {%- endif %}
+  </div>
+
+<div class="folt-slip">
+
+  <table class="slip-head">
+    <tr>
+      <td>
+        <div class="slip-title">Salary Slip</div>
+        <div class="slip-period">
+          {{ frappe.utils.formatdate(doc.start_date, "d MMM yyyy") }}
+          &ndash; {{ frappe.utils.formatdate(doc.end_date, "d MMM yyyy") }}
+          {% if doc.payroll_frequency %}<span class="muted">&nbsp;&middot; {{ _(doc.payroll_frequency) }}</span>{% endif %}
+        </div>
+      </td>
+      <td class="ta-r">
+        <div class="slip-no">{{ doc.name }}</div>
+        <div class="slip-period">
+          {%- if doc.workflow_state %}{{ _(doc.workflow_state) }}{% else %}{{ _(doc.status) }}{% endif -%}
+          {% if doc.posting_date %}<span class="muted">&nbsp;&middot; {{ frappe.utils.formatdate(doc.posting_date, "d MMM yyyy") }}</span>{% endif %}
+        </div>
+      </td>
+    </tr>
+  </table>
+
+  {%- set details = [
+        (_("Employee"), doc.employee),
+        (_("Employee Name"), doc.employee_name),
+        (_("Designation"), doc.designation),
+        (_("Department"), doc.department),
+        (_("Branch"), doc.branch),
+        (_("Salary Structure"), doc.salary_structure),
+        (_("Payroll Entry"), doc.payroll_entry),
+        (_("Payroll Period"), doc.current_payroll_period),
+        (_("Mode of Payment"), doc.mode_of_payment),
+        (_("Bank"), doc.bank_name),
+        (_("Bank A/C No."), doc.bank_account_no),
+        (_("Currency"), doc.currency if multi_currency else None),
+      ] -%}
+  {%- set details = details | rejectattr(1, "none") | rejectattr(1, "equalto", "") | list -%}
+  <table class="detail-grid">
+    {%- for i in range(0, details | length, 2) %}
+    <tr>
+      <th>{{ details[i][0] }}</th><td>{{ details[i][1] }}</td>
+      {%- if i + 1 < details | length %}
+      <th>{{ details[i + 1][0] }}</th><td>{{ details[i + 1][1] }}</td>
+      {%- else %}
+      <th></th><td></td>
+      {%- endif %}
+    </tr>
+    {%- endfor %}
+  </table>
+
+  <table class="strip">
+    <tr>
+      <td><span class="k">{{ _("Working Days") }}</span><span class="v">{{ num(doc.total_working_days) }}</span></td>
+      <td><span class="k">{{ _("Payment Days") }}</span><span class="v">{{ num(doc.payment_days) }}</span></td>
+      <td><span class="k">{{ _("Leave Without Pay") }}</span><span class="v">{{ num(doc.leave_without_pay) }}</span></td>
+      <td><span class="k">{{ _("Absent Days") }}</span><span class="v">{{ num(doc.absent_days) }}</span></td>
+      <td><span class="k">{{ _("Unmarked Days") }}</span><span class="v">{{ num(doc.unmarked_days) }}</span></td>
+    </tr>
+  </table>
+
+  {%- if doc.salary_slip_based_on_timesheet and doc.timesheets %}
+  <table class="amt-table wide mt">
+    <thead>
+      <tr>
+        <th>{{ _("Timesheet") }}</th>
+        <th class="ta-r w-hours">{{ _("Hours") }}</th>
+        <th class="ta-r w-amt">{{ _("Hour Rate") }}</th>
+        <th class="ta-r w-amt">{{ _("Amount") }}</th>
+      </tr>
+    </thead>
+    <tbody>
+      {%- for t in doc.timesheets %}
+      <tr>
+        <td>{{ t.time_sheet }}</td>
+        <td class="ta-r">{{ num(t.working_hours) }}</td>
+        <td class="ta-r">{{ money(doc.hour_rate) }}</td>
+        <td class="ta-r">{{ money(frappe.utils.flt(t.working_hours) * frappe.utils.flt(doc.hour_rate)) }}</td>
+      </tr>
+      {%- endfor %}
+      <tr class="total-row">
+        <td>{{ _("Total Working Hours") }}</td>
+        <td class="ta-r">{{ num(doc.total_working_hours) }}</td>
+        <td colspan="2"></td>
+      </tr>
+    </tbody>
+  </table>
+  {%- endif %}
+
+  <table class="two-up">
+    <tr>
+      <td class="col-l">
+        <table class="amt-table">
+          <thead>
+            <tr>
+              <th>{{ _("Earnings") }}</th>
+              <th class="ta-r w-amt">{{ _("Amount") }}</th>
+              {%- if show_ytd %}<th class="ta-r w-amt">{{ _("Year to Date") }}</th>{% endif %}
+            </tr>
+          </thead>
+          <tbody>
+            {%- for row in earnings %}
+            <tr>
+              <td>{{ row.salary_component }}{% if row.additional_salary %}<span class="muted"> ({{ _("Additional") }})</span>{% endif %}</td>
+              <td class="ta-r">{{ money(row.amount) }}</td>
+              {%- if show_ytd %}<td class="ta-r">{{ money(row.year_to_date) }}</td>{% endif %}
+            </tr>
+            {%- endfor %}
+            {%- if not earnings %}
+            <tr><td colspan="{{ 3 if show_ytd else 2 }}" class="muted">{{ _("No earnings") }}</td></tr>
+            {%- endif %}
+            <tr class="total-row">
+              <td>{{ _("Gross Pay") }}</td>
+              <td class="ta-r">{{ money(doc.gross_pay) }}</td>
+              {%- if show_ytd %}<td class="ta-r">{{ money(doc.gross_year_to_date) }}</td>{% endif %}
+            </tr>
+          </tbody>
+        </table>
+      </td>
+      <td class="col-r">
+        <table class="amt-table">
+          <thead>
+            <tr>
+              <th>{{ _("Deductions") }}</th>
+              <th class="ta-r w-amt">{{ _("Amount") }}</th>
+              {%- if show_ytd %}<th class="ta-r w-amt">{{ _("Year to Date") }}</th>{% endif %}
+            </tr>
+          </thead>
+          <tbody>
+            {%- for row in deductions %}
+            <tr>
+              <td>{{ row.salary_component }}{% if row.additional_salary %}<span class="muted"> ({{ _("Additional") }})</span>{% endif %}</td>
+              <td class="ta-r">{{ money(row.amount) }}</td>
+              {%- if show_ytd %}<td class="ta-r">{{ money(row.year_to_date) }}</td>{% endif %}
+            </tr>
+            {%- endfor %}
+            {%- if not deductions %}
+            <tr><td colspan="{{ 3 if show_ytd else 2 }}" class="muted">{{ _("No deductions") }}</td></tr>
+            {%- endif %}
+            <tr class="total-row">
+              <td>{{ _("Total Deductions") }}</td>
+              <td class="ta-r">{{ money(doc.total_deduction) }}</td>
+              {%- if show_ytd %}<td class="ta-r">{{ money(deductions | sum(attribute="year_to_date")) }}</td>{% endif %}
+            </tr>
+          </tbody>
+        </table>
+      </td>
+    </tr>
+  </table>
+
+  <table class="net-band">
+    <tr>
+      <td class="net-label">
+        {{ _("Net Pay") }}
+        <div class="muted">{{ _("Gross") }} {{ money(doc.gross_pay) }} &minus;
+          {{ _("Deductions") }} {{ money(doc.total_deduction) }}</div>
+      </td>
+      <td class="net-amount">{{ frappe.utils.fmt_money(doc.rounded_total or doc.net_pay, currency=doc.currency) }}</td>
+    </tr>
+    {%- if doc.total_in_words %}
+    <tr>
+      <td colspan="2" class="in-words">{{ doc.total_in_words }}</td>
+    </tr>
+    {%- endif %}
+  </table>
+
+  {%- if show_ytd or doc.month_to_date %}
+  <table class="strip">
+    <tr>
+      <td><span class="k">{{ _("Gross Year to Date") }}</span><span class="v">{{ money(doc.gross_year_to_date) }}</span></td>
+      <td><span class="k">{{ _("Net Year to Date") }}</span><span class="v">{{ money(doc.year_to_date) }}</span></td>
+      <td><span class="k">{{ _("Month to Date") }}</span><span class="v">{{ money(doc.month_to_date) }}</span></td>
+    </tr>
+  </table>
+  {%- endif %}
+
+  {%- if multi_currency %}
+  <table class="strip">
+    <tr>
+      <td><span class="k">{{ _("Exchange Rate") }}</span><span class="v">{{ num(doc.exchange_rate) }}</span></td>
+      <td><span class="k">{{ _("Gross Pay") }} ({{ _("Company Currency") }})</span><span class="v">{{ money(doc.base_gross_pay) }}</span></td>
+      <td><span class="k">{{ _("Total Deductions") }} ({{ _("Company Currency") }})</span><span class="v">{{ money(doc.base_total_deduction) }}</span></td>
+      <td><span class="k">{{ _("Net Pay") }} ({{ _("Company Currency") }})</span><span class="v">{{ money(doc.base_rounded_total or doc.base_net_pay) }}</span></td>
+    </tr>
+  </table>
+  {%- endif %}
+
+  {%- if statistical %}
+  {#- Employer-side and computation-only components (NSSF Employer, Housing Levy
+      Employer, Taxable Pay). They are excluded from Gross and Total Deductions, so
+      they are shown apart rather than mixed into the two columns above. -#}
+  <table class="amt-table wide mt">
+    <thead>
+      <tr>
+        <th>{{ _("Employer Contributions & Computation Basis") }}</th>
+        <th class="ta-r w-amt">{{ _("Amount") }}</th>
+        <th class="ta-r w-amt">{{ _("Year to Date") }}</th>
+      </tr>
+    </thead>
+    <tbody>
+      {%- for row in statistical %}
+      <tr>
+        <td>{{ row.salary_component }}</td>
+        <td class="ta-r">{{ money(row.amount) }}</td>
+        <td class="ta-r">{{ money(row.year_to_date) }}</td>
+      </tr>
+      {%- endfor %}
+    </tbody>
+  </table>
+  <div class="note">{{ _("Not deducted from net pay and not included in the totals above.") }}</div>
+  {%- endif %}
+
+  {%- if tax_block %}
+  {%- set tax_rows = [
+        (_("CTC"), doc.ctc),
+        (_("Income from Other Sources"), doc.income_from_other_sources),
+        (_("Total Earnings"), doc.total_earnings),
+        (_("Non Taxable Earnings"), doc.non_taxable_earnings),
+        (_("Standard Tax Exemption"), doc.standard_tax_exemption_amount),
+        (_("Tax Exemption Declaration"), doc.tax_exemption_declaration),
+        (_("Deductions Before Tax Calculation"), doc.deductions_before_tax_calculation),
+        (_("Annual Taxable Amount"), doc.annual_taxable_amount),
+        (_("Income Tax Deducted Till Date"), doc.income_tax_deducted_till_date),
+        (_("Current Month Income Tax"), doc.current_month_income_tax),
+        (_("Future Income Tax"), doc.future_income_tax_deductions),
+        (_("Total Income Tax"), doc.total_income_tax),
+      ] | rejectattr(1, "none") | rejectattr(1, "equalto", 0) | list -%}
+  <table class="detail-grid mt">
+    <tr><th colspan="4" class="grid-head">{{ _("Annual Taxation Summary") }}</th></tr>
+    {%- for i in range(0, tax_rows | length, 2) %}
+    <tr>
+      <th>{{ tax_rows[i][0] }}</th><td class="ta-r">{{ money(tax_rows[i][1]) }}</td>
+      {%- if i + 1 < tax_rows | length %}
+      <th>{{ tax_rows[i + 1][0] }}</th><td class="ta-r">{{ money(tax_rows[i + 1][1]) }}</td>
+      {%- else %}<th></th><td></td>{% endif %}
+    </tr>
+    {%- endfor %}
+  </table>
+  {%- endif %}
+
+  {%- if doc.leave_details %}
+  <table class="amt-table wide mt">
+    <thead>
+      <tr>
+        <th>{{ _("Leave Type") }}</th>
+        <th class="ta-r">{{ _("Opening") }}</th>
+        <th class="ta-r">{{ _("Taken") }}</th>
+        <th class="ta-r">{{ _("Expired") }}</th>
+        <th class="ta-r">{{ _("Balance") }}</th>
+      </tr>
+    </thead>
+    <tbody>
+      {%- for l in doc.leave_details %}
+      <tr>
+        <td>{{ l.leave_type }}</td>
+        <td class="ta-r">{{ num(l.total_allocated_leaves) }}</td>
+        <td class="ta-r">{{ num(l.used_leaves) }}</td>
+        <td class="ta-r">{{ num(l.expired_leaves) }}</td>
+        <td class="ta-r">{{ num(l.available_leaves) }}</td>
+      </tr>
+      {%- endfor %}
+    </tbody>
+  </table>
+  {%- endif %}
+
+  {%- if doc.salary_withholding or doc.journal_entry %}
+  <table class="strip">
+    <tr>
+      {%- if doc.salary_withholding %}
+      <td><span class="k">{{ _("Salary Withheld") }}</span><span class="v">{{ doc.salary_withholding }}</span></td>
+      {%- endif %}
+      {%- if doc.journal_entry %}
+      <td><span class="k">{{ _("Payment Entry") }}</span><span class="v">{{ doc.journal_entry }}</span></td>
+      {%- endif %}
+    </tr>
+  </table>
+  {%- endif %}
+
+  <table class="sign-row">
+    <tr>
+      <td><div class="sign-line"></div>{{ _("Prepared by") }}</td>
+      <td><div class="sign-line"></div>{{ _("Approved by") }}</td>
+      <td><div class="sign-line"></div>{{ _("Received by (Employee)") }}</td>
+    </tr>
+  </table>
+
+  <div class="note ta-c">
+    {{ _("All amounts in {0}.").format(doc.currency) }}
+    {{ _("This is a computer-generated payslip and is confidential to the named employee.") }}
+  </div>
+</div>
+
+  <div {% if print_settings.repeat_header_footer %}id="footer-html" class="visible-pdf"{% endif %}>
+    {%- if not no_letterhead and footer %}
+    <div class="letter-head-footer">{{ footer }}</div>
+    {%- endif %}
+    {%- if print_settings.repeat_header_footer %}
+    <p class="text-center small page-number visible-pdf">
+      {{ _("Page {0} of {1}").format('<span class="page"></span>', '<span class="topage"></span>') }}
+    </p>
+    {%- endif %}
+  </div>
+
+</div>

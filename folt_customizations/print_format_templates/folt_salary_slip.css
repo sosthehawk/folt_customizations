@@ -1,0 +1,167 @@
+/* FoLT Salary Slip.
+   Scoped to .folt-slip so nothing here leaks into the letterhead or any other format.
+   frappe's templates/styles/standard.css sets `.print-format td, .print-format th
+   { padding: 6px !important }` -- 6px per cell is what makes the stock slip run over
+   several pages -- so the padding rules below have to carry !important to win. */
+
+.print-format .folt-slip {
+	font-size: 8.6pt;
+	line-height: 1.35;
+	color: #171717;
+}
+
+.print-format .folt-slip table {
+	width: 100%;
+	border-collapse: collapse;
+	/* fixed keeps a long component name inside its column instead of stretching the
+	   table past the page edge, which is how wkhtmltopdf clips the amount columns. */
+	table-layout: fixed;
+}
+
+.print-format .folt-slip td,
+.print-format .folt-slip th {
+	padding: 2.5px 5px !important;
+	vertical-align: top !important;
+	word-wrap: break-word;
+	overflow-wrap: break-word;
+}
+
+/* Stated at table-cell specificity too, so the per-table `text-align: left` defaults
+   below cannot win over an explicit .ta-r on a money column heading -- a heading that
+   drifts left of the figures it labels is the tell. */
+.print-format .folt-slip .ta-r,
+.print-format .folt-slip th.ta-r,
+.print-format .folt-slip td.ta-r { text-align: right; }
+.print-format .folt-slip .ta-c { text-align: center; }
+.print-format .folt-slip .muted { color: #7c7c7c; font-weight: 400; }
+.print-format .folt-slip .mt { margin-top: 8px; }
+
+/* ---- title ---- */
+.print-format .folt-slip .slip-head {
+	border-bottom: 1.5px solid #171717;
+	margin-bottom: 7px;
+}
+/* Flush with the bordered tables below, which lose 6px to their border + cell padding,
+   rather than with the raw page margin -- at the margin the last glyph gets clipped. */
+.print-format .folt-slip .slip-head td { padding-left: 1px !important; padding-right: 6px !important; }
+.print-format .folt-slip .slip-head td.ta-r { padding-left: 6px !important; }
+.print-format .folt-slip .slip-title {
+	font-size: 14pt;
+	font-weight: 700;
+	letter-spacing: 0.4px;
+	line-height: 1.1;
+}
+.print-format .folt-slip .slip-no { font-size: 9.5pt; font-weight: 700; }
+.print-format .folt-slip .slip-period { font-size: 8.2pt; color: #4a4a4a; }
+
+/* ---- employee / payroll details ---- */
+.print-format .folt-slip .detail-grid { border: 1px solid #d1d8dd; }
+.print-format .folt-slip .detail-grid th,
+.print-format .folt-slip .detail-grid td {
+	border: 1px solid #e8ebee;
+	font-weight: 400;
+	text-align: left;
+}
+.print-format .folt-slip .detail-grid th {
+	width: 17%;
+	background: #f6f7f8;
+	color: #4a4a4a;
+}
+.print-format .folt-slip .detail-grid td { width: 33%; font-weight: 600; }
+.print-format .folt-slip .detail-grid .grid-head {
+	width: auto;
+	font-weight: 700;
+	color: #171717;
+	background: #eceef0;
+}
+
+/* ---- one-line key/value strips ---- */
+.print-format .folt-slip .strip {
+	margin-top: 6px;
+	border: 1px solid #d1d8dd;
+	background: #f6f7f8;
+}
+.print-format .folt-slip .strip .k {
+	display: block;
+	font-size: 7.4pt;
+	color: #7c7c7c;
+	text-transform: uppercase;
+	letter-spacing: 0.3px;
+}
+.print-format .folt-slip .strip .v { display: block; font-weight: 600; }
+
+/* ---- earnings / deductions ---- */
+.print-format .folt-slip .two-up { margin-top: 8px; }
+.print-format .folt-slip .two-up > tbody > tr > td {
+	width: 50%;
+	padding: 0 !important;
+}
+.print-format .folt-slip .two-up > tbody > tr > .col-l { padding-right: 5px !important; }
+.print-format .folt-slip .two-up > tbody > tr > .col-r { padding-left: 5px !important; }
+
+.print-format .folt-slip .amt-table { border: 1px solid #d1d8dd; }
+.print-format .folt-slip .amt-table th {
+	background: #eceef0;
+	text-align: left;
+	font-weight: 700;
+	border-bottom: 1px solid #d1d8dd;
+}
+.print-format .folt-slip .amt-table td { border-bottom: 1px solid #f0f2f4; }
+/* The half-width earnings/deductions tables need 30% per money column: at 27% a
+   seven-figure year-to-date total broke across two lines mid-number. `nowrap` on the
+   value cells (not the headers, which are free to wrap) makes a figure overflow
+   visibly rather than silently split, so a too-narrow column shows up in review. */
+.print-format .folt-slip .amt-table .w-amt { width: 30%; }
+.print-format .folt-slip .amt-table td.ta-r { white-space: nowrap; }
+/* Full-width variants have far more room for the component name. */
+.print-format .folt-slip .amt-table.wide .w-amt { width: 18%; }
+.print-format .folt-slip .amt-table.wide .w-hours { width: 12%; }
+.print-format .folt-slip .amt-table .total-row td {
+	border-top: 1px solid #171717;
+	border-bottom: 0;
+	font-weight: 700;
+	background: #f6f7f8;
+}
+/* A slip long enough to break should break between rows, never through one. */
+.print-format .folt-slip tr { page-break-inside: avoid; }
+.print-format .folt-slip thead { display: table-header-group; }
+
+/* ---- net pay ---- */
+.print-format .folt-slip .net-band {
+	margin-top: 8px;
+	border: 1.5px solid #171717;
+	background: #f6f7f8;
+}
+.print-format .folt-slip .net-band .net-label {
+	font-size: 10.5pt;
+	font-weight: 700;
+	vertical-align: middle !important;
+}
+.print-format .folt-slip .net-band .net-label .muted { font-size: 7.8pt; font-weight: 400; }
+.print-format .folt-slip .net-band .net-amount {
+	width: 42%;
+	text-align: right;
+	font-size: 15pt;
+	font-weight: 700;
+	white-space: nowrap;
+	vertical-align: middle !important;
+}
+.print-format .folt-slip .net-band .in-words {
+	border-top: 1px solid #d1d8dd;
+	font-size: 8pt;
+	font-style: italic;
+	color: #4a4a4a;
+}
+
+/* ---- signatures / footnotes ---- */
+.print-format .folt-slip .note { font-size: 7.4pt; color: #7c7c7c; margin-top: 4px; }
+.print-format .folt-slip .sign-row { margin-top: 26px; font-size: 8pt; }
+.print-format .folt-slip .sign-row td { width: 33.33%; padding: 0 12px 0 0 !important; }
+.print-format .folt-slip .sign-line {
+	border-top: 1px solid #171717;
+	margin-bottom: 3px;
+}
+
+/* The Desk preview scrolls a wide child table instead of shrinking it; these tables
+   are already page-width, so the rule only adds a stray scrollbar. */
+.print-format-preview .folt-slip [data-fieldtype="Table"] { overflow: visible; }

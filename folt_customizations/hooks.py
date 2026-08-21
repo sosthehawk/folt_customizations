@@ -39,10 +39,15 @@ extend_bootinfo = ["folt_customizations.branding.rebrand_bootinfo"]
 # splash_image is the animated mark, not the plain emblem: it is what shows during the
 # login wait, and it needs intrinsic width/height to render at all inside frappe's
 # shrink-to-fit `.centered` splash box. See branding.SPLASH. favicon stays static.
+# brand_html carries its height inline rather than leaving it to folt_branding.css, and that
+# is deliberate: folt-logo.svg declares only a viewBox, so an <img> with no height at all
+# falls back to CSS's default 300x150 sizing -- a stylesheet that fails to load would blow
+# the logo up to ten times its intended size instead of merely mis-sizing it. The inline
+# value is the target size; the CSS only has to clear frappe's cap (see folt_branding.css).
 website_context = {
     "favicon": "/assets/folt_customizations/images/folt-emblem.svg",
     "splash_image": "/assets/folt_customizations/images/folt-emblem-animated.svg",
-    "brand_html": "<img src='/assets/folt_customizations/images/folt-logo.svg' alt='Friends of Lake Turkana' style='height:28px'>",
+    "brand_html": "<img src='/assets/folt_customizations/images/folt-logo.svg' alt='Friends of Lake Turkana' style='height:40px'>",
 }
 
 # app_logo_url alone isn't enough for the Desk navbar / login logo (see branding.py),

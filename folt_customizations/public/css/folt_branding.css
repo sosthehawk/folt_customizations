@@ -17,3 +17,22 @@
   display: block;
   margin: 0 auto 24px;
 }
+
+/* The supplier portal navbar. frappe's website/navbar.scss caps `.navbar-brand img` at
+   max-height 22px / max-width 150px, which clipped the FoLT lockup to a 58x22 smudge: the
+   emblem was recognisable, the "FRIENDS of LAKE TURKANA" wordmark was not readable at all.
+   The logo was present and the asset returned 200 the whole time -- it was legible only to
+   someone who already knew what it said.
+
+   Clearing both caps hands sizing back to the inline height on brand_html (hooks.py), which
+   is the value to change if 40px ever needs revisiting. No !important anywhere: this file is
+   the last stylesheet the website loads, so an equal-specificity rule wins on order -- unlike
+   the login rules above, which have to out-specify a bundle that loads after them.
+
+   Scoped to .navbar-brand, so it is website/portal only. The v16 Desk has no navbar brand at
+   all (its top-left mark is the workspace sidebar header), so nothing here reaches it. */
+.navbar-brand img {
+  max-height: none;
+  max-width: none;
+  width: auto;
+}

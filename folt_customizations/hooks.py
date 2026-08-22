@@ -91,6 +91,13 @@ doc_events = {
     "Purchase Order": {
         "validate": "folt_customizations.purchase_order.validate",
     },
+    # A Procurement Committee Evaluation scores the bids received against one RFQ, and a bid
+    # can be withdrawn while the committee is still scoring it. Frappe validates links before
+    # it runs validate(), so a cancelled quotation left in the grid would freeze the evaluation
+    # outright -- see procurement.withdraw_cancelled_quotation.
+    "Supplier Quotation": {
+        "on_cancel": "folt_customizations.procurement.withdraw_cancelled_quotation",
+    },
     # Notify the role that can make the next move whenever a document enters a state that
     # waits on somebody. Frappe writes one Workflow Action per transition, so hooking its
     # insert covers all eight FoLT workflows at once -- see notifications.py for why the

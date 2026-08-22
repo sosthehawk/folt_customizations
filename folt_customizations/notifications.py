@@ -4,16 +4,22 @@ from frappe.desk.doctype.notification_log.notification_log import enqueue_create
 from frappe.utils import get_url_to_form
 from frappe.utils.user import get_users_with_role
 
+from folt_customizations.procurement import COMMITTEE_REVIEW_STATE, EVALUATION_DOCTYPE
+
 # FoLT runs eight approval workflows, and until now nobody was told when a document landed in
 # their queue. Two things were switched off, and both gates have to be open for frappe to send
 # anything: `send_email_alert` on the Workflow, AND `send_email` on the Workflow Document State
-# the document has just entered. The fixtures now set both everywhere.
+# the document has just entered. The fixtures set both everywhere bar one state, `Committee
+# Reviewing`, which has a named audience of its own -- see notify_committee_members below.
 #
 # That covers email. This module covers the Desk bell, because the email path is gated on an
-# outgoing Email Account the site does not have -- `send_workflow_action_email` swallows the
-# resulting OutgoingEmailError and logs it, so approvers would still hear nothing. A
-# Notification Log entry needs no mail server, and forwards itself as email by itself once one
-# is configured (see NotificationLog.after_insert), so this is not throwaway scaffolding.
+# outgoing Email Account -- `send_workflow_action_email` swallows the resulting
+# OutgoingEmailError and logs it, so approvers would hear nothing on a site without one. A
+# Notification Log entry needs no mail server at all, so the bell always lands.
+#
+# The bell does NOT double as email: type "Alert" is in frappe's `notification_skip_email_types`
+# hook, so notification_log.after_insert deliberately skips mailing it. Anything that has to
+# reach an inbox has to send its own -- see notify_committee_members below.
 
 
 def notify_pending_approvers(doc, method=None):
@@ -31,6 +37,16 @@ def notify_pending_approvers(doc, method=None):
     roles = [row.role for row in (doc.permitted_roles or [])]
     if not roles:
         return
+
+    # A Procurement Committee Evaluation names its own committee, and notify_committee_members
+    # has already told exactly those people to go and score. Broadcasting to the whole
+    # `Procurement Committee` role on top of that reaches the wrong people, twice over.
+    if doc.reference_doctype == EVALUATION_DOCTYPE and doc.workflow_state == COMMITTEE_REVIEW_STATE:
+        if frappe.db.exists(
+            "Procurement Committee Member",
+            {"parent": doc.reference_name, "parenttype": EVALUATION_DOCTYPE, "parentfield": "members"},
+        ):
+            return
 
     # Frappe writes a Workflow Action for the initial state too, where the pending action is
     # the author's own -- submitting their own draft. Notifying every holder of the author's
@@ -74,3 +90,80 @@ def notify_pending_approvers(doc, method=None):
             "link": get_url_to_form(doc.reference_doctype, doc.reference_name),
         },
     )
+
+
+# --- Procurement Committee Evaluation --------------------------------------------------------
+# The role broadcast above answers "who can move this document"; a competitive bidding
+# evaluation also has to answer "who was appointed to score this RFQ", and those are not the
+# same people. FoLT's committee for a given RFQ is the `members` table on the document -- the
+# `Procurement Committee` role is everyone who has ever sat on one.
+
+
+def notify_committee_members(doc):
+    """Ask the members named on an evaluation to go and score the quotations.
+
+    Called from ProcurementCommitteeEvaluation.on_update when the document enters
+    `Committee Reviewing`.
+
+    Sends the bell notification AND an email, because in v16 those are two separate deliveries
+    and neither is a substitute for the other. Notification type "Alert" is listed in frappe's
+    `notification_skip_email_types` hook, so a Notification Log of that type never mails itself
+    (notification_log.after_insert -> is_email_notifications_enabled_for_type). The bell needs no
+    mail server and always lands; the email is sent explicitly here and is best-effort.
+
+    The workflow's own role-wide email for this state is switched off in fixtures/workflow.json
+    (`send_email: 0` on the `Committee Reviewing` Workflow Document State) so the two do not
+    both land. Only the email is gated on that flag -- frappe still writes the Workflow Action
+    records, so the pending-approver machinery above is unaffected.
+    """
+    recipients = _active_users(row.member for row in (doc.members or []) if row.member)
+    # Whoever just sent the document to the committee does not need telling that they did. They
+    # may well be on the committee themselves -- only `requested_by` is barred from it.
+    recipients.discard(frappe.session.user)
+    if not recipients:
+        return
+
+    quotations = len({row.supplier_quotation for row in (doc.quotation_scores or []) if row.supplier_quotation})
+    link = get_url_to_form(doc.doctype, doc.name)
+    subject = _("{0} is waiting for your committee score").format(doc.name)
+    body = _(
+        "{0} has been sent to the Procurement Committee for evaluation of {1}. Please score each"
+        " supplier quotation on the evaluation grid and tick <b>Reviewed / Signed</b> on your"
+        " row -- the award cannot be recommended until a quorum has signed off."
+    ).format(frappe.bold(doc.name), doc.request_for_quotation or _("the quotations received"))
+    if quotations:
+        body += " " + _("There are {0} quotation(s) to score.").format(quotations)
+
+    enqueue_create_notification(
+        sorted(recipients),
+        {
+            "type": "Alert",
+            "subject": subject,
+            "email_content": body,
+            "document_type": doc.doctype,
+            "document_name": doc.name,
+            "from_user": frappe.session.user,
+            "link": link,
+        },
+    )
+
+    try:
+        frappe.sendmail(
+            recipients=sorted(recipients),
+            subject=subject,
+            message=f'<p>{body}</p><p><a href="{link}">{link}</a></p>',
+            reference_doctype=doc.doctype,
+            reference_name=doc.name,
+        )
+    except frappe.OutgoingEmailError:
+        # A site with no default outgoing account still gets the bell. Losing the email is not
+        # worth rolling back the workflow transition that triggered it.
+        doc.log_error(_("Could not email the procurement committee"))
+
+
+def _active_users(users) -> set[str]:
+    """The enabled subset of `users` -- notifying a deactivated login is a dead end."""
+    users = {user for user in users if user}
+    if not users:
+        return set()
+    return set(frappe.get_all("User", filters={"name": ["in", list(users)], "enabled": 1}, pluck="name"))

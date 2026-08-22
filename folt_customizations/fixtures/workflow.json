@@ -282,7 +282,7 @@
     "is_optional_state": 0,
     "message": null,
     "next_action_email_template": null,
-    "send_email": 1,
+    "send_email": 0,
     "state": "Committee Reviewing",
     "update_field": null,
     "update_value": null,

@@ -16,6 +16,8 @@
     { "fieldname": "quorum", "fieldtype": "Int", "label": "Quorum (0 = all members)", "default": "0" },
     { "fieldname": "section_break_members", "fieldtype": "Section Break", "label": "Committee Members" },
     { "fieldname": "members", "fieldtype": "Table", "options": "Procurement Committee Member", "label": "Members" },
+    { "fieldname": "section_break_quotations", "fieldtype": "Section Break", "label": "Quotation Evaluation", "depends_on": "eval:doc.request_for_quotation" },
+    { "fieldname": "quotation_scores", "fieldtype": "Table", "options": "Procurement Committee Quotation Score", "label": "Scores by Member and Quotation", "description": "One row per member per quotation received against the RFQ. Filled in from the RFQ \u2014 rows added by hand are dropped on save." },
     { "fieldname": "section_break_award", "fieldtype": "Section Break", "label": "Award Recommendation" },
     { "fieldname": "recommended_supplier", "fieldtype": "Link", "options": "Supplier", "label": "Recommended Supplier" },
     { "fieldname": "recommended_supplier_quotation", "fieldtype": "Link", "options": "Supplier Quotation", "label": "Winning Supplier Quotation" },

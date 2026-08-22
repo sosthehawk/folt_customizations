@@ -17,6 +17,13 @@ app_logo_url = "/assets/folt_customizations/images/folt-logo.svg"
 # untouched). Served on website/login pages via the head include.
 web_include_css = "/assets/folt_customizations/css/folt_branding.css"
 
+# Same job for outgoing email: frappe inlines every `email_css` file into the message body
+# (premailer, via email_body.inline_style_in_html), which is the only way to reach the markup
+# in frappe's own standard.html email template. A plain path rather than a `.bundle.css` one
+# on purpose -- `bundled_asset` passes anything without ".bundle." through untouched, so this
+# needs no build step, and premailer reads it off disk through the sites/assets symlink.
+email_css = ["/assets/folt_customizations/css/folt_email.css"]
+
 # Without this, frappe's boot.py falls through to the raw `app_logo_url` hook list and
 # app_data["folt_customizations"].app_logo_url ends up a *list* where every other app's is
 # a string -- it only survives because JS coerces a one-element array to its element.
@@ -60,6 +67,10 @@ website_context = {
 # need on standard doctypes (Purchase Order, Employee Advance, Salary Slip). It runs here
 # rather than as a Custom DocPerm fixture so the grants are additive and idempotent -- see
 # permissions.py for why a fixture would be the wrong tool.
+# apply_module_access() is the other half of that: permissions decide what a role can open,
+# and this decides which module icons and workspaces it is offered at all. Both surfaces
+# default to "visible to everyone" and are re-synced from the shipping apps by migrate, which
+# is why this runs after it rather than being a fixture -- see access.py.
 # apply_print_formats() upserts the Print Formats whose Jinja templates FoLT keeps as files
 # under print_format_templates/ (currently the salary slip) and points their doctype's
 # preview and PDF at them. Same reasoning: a fixture would bury a 350-line template in a
@@ -67,13 +78,17 @@ website_context = {
 after_install = [
     "folt_customizations.branding.apply_branding",
     "folt_customizations.workspaces.hide_workspaces",
+    "folt_customizations.workspaces.sync_workspace_sidebars",
     "folt_customizations.permissions.apply_role_permissions",
+    "folt_customizations.access.apply_module_access",
     "folt_customizations.print_formats.apply_print_formats",
 ]
 after_migrate = [
     "folt_customizations.branding.apply_branding",
     "folt_customizations.workspaces.hide_workspaces",
+    "folt_customizations.workspaces.sync_workspace_sidebars",
     "folt_customizations.permissions.apply_role_permissions",
+    "folt_customizations.access.apply_module_access",
     "folt_customizations.print_formats.apply_print_formats",
 ]
 
@@ -90,6 +105,13 @@ doc_events = {
     # purchase_order.py.
     "Purchase Order": {
         "validate": "folt_customizations.purchase_order.validate",
+    },
+    # A Procurement Committee Evaluation scores the bids received against one RFQ, and a bid
+    # can be withdrawn while the committee is still scoring it. Frappe validates links before
+    # it runs validate(), so a cancelled quotation left in the grid would freeze the evaluation
+    # outright -- see procurement.withdraw_cancelled_quotation.
+    "Supplier Quotation": {
+        "on_cancel": "folt_customizations.procurement.withdraw_cancelled_quotation",
     },
     # Notify the role that can make the next move whenever a document enters a state that
     # waits on somebody. Frappe writes one Workflow Action per transition, so hooking its

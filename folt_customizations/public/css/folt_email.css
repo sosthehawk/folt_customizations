@@ -1,0 +1,34 @@
+/* FoLT branding for outgoing email, inlined into every message frappe sends with a header or
+   `with_container` (frappe.email.email_body.inline_style_in_html runs premailer over the
+   `email_css` hook files -- see hooks.py).
+
+   Only one thing needs saying here. frappe's email.bundle.css caps the masthead logo at
+   `max-height: 28px` and standard.html also sets `height="28"` on the img, which suits a
+   square app mark. The FoLT logo is a 2.62:1 lockup, so at 28px tall the "FRIENDS of LAKE
+   TURKANA" wordmark comes out around 5px high -- present, and legible only to someone who
+   already knows what it says. This is the same trap as the portal navbar cap in
+   folt_branding.css.
+
+   40px is the largest that still sits inside the masthead's 20px/16px vertical padding without
+   the row growing, and takes the wordmark to a readable ~14px.
+
+   `min-height` is doing the growing, and NOT `height`, for a specific reason: premailer copies
+   a handful of CSS properties back out into presentational HTML attributes -- width, height,
+   text-align, background-color -- so a `height: 40px` here lands on the element as
+   `height="40px !important"`, which is not a valid HTML length. min-height is not in that
+   translation table, so it resizes the image in every CSS-capable client while leaving
+   standard.html's own `height="28"` attribute intact for Outlook's Word renderer, which reads
+   the attribute and ignores the stylesheet. Outlook therefore shows the 28px version rather
+   than a broken one.
+
+   `!important` beats frappe's own `max-height: 28px` regardless of which file premailer reads
+   first, and survives inlining because frappe constructs Premailer with strip_important=False.
+   Width is left alone entirely -- frappe's rule already sets `width: auto`, so the aspect
+   ratio follows the height by itself.
+
+   The logo this sizes is a PNG, not the SVG the Desk uses -- Gmail and Outlook do not render
+   SVG images at all. See branding.LOGO_EMAIL for how it is generated. */
+.brand-logo {
+  min-height: 40px !important;
+  max-height: 40px !important;
+}

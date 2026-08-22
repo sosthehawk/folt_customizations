@@ -81,6 +81,18 @@
   {
    "child": 0,
    "collapsible": 1,
+   "icon": "clipboard-check",
+   "indent": 0,
+   "keep_closed": 0,
+   "label": "Attendance Register",
+   "link_to": "Activity Participant List",
+   "link_type": "DocType",
+   "show_arrow": 0,
+   "type": "Link"
+  },
+  {
+   "child": 0,
+   "collapsible": 1,
    "icon": "hand-coins",
    "indent": 0,
    "keep_closed": 0,
@@ -112,6 +124,18 @@
    "link_type": "DocType",
    "show_arrow": 0,
    "type": "Section Break"
+  },
+  {
+   "child": 0,
+   "collapsible": 1,
+   "icon": "user-round",
+   "indent": 0,
+   "keep_closed": 0,
+   "label": "FoLT Participant",
+   "link_to": "FoLT Participant",
+   "link_type": "DocType",
+   "show_arrow": 0,
+   "type": "Link"
   },
   {
    "child": 1,

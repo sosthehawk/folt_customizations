@@ -31,6 +31,24 @@ ICON_SETTINGS_SOLID = "/assets/folt_customizations/icons/desktop_icons/solid/fol
 # identically. Keep the width/height attributes on any asset used as splash_image.
 SPLASH = "/assets/folt_customizations/images/folt-emblem-animated.svg"
 
+# The email masthead logo, and the one asset here that is a PNG rather than an SVG. Mail
+# clients are the reason: Gmail and Outlook both refuse to render `<img src="*.svg">`, so an
+# SVG masthead is an alt-text placeholder in exactly the clients FoLT's suppliers and staff
+# read mail in. frappe's own default (frappe-framework-logo.svg) has the same problem; it is
+# just less visible because most sites never look at their own outgoing mail.
+#
+# Rendered from folt-logo.svg at 4x the 28px height frappe's email template hardcodes, on a
+# transparent ground, with headless Chrome -- wkhtmltoimage (which the container does have)
+# renders this file wrongly, collapsing the wordmark into an unreadable column. To regenerate
+# after a logo change, on a machine with Chrome:
+#
+#   printf '%s' '<html><body style="margin:0"><img src="folt-logo.svg"
+#     style="display:block;width:294px;height:112px"></body></html>' > wrap.html
+#   "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless --disable-gpu \
+#     --hide-scrollbars --default-background-color=00000000 --window-size=294,112 \
+#     --screenshot=folt-logo-email.png wrap.html
+LOGO_EMAIL = "/assets/folt_customizations/images/folt-logo-email.png"
+
 # What the product is called once Frappe/ERPNext branding is replaced.
 #   Frappe Framework -> FoLT      ERPNext -> FoLT ERP      Frappe HR -> FoLT HR
 APP_NAME = "FoLT ERP"
@@ -198,8 +216,60 @@ def apply_branding():
     changed |= _apply_single("Navbar Settings", NAVBAR_BRANDING)
     changed |= _apply_desktop_icons()
     changed |= _hide_navbar_items()
+    changed |= _apply_email_brand_logo()
+    changed |= _apply_email_footer()
     if changed:
         frappe.clear_cache()
+
+
+# The footer of every outgoing email. frappe assembles it from three sources (email_body.
+# get_footer): the Email Account's own footer, the `email_footer_address` default, and the
+# `default_mail_footer` hook -- and that last one is ERPNext's "Sent via ERPNext" promo, with a
+# tracking link, at the bottom of every notification FoLT sends. A hook can only ADD to that
+# list, never subtract, so the standard footer is switched off wholesale and FoLT's own line put
+# in its place.
+EMAIL_FOOTER = {
+    "disable_standard_email_footer": 1,
+    "email_footer_address": "Friends of Lake Turkana Trust",
+}
+
+
+def _apply_email_footer():
+    """De-brand the outgoing email footer and sign it as FoLT.
+
+    Both fields live on System Settings, but `get_footer` reads them from the DefaultValue
+    table, not from the Single -- System Settings mirrors them there in its own `set_defaults()`
+    on save. `_apply_single` writes with `set_single_value`, which skips that, so the mirror has
+    to be done here or the setting reads as unset no matter what the form shows.
+    """
+    changed = _apply_single("System Settings", EMAIL_FOOTER)
+    for fieldname, value in EMAIL_FOOTER.items():
+        if frappe.db.get_default(fieldname) != str(value):
+            frappe.db.set_default(fieldname, value)
+            changed = True
+    return changed
+
+
+def _apply_email_brand_logo():
+    """Put the FoLT logo in the masthead of every email the site sends.
+
+    frappe renders that masthead from the outgoing Email Account's `brand_logo`, falling back
+    to Website Settings `app_logo` -- which BRANDING above already sets, but to the SVG the
+    Desk wants and mail clients will not display. Setting the account field overrides it for
+    email only, so the Desk keeps the sharp vector and mail gets a PNG that actually renders.
+    (Only shown on mail sent with `with_container` or a header -- see email_body.py.)
+
+    Written with `db.set_value` rather than a document save on purpose: an Email Account save
+    re-validates, and `validate_smtp_conn()` would have the site dial its own mail relay just
+    to set a logo path -- which fails, loudly, on a machine that cannot reach it.
+    """
+    accounts = frappe.get_all(
+        "Email Account", filters={"enable_outgoing": 1}, fields=["name", "brand_logo"]
+    )
+    stale = [account.name for account in accounts if account.brand_logo != LOGO_EMAIL]
+    for name in stale:
+        frappe.db.set_value("Email Account", name, "brand_logo", LOGO_EMAIL, update_modified=False)
+    return bool(stale)
 
 
 def _apply_single(doctype, values):

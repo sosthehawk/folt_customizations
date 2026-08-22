@@ -126,20 +126,19 @@ def notify_committee_members(doc):
     quotations = len({row.supplier_quotation for row in (doc.quotation_scores or []) if row.supplier_quotation})
     link = get_url_to_form(doc.doctype, doc.name)
     subject = _("{0} is waiting for your committee score").format(doc.name)
-    body = _(
-        "{0} has been sent to the Procurement Committee for evaluation of {1}. Please score each"
-        " supplier quotation on the evaluation grid and tick <b>Reviewed / Signed</b> on your"
-        " row -- the award cannot be recommended until a quorum has signed off."
-    ).format(frappe.bold(doc.name), doc.request_for_quotation or _("the quotations received"))
-    if quotations:
-        body += " " + _("There are {0} quotation(s) to score.").format(quotations)
 
+    # The bell has a line of its own: it is read in a dropdown next to the document it points
+    # at, so it needs the ask and nothing else. The email carries the same ask with the detail
+    # a reader outside the Desk has no other way to get.
     enqueue_create_notification(
         sorted(recipients),
         {
             "type": "Alert",
             "subject": subject,
-            "email_content": body,
+            "email_content": _(
+                "{0} is with the Procurement Committee. Please score the supplier quotations and"
+                " tick <b>Reviewed / Signed</b> on your row."
+            ).format(frappe.bold(doc.name)),
             "document_type": doc.doctype,
             "document_name": doc.name,
             "from_user": frappe.session.user,
@@ -151,7 +150,13 @@ def notify_committee_members(doc):
         frappe.sendmail(
             recipients=sorted(recipients),
             subject=subject,
-            message=f'<p>{body}</p><p><a href="{link}">{link}</a></p>',
+            message=_committee_email_body(doc, link, quotations),
+            # `with_container` and `header` are what put the email in frappe's framed layout,
+            # with the FoLT logo in the masthead (branding._apply_email_brand_logo) and a
+            # coloured indicator beside the title. Without either, standard.html renders the
+            # message full-width and unbranded -- see email_body.get_formatted_html.
+            header=[_("Committee Evaluation"), "orange"],
+            with_container=True,
             reference_doctype=doc.doctype,
             reference_name=doc.name,
         )
@@ -159,6 +164,54 @@ def notify_committee_members(doc):
         # A site with no default outgoing account still gets the bell. Losing the email is not
         # worth rolling back the workflow transition that triggered it.
         doc.log_error(_("Could not email the procurement committee"))
+
+
+# The logo's own blue, so the call to action belongs to the same lockup as the masthead above
+# it (#001a33 is the wordmark navy and reads as near-black on a button).
+BUTTON_COLOR = "#3c6a91"
+
+
+def _committee_email_body(doc, link, quotations):
+    """The committee email as HTML, styled for a mail client rather than for the Desk.
+
+    Two constraints shape this. Frappe inlines its own email stylesheet over the result
+    (`inline_style_in_html` -> premailer), so `table`, `btn btn-primary` and `text-muted` are
+    reused from there instead of restated -- the email then matches every other email the site
+    sends. And a mail client is not a browser: the button is a bordered table cell with an
+    inline background rather than a styled `<a>`, because Outlook drops padding and background
+    on an anchor and would render the call to action as bare underlined text.
+
+    The link is whatever `get_url_to_form` resolves to, which is the site's `host_name` -- set
+    that per site (`bench set-config host_name http://host:port`) or every link generated
+    outside a web request points at a hostname with no port on it.
+    """
+    rows = [(_("Request for Quotation"), doc.request_for_quotation or _("Not linked"))]
+    if doc.activity_requisition:
+        rows.append((_("Activity Requisition"), doc.activity_requisition))
+    rows.append((_("Quotations to score"), quotations or _("None received yet")))
+    rows.append((_("Committee"), _("{0} member(s)").format(len(doc.members or []))))
+
+    detail = "".join(
+        f'<tr><td style="padding:6px 12px 6px 0;color:#6b7280;white-space:nowrap">{label}</td>'
+        f'<td style="padding:6px 0"><b>{value}</b></td></tr>'
+        for label, value in rows
+    )
+
+    return f"""
+<p>{_("You have been appointed to the procurement committee for this evaluation.")}</p>
+<p>{_("Please score each supplier quotation on the evaluation grid, then tick <b>Reviewed / Signed</b> on your own row. The award cannot be recommended until a quorum of members has signed off.")}</p>
+<table role="presentation" cellpadding="0" cellspacing="0" border="0"
+       style="margin:20px 0;font-size:14px">{detail}</table>
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:24px 0">
+    <tr><td align="center" bgcolor="{BUTTON_COLOR}" style="border-radius:6px">
+        <a href="{link}" class="btn btn-primary"
+           style="display:inline-block;padding:11px 22px;background-color:{BUTTON_COLOR};
+                  border:1px solid {BUTTON_COLOR};border-radius:6px;color:#ffffff;
+                  font-size:14px;font-weight:600;text-decoration:none">{_("Score the quotations")}</a>
+    </td></tr>
+</table>
+<p class="text-muted" style="font-size:12px">{_("Or open it directly:")} <a href="{link}">{link}</a></p>
+"""
 
 
 def _active_users(users) -> set[str]:

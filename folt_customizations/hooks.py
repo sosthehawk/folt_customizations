@@ -17,6 +17,13 @@ app_logo_url = "/assets/folt_customizations/images/folt-logo.svg"
 # untouched). Served on website/login pages via the head include.
 web_include_css = "/assets/folt_customizations/css/folt_branding.css"
 
+# Same job for outgoing email: frappe inlines every `email_css` file into the message body
+# (premailer, via email_body.inline_style_in_html), which is the only way to reach the markup
+# in frappe's own standard.html email template. A plain path rather than a `.bundle.css` one
+# on purpose -- `bundled_asset` passes anything without ".bundle." through untouched, so this
+# needs no build step, and premailer reads it off disk through the sites/assets symlink.
+email_css = ["/assets/folt_customizations/css/folt_email.css"]
+
 # Without this, frappe's boot.py falls through to the raw `app_logo_url` hook list and
 # app_data["folt_customizations"].app_logo_url ends up a *list* where every other app's is
 # a string -- it only survives because JS coerces a one-element array to its element.

@@ -67,6 +67,10 @@ website_context = {
 # need on standard doctypes (Purchase Order, Employee Advance, Salary Slip). It runs here
 # rather than as a Custom DocPerm fixture so the grants are additive and idempotent -- see
 # permissions.py for why a fixture would be the wrong tool.
+# apply_module_access() is the other half of that: permissions decide what a role can open,
+# and this decides which module icons and workspaces it is offered at all. Both surfaces
+# default to "visible to everyone" and are re-synced from the shipping apps by migrate, which
+# is why this runs after it rather than being a fixture -- see access.py.
 # apply_print_formats() upserts the Print Formats whose Jinja templates FoLT keeps as files
 # under print_format_templates/ (currently the salary slip) and points their doctype's
 # preview and PDF at them. Same reasoning: a fixture would bury a 350-line template in a
@@ -74,13 +78,17 @@ website_context = {
 after_install = [
     "folt_customizations.branding.apply_branding",
     "folt_customizations.workspaces.hide_workspaces",
+    "folt_customizations.workspaces.sync_workspace_sidebars",
     "folt_customizations.permissions.apply_role_permissions",
+    "folt_customizations.access.apply_module_access",
     "folt_customizations.print_formats.apply_print_formats",
 ]
 after_migrate = [
     "folt_customizations.branding.apply_branding",
     "folt_customizations.workspaces.hide_workspaces",
+    "folt_customizations.workspaces.sync_workspace_sidebars",
     "folt_customizations.permissions.apply_role_permissions",
+    "folt_customizations.access.apply_module_access",
     "folt_customizations.print_formats.apply_print_formats",
 ]
 

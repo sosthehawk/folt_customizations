@@ -47,3 +47,79 @@ def hide_workspaces():
         changed = True
     if changed:
         frappe.clear_cache()
+
+
+# The Workspace Sidebar definitions this app ships under folt_customizations/workspace_sidebar/.
+# `bench migrate` does NOT import them: those files are *exports*, written out by
+# WorkspaceSidebar.export_sidebar whenever the sidebar is edited in the Desk with developer_mode
+# on, and nothing ever reads them back. So they look version-controlled while the live sidebar
+# drifts from them -- adding an item to folt.json changed precisely nothing until this existed,
+# and the doc in the database still carried its original 2026-07-28 items.
+#
+# Syncing them here makes the file on disk the source of truth it already pretends to be, and
+# survives a rebuilt container or a fresh site, which is the same reason branding and the role
+# permissions live in code.
+SIDEBAR_DIR = "workspace_sidebar"
+
+# The fields worth owning from disk. Deliberately not the whole document: `module` is derived in
+# the doctype's own before_save, and the rest is bookkeeping.
+SIDEBAR_FIELDS = ("header_icon",)
+
+# One row of the `items` child table, in the order the JSON writes them.
+ITEM_FIELDS = (
+    "type", "label", "link_type", "link_to", "url", "icon", "child", "indent",
+    "collapsible", "keep_closed", "show_arrow", "filters", "route_options",
+)
+
+
+def sync_workspace_sidebars():
+    """Re-apply this app's shipped Workspace Sidebar definitions. True if anything changed."""
+    import json
+    import os
+
+    import folt_customizations
+
+    directory = os.path.join(os.path.dirname(folt_customizations.__file__), SIDEBAR_DIR)
+    if not os.path.isdir(directory):
+        return False
+
+    changed = False
+    for filename in sorted(os.listdir(directory)):
+        if not filename.endswith(".json"):
+            continue
+        with open(os.path.join(directory, filename)) as handle:
+            definition = json.load(handle)
+        if _apply_sidebar(definition):
+            changed = True
+
+    if changed:
+        frappe.clear_cache()
+    return changed
+
+
+def _apply_sidebar(definition):
+    name = definition.get("name")
+    if not name or not frappe.db.exists("Workspace Sidebar", name):
+        # A sidebar this site has never had is left for a human: creating one blind would put an
+        # unreviewed set of links in everybody's Desk.
+        return False
+
+    doc = frappe.get_doc("Workspace Sidebar", name)
+    wanted = [
+        {field: item.get(field) for field in ITEM_FIELDS} for item in definition.get("items") or []
+    ]
+    current = [{field: row.get(field) for field in ITEM_FIELDS} for row in doc.items]
+    header_matches = all(
+        doc.get(field) == definition.get(field) for field in SIDEBAR_FIELDS
+    )
+    if current == wanted and header_matches:
+        return False
+
+    for field in SIDEBAR_FIELDS:
+        doc.set(field, definition.get(field))
+    doc.set("items", [])
+    for item in wanted:
+        doc.append("items", item)
+    doc.flags.ignore_permissions = True
+    doc.save()
+    return True

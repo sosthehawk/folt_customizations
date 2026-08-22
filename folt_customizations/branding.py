@@ -49,6 +49,38 @@ SPLASH = "/assets/folt_customizations/images/folt-emblem-animated.svg"
 #     --screenshot=folt-logo-email.png wrap.html
 LOGO_EMAIL = "/assets/folt_customizations/images/folt-logo-email.png"
 
+# The letterhead lockup: the blue mark, the FoLT wordmark and the strapline, as supplied by
+# FoLT. A different asset from LOGO on purpose -- LOGO is the horizontal wordmark the Desk
+# navbar and login page need, this is the portrait block that belongs at the head of a printed
+# document. Trimmed of its white border and reduced to a 128-colour palette (35 KB from 104 KB,
+# no visible loss: the source is a screenshot, so it carries compression noise across thousands
+# of near-identical colours).
+#
+# Supplied at 465x397, which is the ceiling on print quality here. If FoLT can produce the
+# original vector or a larger export, replace the file -- nothing else has to change.
+LETTERHEAD_IMAGE = "images/folt-letterhead.png"
+
+# Rendered width of the letterhead, in CSS pixels. This artwork is nearly square and carries
+# three lines of small type, so the width is a compromise rather than a house style: below about
+# 150px the strapline stops being readable, and much above it the header eats into a payslip
+# that is built to fit one A4 page (see print_format_templates/folt_salary_slip.html). 160px is
+# ~42mm wide and ~36mm tall on the page, and keeps the slip to its single page -- verified, not
+# assumed. Change it here and re-run apply_branding.
+LETTERHEAD_WIDTH_PX = 160
+
+# The Letter Head record every printed document picks up. One default, no per-doctype variants.
+LETTER_HEAD = "FoLT"
+
+# ERPNext ships two sample letterheads and, worse, stamps one of them onto transactions through
+# Company.default_letter_head -- so an existing Purchase Order or Salary Slip carries
+# `letter_head = "Company Letterhead - Grey"` on the document itself, and printview prefers
+# `doc.letter_head` over the default (frappe/www/printview.py:get_letter_head). Making FoLT's
+# letterhead the default is therefore only a third of the job: the samples have to stop being
+# offered, the Company has to stop stamping them, and the documents that already carry one have
+# to be released back to the default. They are disabled rather than deleted -- reversible, and
+# deleting a letterhead clears defaults that point at it.
+SAMPLE_LETTER_HEADS = ("Company Letterhead", "Company Letterhead - Grey")
+
 # What the product is called once Frappe/ERPNext branding is replaced.
 #   Frappe Framework -> FoLT      ERPNext -> FoLT ERP      Frappe HR -> FoLT HR
 APP_NAME = "FoLT ERP"
@@ -218,6 +250,8 @@ def apply_branding():
     changed |= _hide_navbar_items()
     changed |= _apply_email_brand_logo()
     changed |= _apply_email_footer()
+    changed |= _apply_letter_head()
+    changed |= _retire_sample_letter_heads()
     if changed:
         frappe.clear_cache()
 
@@ -232,6 +266,133 @@ EMAIL_FOOTER = {
     "disable_standard_email_footer": 1,
     "email_footer_address": "Friends of Lake Turkana Trust",
 }
+
+
+def _apply_letter_head():
+    """Put FoLT's letterhead at the head of every printed document and PDF.
+
+    The image is embedded as a data URI rather than referenced at
+    /assets/folt_customizations/images/folt-letterhead.png, and that is the whole point of
+    this function rather than a two-line Desk edit.
+
+    wkhtmltopdf runs inside the backend container with --disable-local-file-access and fetches
+    every image over HTTP, resolving a relative src against the site's `host_name`. On this
+    deployment host_name is what a browser needs (http://localhost:8080) and nothing listens on
+    that port inside the container, so a URL-referenced letterhead renders as a broken image in
+    every PDF -- and in production it would depend on the site being able to reach itself, which
+    is a strange thing for a logo to depend on. A data URI needs no fetch at all, so the same
+    bytes render in the Desk preview, in the PDF, and in a PDF built by a background job with no
+    request context. The cost is ~46 KB of base64 in one field, paid once.
+
+    `source = "HTML"` because the Image source path builds the same <img> from an attachment,
+    which would mean a File record and an upload step outside version control.
+    """
+    content = (
+        f'<div style="text-align:center;padding:4px 0">'
+        f'<img src="{_letterhead_data_uri()}" alt="Friends of Lake Turkana"'
+        f' style="width:{LETTERHEAD_WIDTH_PX}px;height:auto"></div>'
+    )
+    values = {
+        "letter_head_name": LETTER_HEAD,
+        "source": "HTML",
+        "content": content,
+        "align": "Center",
+        "disabled": 0,
+        "is_default": 1,
+    }
+
+    created = not frappe.db.exists("Letter Head", LETTER_HEAD)
+    if created:
+        doc = frappe.new_doc("Letter Head")
+        doc.update(values)
+        doc.insert(ignore_permissions=True)
+
+    doc = frappe.get_doc("Letter Head", LETTER_HEAD)
+    if all(doc.get(field) == value for field, value in values.items()):
+        return created
+
+    # The second write is not redundant on a fresh record. LetterHead.before_insert overrides
+    # `source` to "Image" for anything not created during migrate or install -- a UX nicety for
+    # someone uploading a logo in the Desk -- which leaves the record claiming to be
+    # image-sourced while carrying HTML. Harmless until the next time anybody saves it in the
+    # Desk: validate() would then rebuild `content` from the (empty) `image` field. Saving again
+    # puts `source` back, because before_insert does not run on an update.
+    doc.update(values)
+    doc.save(ignore_permissions=True)
+    return True
+
+
+def _retire_sample_letter_heads():
+    """Stop ERPNext's sample letterheads being offered, stamped or already stamped."""
+    changed = False
+    samples = [name for name in SAMPLE_LETTER_HEADS if frappe.db.exists("Letter Head", name)]
+
+    for name in samples:
+        current = frappe.db.get_value("Letter Head", name, ["disabled", "is_default"], as_dict=True)
+        if current.disabled and not current.is_default:
+            continue
+        # db.set_value, not a save: LetterHead.validate rebuilds `content` from the `image`
+        # field, and these samples are HTML-sourced -- saving them would blank their content on
+        # the way to disabling them, which is a destructive way to turn something off.
+        frappe.db.set_value(
+            "Letter Head", name, {"disabled": 1, "is_default": 0}, update_modified=False
+        )
+        changed = True
+
+    # New transactions get their letterhead from the Company, not from the Letter Head default.
+    for company in frappe.get_all("Company", pluck="name"):
+        if frappe.db.get_value("Company", company, "default_letter_head") != LETTER_HEAD:
+            frappe.db.set_value(
+                "Company", company, "default_letter_head", LETTER_HEAD, update_modified=False
+            )
+            changed = True
+
+    if samples:
+        changed |= _release_stamped_documents(samples)
+    return changed
+
+
+def _release_stamped_documents(samples):
+    """Blank `letter_head` wherever it points at a retired sample, on every doctype that has one.
+
+    Blanked rather than repointed at LETTER_HEAD on purpose: an empty field falls through to the
+    default, so these documents follow whatever the default becomes instead of pinning today's
+    answer into thousands of rows. Written with db.set_value because most of them are submitted
+    and this is a print-only field -- no ledger, no workflow, nothing that validation guards.
+    """
+    changed = False
+    doctypes = frappe.get_all(
+        "DocField",
+        filters={"fieldname": "letter_head", "fieldtype": "Link"},
+        pluck="parent",
+        distinct=True,
+    )
+    for doctype in doctypes:
+        if not frappe.db.exists("DocType", doctype) or frappe.db.get_value(
+            "DocType", doctype, "issingle"
+        ):
+            continue
+        stale = frappe.get_all(doctype, filters={"letter_head": ["in", samples]}, pluck="name")
+        for name in stale:
+            frappe.db.set_value(doctype, name, "letter_head", None, update_modified=False)
+        if stale:
+            changed = True
+    return changed
+
+
+def _letterhead_data_uri():
+    """The letterhead PNG as a data URI, read from the file shipped in this app."""
+    import base64
+    import os
+
+    import folt_customizations
+
+    path = os.path.join(
+        os.path.dirname(folt_customizations.__file__), "public", LETTERHEAD_IMAGE
+    )
+    with open(path, "rb") as handle:
+        encoded = base64.b64encode(handle.read()).decode()
+    return f"data:image/png;base64,{encoded}"
 
 
 def _apply_email_footer():

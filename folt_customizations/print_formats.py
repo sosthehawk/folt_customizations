@@ -75,6 +75,42 @@ PRINT_FORMATS = {
 
 TEMPLATE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "print_format_templates")
 
+# Site config key naming a base URL that the *container* can reach, used only while building a
+# PDF. See use_internal_host_for_pdf.
+PDF_HOST_KEY = "pdf_host_name"
+
+
+def use_internal_host_for_pdf(**kwargs):
+    """Point asset fetching at a host the container can reach, for the duration of a PDF build.
+
+    `host_name` has to be the address a *browser* uses, because it is also the base of every
+    link the site puts in an email or a notification -- and those are read by people, not by
+    the container. On this deployment that is http://localhost:8080, which inside the backend
+    container is the container itself with nothing listening on 8080.
+
+    wkhtmltopdf does not care about any of that: it runs inside the container with
+    --disable-local-file-access, and the printview page it renders carries a <link> to
+    frappe's compiled print stylesheet, which `scrub_urls` has already resolved against
+    host_name. Unreachable means wkhtmltopdf exits 1 with a network error, so the PDF does not
+    build at all rather than merely printing unstyled. The letterhead sidesteps this by being a
+    data URI (see branding._apply_letter_head); a 200 KB stylesheet emitted by frappe's own
+    page template is not ours to inline, and pdf_body_html renders only the format body, so
+    there is nothing to rewrite there.
+
+    Hence this hook, which frappe calls from `get_print` immediately before `get_pdf` and only
+    on the PDF path -- never for the Desk's HTML preview, where the browser-facing URL is the
+    correct one. It writes to `frappe.local.conf`, which is per-request and per-job, so nothing
+    leaks past the response. A site with no `pdf_host_name` set gets no override: on staging and
+    production the public hostname resolves from inside the container too, and this whole
+    problem only exists where the browser-facing address is loopback.
+
+    Not covered: `attach_print(html=...)`, which hands pre-rendered html straight to `get_pdf`
+    and bypasses every hook. Nothing in FoLT uses that path today.
+    """
+    internal_host = frappe.local.conf.get(PDF_HOST_KEY)
+    if internal_host:
+        frappe.local.conf.host_name = internal_host
+
 
 def apply_print_formats():
     """Upsert FoLT's file-backed Print Formats and point their doctypes at them."""

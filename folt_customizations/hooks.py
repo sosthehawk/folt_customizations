@@ -155,6 +155,11 @@ scheduler_events = {
 # Supplier dropdown to that category's pre-qualified register.
 doctype_js = {"Purchase Order": "public/js/purchase_order.js"}
 
+# Called from frappe's `get_print` just before the PDF is built, and only on the PDF path.
+# `host_name` is the base of every link the site emails to a person, so it has to be the
+# browser's address; wkhtmltopdf needs one the container can reach. See print_formats.py.
+on_print_pdf = "folt_customizations.print_formats.use_internal_host_for_pdf"
+
 # Fixtures shipped with this app. `bench migrate` re-syncs these from disk into the
 # database on every run -- so this file on disk is the source of truth. If you edit a
 # Workflow, Custom Field or Property Setter in the Desk UI, re-export it here

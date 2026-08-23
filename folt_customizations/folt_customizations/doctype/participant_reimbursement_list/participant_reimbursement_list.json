@@ -61,6 +61,13 @@
       "description": "The amount actually paid out on the linked float. This list cannot exceed it."
     },
     {
+      "fieldname": "signed_list",
+      "fieldtype": "Attach",
+      "label": "Signed reimbursement list",
+      "allow_on_submit": 1,
+      "description": "The list as returned by the programme officer, acknowledged by the participants."
+    },
+    {
       "fieldname": "section_break_participants",
       "fieldtype": "Section Break",
       "label": "Participants"
@@ -138,6 +145,13 @@
       "submit": 1,
       "cancel": 1,
       "amend": 1,
+      "report": 1
+    },
+    {
+      "role": "Executive Director",
+      "read": 1,
+      "write": 1,
+      "submit": 1,
       "report": 1
     },
     {

@@ -169,5 +169,50 @@
   "name": "Disputed",
   "style": "Danger",
   "workflow_state_name": "Disputed"
+ },
+ {
+  "docstatus": 0,
+  "doctype": "Workflow State",
+  "icon": "",
+  "modified": "2026-08-22 09:00:00.000000",
+  "name": "Disbursed",
+  "style": "Info",
+  "workflow_state_name": "Disbursed"
+ },
+ {
+  "docstatus": 0,
+  "doctype": "Workflow State",
+  "icon": "",
+  "modified": "2026-08-22 09:00:00.000000",
+  "name": "Overdue",
+  "style": "Danger",
+  "workflow_state_name": "Overdue"
+ },
+ {
+  "docstatus": 0,
+  "doctype": "Workflow State",
+  "icon": "",
+  "modified": "2026-08-22 09:00:00.000000",
+  "name": "Accounted",
+  "style": "Info",
+  "workflow_state_name": "Accounted"
+ },
+ {
+  "docstatus": 0,
+  "doctype": "Workflow State",
+  "icon": "",
+  "modified": "2026-08-22 09:00:00.000000",
+  "name": "Closed",
+  "style": "Success",
+  "workflow_state_name": "Closed"
+ },
+ {
+  "docstatus": 0,
+  "doctype": "Workflow State",
+  "icon": "",
+  "modified": "2026-08-22 09:00:00.000000",
+  "name": "Settled",
+  "style": "Success",
+  "workflow_state_name": "Settled"
  }
 ]

@@ -6,7 +6,7 @@ from frappe.utils.user import get_users_with_role
 
 from folt_customizations.procurement import COMMITTEE_REVIEW_STATE, EVALUATION_DOCTYPE
 
-# FoLT runs eight approval workflows, and until now nobody was told when a document landed in
+# FoLT runs nine approval workflows, and until now nobody was told when a document landed in
 # their queue. Two things were switched off, and both gates have to be open for frappe to send
 # anything: `send_email_alert` on the Workflow, AND `send_email` on the Workflow Document State
 # the document has just entered. The fixtures set both everywhere bar one state, `Committee

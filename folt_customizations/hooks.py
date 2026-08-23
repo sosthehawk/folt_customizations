@@ -115,11 +115,40 @@ doc_events = {
     },
     # Notify the role that can make the next move whenever a document enters a state that
     # waits on somebody. Frappe writes one Workflow Action per transition, so hooking its
-    # insert covers all eight FoLT workflows at once -- see notifications.py for why the
+    # insert covers every FoLT workflow at once -- see notifications.py for why the
     # Desk bell is used rather than relying on the workflows' own email alert.
     "Workflow Action": {
         "after_insert": "folt_customizations.notifications.notify_pending_approvers",
     },
+    # Steps 3 and 4 of FoLT's finance workflow -- disbursement, then accountability -- happen
+    # on documents *other* than the float: a Payment Entry funds it, an Expense Claim retires
+    # it. ERPNext already recomputes Employee Advance.status from those vouchers, so the float's
+    # workflow state is derived from them rather than clicked a second time. See
+    # float_lifecycle.py for why the sync is deferred to after the commit.
+    "Employee Advance": {
+        "validate": "folt_customizations.float_lifecycle.set_retirement_deadline",
+    },
+    "Payment Entry": {
+        "on_submit": "folt_customizations.float_lifecycle.sync_from_voucher",
+        "on_cancel": "folt_customizations.float_lifecycle.sync_from_voucher",
+    },
+    "Journal Entry": {
+        "on_submit": "folt_customizations.float_lifecycle.sync_from_voucher",
+        "on_cancel": "folt_customizations.float_lifecycle.sync_from_voucher",
+    },
+    "Expense Claim": {
+        "on_submit": "folt_customizations.float_lifecycle.sync_from_claim",
+        "on_cancel": "folt_customizations.float_lifecycle.sync_from_claim",
+    },
+}
+
+# The other half of the Float Request Form's own undertaking: a float unaccounted for more than
+# three days after the activity stops looking current. The sweep flags; recovery from salary
+# stays a human decision -- see float_lifecycle.flag_overdue_floats.
+scheduler_events = {
+    "daily": [
+        "folt_customizations.float_lifecycle.flag_overdue_floats",
+    ],
 }
 
 # Client-side half of the same rule: leads the form with the category and restricts the
@@ -152,6 +181,7 @@ FOLT_WORKFLOWS = [
     "FoLT Payroll Approval",
     "Activity Participant List Verification",
     "Participant Reimbursement List Verification",
+    "FoLT Float Retirement Approval",
 ]
 
 # Workflow State / Action masters referenced by the workflows above. ERPNext 16 validates
@@ -164,6 +194,9 @@ FOLT_WORKFLOW_STATES = [
     "Requested", "Checked", "Approved", "Rejected", "Pending Approval",
     "Pending Payroll Approval",
     "Pending Verification", "Verified", "Paid", "Partly Paid", "Disputed",
+    # The float's life after the approval decision (float_lifecycle.py), and the retirement
+    # claim's own settlement state.
+    "Disbursed", "Overdue", "Accounted", "Closed", "Settled",
 ]
 FOLT_WORKFLOW_ACTIONS = [
     "Submit for Review", "Approve", "Reject", "Send to Committee",
@@ -172,6 +205,7 @@ FOLT_WORKFLOW_ACTIONS = [
     "Submit for approval", "Submit Payroll for Approval",
     "Submit for Verification", "Verify", "Return for Correction",
     "Mark Paid", "Mark Partly Paid", "Raise Dispute", "Resolve Dispute",
+    "Record Disbursement", "Mark Accounted", "Flag Overdue", "Close Float", "Mark Settled",
 ]
 
 # Kenyan statutory payroll salary components (NSSF, SHIF, Housing Levy, PAYE + helpers).

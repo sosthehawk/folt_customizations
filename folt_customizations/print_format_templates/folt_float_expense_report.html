@@ -1,0 +1,147 @@
+{#-
+  FoLT Float Expense Report -- step 4 of the finance workflow, printed from the Expense Claim
+  that retires a float.
+
+  The paper form is a single sheet that has to answer three questions at a glance: what was
+  spent, line by line, against which budget coding; what the float actually gave; and what the
+  balance is. The worked case came back at minus four shillings on a 262,000 float, so the
+  balance line is spelled out in both directions -- money owed to the staff member reads
+  differently from money they have to return, and the form is where that is settled.
+
+  Budget coding comes off the expense line's cost centre and accounting dimensions, and the
+  donor and budget line off the float being retired: they are recorded once, on the advance,
+  and this reads them rather than asking for them again.
+-#}
+{%- macro money(v) -%}{{ frappe.utils.fmt_money(v or 0, currency=doc.currency) }}{%- endmacro -%}
+
+{%- set advance_names = doc.advances | map(attribute="employee_advance") | select | list -%}
+{#- Four fields off the float, not the whole document: the print sandbox exposes db.get_value,
+    and loading the advance with its child tables to read a budget line would be wasteful on a
+    form that prints in bulk at month end. -#}
+{%- set advance = frappe.db.get_value(
+      "Employee Advance", advance_names[0],
+      ["name", "purpose", "folt_project", "folt_budget_line", "folt_donor_code", "workflow_state", "status"],
+      as_dict=True) if advance_names else None -%}
+{%- set float_given = doc.total_advance_amount or 0 -%}
+{%- set total_spent = doc.total_sanctioned_amount or doc.total_claimed_amount or 0 -%}
+{#- Positive means the float over-covered the spend and the balance is returnable; negative
+    means the holder spent their own money and is owed it back. -#}
+{%- set balance = frappe.utils.flt(float_given) - frappe.utils.flt(total_spent) -%}
+{%- set designation = frappe.db.get_value("Employee", doc.employee, "designation") -%}
+
+{% include "folt_customizations/print_format_templates/_page_frame.html" %}
+
+<div class="folt-form">
+
+  <div class="folt-title">{{ _("Float Expense Report") }}</div>
+  <div class="folt-subtitle">{{ doc.name }}{% if advance %} &middot; {{ _("retiring float") }} {{ advance.name }}{% endif %}</div>
+  <hr class="folt-rule">
+
+  <table class="folt-meta">
+    <tr>
+      <td class="label">{{ _("Prepared By") }}</td>
+      <td class="value">{{ doc.employee_name }}</td>
+      <td class="label">{{ _("Job Title") }}</td>
+      <td class="value">{{ designation or "&mdash;" }}</td>
+    </tr>
+    <tr>
+      <td class="label">{{ _("Date") }}</td>
+      <td class="value">{{ frappe.utils.formatdate(doc.posting_date) }}</td>
+      <td class="label">{{ _("Activity") }}</td>
+      <td class="value">{{ doc.project or (advance and advance.folt_project) or "&mdash;" }}</td>
+    </tr>
+    <tr>
+      <td class="label">{{ _("Budget Line") }}</td>
+      <td class="value">{{ (advance and advance.folt_budget_line) or "&mdash;" }}</td>
+      <td class="label">{{ _("Donor") }}</td>
+      <td class="value">{{ (advance and advance.folt_donor_code) or "&mdash;" }}</td>
+    </tr>
+    <tr>
+      <td class="label">{{ _("Purpose") }}</td>
+      <td class="value" colspan="3">{{ doc.remark or (advance and advance.purpose) or "&mdash;" }}</td>
+    </tr>
+  </table>
+
+  <table class="folt-lines">
+    <tr>
+      <th class="mid" style="width:10%">{{ _("Date") }}</th>
+      <th style="width:19%">{{ _("Expense") }}</th>
+      <th style="width:35%">{{ _("Description") }}</th>
+      <th style="width:20%">{{ _("Budget Coding") }}</th>
+      <th class="num" style="width:16%">{{ _("Amount") }}</th>
+    </tr>
+    {%- for row in doc.expenses %}
+    <tr>
+      <td class="mid">{{ frappe.utils.formatdate(row.expense_date) }}</td>
+      <td>{{ row.expense_type }}</td>
+      <td>{{ row.description or "&mdash;" }}</td>
+      <td>{{ row.cost_center or doc.cost_center or "&mdash;" }}</td>
+      {#- The sanctioned amount, not the claimed one: what Finance accepted is what the float
+          is accounted for by, and the two differ whenever a line was queried. -#}
+      <td class="num">{{ money(row.sanctioned_amount if row.sanctioned_amount else row.amount) }}</td>
+    </tr>
+    {%- endfor %}
+    {%- for row in doc.taxes %}
+    <tr>
+      <td class="mid">&mdash;</td>
+      <td>{{ _("Tax") }}</td>
+      <td>{{ row.account_head }}</td>
+      <td>{{ row.cost_center or "&mdash;" }}</td>
+      <td class="num">{{ money(row.tax_amount) }}</td>
+    </tr>
+    {%- endfor %}
+    <tr class="total">
+      <td colspan="4" class="num">{{ _("Total Spent") }}</td>
+      <td class="num">{{ money(total_spent) }}</td>
+    </tr>
+    <tr class="total">
+      <td colspan="4" class="num">{{ _("Float Given") }}</td>
+      <td class="num">{{ money(float_given) }}</td>
+    </tr>
+    <tr class="total">
+      <td colspan="4" class="num">
+        {%- if balance < 0 %}{{ _("Balance due to staff") }}{% else %}{{ _("Balance returnable") }}{% endif -%}
+      </td>
+      <td class="num {% if balance < 0 %}negative{% endif %}">{{ money(balance | abs) }}</td>
+    </tr>
+  </table>
+
+  {%- if doc.advances %}
+  <table class="folt-lines">
+    <tr>
+      <th style="width:30%">{{ _("Float Retired") }}</th>
+      <th class="mid" style="width:14%">{{ _("Issued") }}</th>
+      <th class="num" style="width:19%">{{ _("Disbursed") }}</th>
+      <th class="num" style="width:19%">{{ _("Applied Here") }}</th>
+      <th class="num" style="width:18%">{{ _("Returned") }}</th>
+    </tr>
+    {%- for row in doc.advances %}
+    <tr>
+      <td>{{ row.employee_advance }}</td>
+      <td class="mid">{{ frappe.utils.formatdate(row.posting_date) }}</td>
+      <td class="num">{{ money(row.advance_paid) }}</td>
+      <td class="num">{{ money(row.allocated_amount) }}</td>
+      <td class="num">{{ money(row.return_amount) }}</td>
+    </tr>
+    {%- endfor %}
+  </table>
+  {%- endif %}
+
+  <div class="folt-state">
+    {{ _("Status") }}: <span class="pill">{{ _(doc.workflow_state or doc.approval_status or doc.status) }}</span>
+    {%- if advance %} &nbsp; {{ _("Float") }}: <span class="pill">{{ _(advance.workflow_state or advance.status) }}</span>{% endif %}
+  </div>
+
+  <table class="folt-signoff">
+    <tr>
+      <td><div class="line"></div><div class="role">{{ _("Prepared By") }}</div><div class="who">{{ doc.employee_name }}</div></td>
+      <td><div class="line"></div><div class="role">{{ _("Checked By") }}</div><div class="who">{{ _("Finance Officer") }}</div></td>
+      <td><div class="line"></div><div class="role">{{ _("Approved By") }}</div><div class="who">{{ _("Executive Director") }}</div></td>
+    </tr>
+  </table>
+
+  <div class="folt-note">
+    {{ _("Floats are issued to staff only and must be accounted for within three days of the activity. An unaccounted float is recoverable from salary or benefits.") }}
+  </div>
+
+</div>

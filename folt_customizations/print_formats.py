@@ -7,8 +7,8 @@ import frappe
 # template and its stylesheet are the same-named .html / .css under
 # print_format_templates/.
 #
-# Why a hook and not a Print Format fixture (which is how FOLT_PRINT_FORMATS in hooks.py
-# ships the procurement forms): a payslip template is ~350 lines of Jinja plus ~150 lines
+# Why a hook and not a Print Format fixture, which is how the procurement forms used to
+# ship: a payslip template is ~350 lines of Jinja plus ~150 lines
 # of CSS, and a fixture stores both as single JSON string values. That is unreviewable in a
 # diff and unpleasant to edit, and it splits the template across two places the moment
 # someone tweaks the format in the Desk and forgets to re-export. Keeping the template in
@@ -19,7 +19,14 @@ import frappe
 # wrong: with custom_format = 0, printview.get_rendered_template ignores `html` entirely
 # and silently falls through to frappe's auto-generated "standard" layout, so the format
 # appears in the print dropdown and prints something plausible that is not the template at
-# all. That is what the three formats in FOLT_PRINT_FORMATS are currently doing.
+# all. The procurement and finance forms shipped that way as Print Format fixtures and were
+# therefore printing the auto layout, not their own templates, for as long as they existed --
+# which is why they are here now rather than in hooks.FOLT_PRINT_FORMATS.
+#
+# `stylesheet` names the .css file when it is not the template's own. The four form-shaped
+# formats share folt_form.css and the page frame in _page_frame.html; the payslip keeps its
+# own of both, because it is a one-page-at-all-costs layout whose rules make no sense on a
+# form that is allowed to run long.
 PRINT_FORMATS = {
     "FoLT Salary Slip": {
         "doc_type": "Salary Slip",
@@ -31,6 +38,37 @@ PRINT_FORMATS = {
         # Both the Desk preview and the Print/PDF button resolve the format the same way
         # (printview.get_print_format_doc: ?format=, else meta.default_print_format, else
         # "Standard"), so this one Property Setter fixes both at once.
+        "set_as_default": True,
+    },
+    # Step 4 of the finance workflow. Carries the three totals the paper form exists for --
+    # total spent, float given, balance -- and enough rows that the margins are worth the
+    # same tightening as the payslip.
+    "FoLT Float Expense Report": {
+        "doc_type": "Expense Claim",
+        "template": "folt_float_expense_report",
+        "stylesheet": "folt_form",
+        "margins": 12.0,
+        "set_as_default": True,
+    },
+    # Page one of every accountability pack: the authority to release the money. Made the
+    # default for Payment Entry because at FoLT every payment is printed as a voucher and
+    # signed -- pick another format from the print dropdown if a payment needs one.
+    "FoLT Expense Voucher": {
+        "doc_type": "Payment Entry",
+        "template": "folt_expense_voucher",
+        "stylesheet": "folt_form",
+        "set_as_default": True,
+    },
+    "FoLT Intent to Award": {
+        "doc_type": "Procurement Committee Evaluation",
+        "template": "folt_intent_to_award",
+        "stylesheet": "folt_form",
+        "set_as_default": True,
+    },
+    "FoLT Derogation Waiver Request": {
+        "doc_type": "Derogation Waiver Request",
+        "template": "folt_derogation_waiver_request",
+        "stylesheet": "folt_form",
         "set_as_default": True,
     },
 }
@@ -62,7 +100,7 @@ def _apply(name, spec):
         "pdf_generator": "wkhtmltopdf",
         "page_number": "Hide",
         "html": _read(spec["template"] + ".html"),
-        "css": _read(spec["template"] + ".css"),
+        "css": _read(spec.get("stylesheet", spec["template"]) + ".css"),
     }
     for side in ("top", "bottom", "left", "right"):
         values["margin_" + side] = spec.get("margins", 15.0)

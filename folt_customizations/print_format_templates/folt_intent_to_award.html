@@ -1,0 +1,112 @@
+{#-
+  FoLT Intent to Award -- the procurement decision, printed from the committee's evaluation.
+
+  It has to stand on its own as the record of a competitive process: who sat on the committee,
+  who was excluded and why, what each bid was scored, and which supplier the committee
+  recommended. The quotation scores are printed per supplier with each member's mark, because
+  "the committee scored it 7" is not an audit trail and "four members scored it" is.
+-#}
+{%- macro money(v, currency) -%}{{ frappe.utils.fmt_money(v or 0, currency=currency) }}{%- endmacro -%}
+
+{%- set reviewed = doc.members | selectattr("reviewed") | list -%}
+{%- set required = doc.quorum if doc.quorum else (doc.members | length) -%}
+{#- Scores arrive as one row per member per quotation; the form reads by supplier, so they are
+    regrouped here rather than printed in entry order. -#}
+{%- set suppliers = doc.quotation_scores | map(attribute="supplier_quotation") | select | unique | list -%}
+
+{% include "folt_customizations/print_format_templates/_page_frame.html" %}
+
+<div class="folt-form">
+
+  <div class="folt-title">{{ _("Procurement Decision / Intent to Award") }}</div>
+  <div class="folt-subtitle">{{ doc.name }}</div>
+  <hr class="folt-rule">
+
+  <table class="folt-meta">
+    <tr>
+      <td class="label">{{ _("Request for Quotation") }}</td>
+      <td class="value">{{ doc.request_for_quotation or "&mdash;" }}</td>
+      <td class="label">{{ _("Date") }}</td>
+      <td class="value">{{ frappe.utils.formatdate(doc.modified) }}</td>
+    </tr>
+    <tr>
+      <td class="label">{{ _("Requisition") }}</td>
+      <td class="value">{{ doc.activity_requisition or "&mdash;" }}</td>
+      <td class="label">{{ _("Requested By") }}</td>
+      <td class="value">{{ doc.requested_by or "&mdash;" }}</td>
+    </tr>
+    <tr>
+      <td class="label">{{ _("Recommended Supplier") }}</td>
+      <td class="value">{{ doc.recommended_supplier or "&mdash;" }}</td>
+      <td class="label">{{ _("Winning Quotation") }}</td>
+      <td class="value">{{ doc.recommended_supplier_quotation or "&mdash;" }}</td>
+    </tr>
+  </table>
+
+  <table class="folt-lines">
+    <tr>
+      <th style="width:52%">{{ _("Committee Member") }}</th>
+      <th class="mid" style="width:20%">{{ _("Reviewed") }}</th>
+      <th class="num" style="width:12%">{{ _("Score") }}</th>
+      <th style="width:16%">{{ _("Comments") }}</th>
+    </tr>
+    {%- for row in doc.members %}
+    <tr>
+      <td>{{ frappe.db.get_value("User", row.member, "full_name") or row.member }}</td>
+      <td class="mid">{{ _("Yes") if row.reviewed else _("No") }}</td>
+      <td class="num">{{ row.score if row.score else "&mdash;" }}</td>
+      <td>{{ row.comments or "" }}</td>
+    </tr>
+    {%- endfor %}
+    <tr class="total">
+      <td class="num">{{ _("Quorum") }}</td>
+      <td class="mid">{{ reviewed | length }} {{ _("of") }} {{ required }}</td>
+      <td colspan="2">{{ _("Met") if (reviewed | length) >= required else _("Not met") }}</td>
+    </tr>
+  </table>
+
+  {%- if suppliers %}
+  <table class="folt-lines">
+    <tr>
+      <th style="width:26%">{{ _("Supplier") }}</th>
+      <th style="width:20%">{{ _("Quotation") }}</th>
+      <th class="num" style="width:18%">{{ _("Quoted") }}</th>
+      <th class="mid" style="width:14%">{{ _("Valid Till") }}</th>
+      <th style="width:22%">{{ _("Scores") }}</th>
+    </tr>
+    {%- for quotation in suppliers %}
+    {%- set rows = doc.quotation_scores | selectattr("supplier_quotation", "equalto", quotation) | list -%}
+    {%- set first = rows[0] -%}
+    <tr>
+      <td>{{ first.supplier }}</td>
+      <td>{{ quotation }}</td>
+      <td class="num">{{ money(first.quotation_amount, first.currency) }}</td>
+      <td class="mid">{{ frappe.utils.formatdate(first.valid_till) if first.valid_till else "&mdash;" }}</td>
+      <td>
+        {%- for row in rows %}
+        {{ frappe.db.get_value("User", row.member, "full_name") or row.member }}: {{ row.score if row.score else "&ndash;" }}{% if not loop.last %}<br>{% endif %}
+        {%- endfor %}
+      </td>
+    </tr>
+    {%- endfor %}
+  </table>
+  {%- endif %}
+
+  <div class="folt-block">
+    <div class="heading">{{ _("Recommendation Notes") }}</div>
+    <div class="body">{{ doc.recommendation_notes or "" }}</div>
+  </div>
+
+  <div class="folt-state">
+    {{ _("Status") }}: <span class="pill">{{ _(doc.workflow_state) }}</span>
+  </div>
+
+  <table class="folt-signoff">
+    <tr>
+      <td><div class="line"></div><div class="role">{{ _("Committee Chair") }}</div><div class="who">{{ _("Procurement Committee") }}</div></td>
+      <td><div class="line"></div><div class="role">{{ _("Award Approval") }}</div><div class="who">{{ _("Head of Finance") }}</div></td>
+      <td></td>
+    </tr>
+  </table>
+
+</div>

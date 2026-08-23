@@ -218,15 +218,12 @@ FOLT_SALARY_STRUCTURES = ["FoLT Kenya Payroll"]
 # FoLT Supplier Groups acting as the pre-qualified supplier register (Section 4.1).
 FOLT_SUPPLIER_GROUPS = ["Catering", "Car Hire", "Travel & Accommodation", "ICT"]
 
-# Custom print formats matched to FoLT's existing paper forms. "FoLT Salary Slip" is
-# deliberately absent: its template is a file applied by the after_migrate hook above, and
-# listing it here would have `bench export-fixtures` write a second copy of that template
-# into print_format.json for the two to drift apart.
-FOLT_PRINT_FORMATS = [
-    "FoLT Intent to Award",
-    "FoLT Derogation Waiver Request",
-    "FoLT Float Expense Report",
-]
+# There is deliberately no Print Format fixture. Every FoLT print format is now file-backed --
+# template and stylesheet under print_format_templates/, upserted by the apply_print_formats
+# hook above -- so that the template has exactly one source of truth. Shipping them as fixtures
+# instead stored each template as a single JSON string, which no diff could review, and it hid
+# the bug that mattered: all three carried custom_format = 0 and were quietly printing frappe's
+# auto layout rather than their own markup. See print_formats.py.
 
 # Order matters: masters and Custom Fields (e.g. the Employee Advance `workflow_state` field)
 # must import before the Workflows that reference them, so a fresh `bench migrate` on an empty
@@ -242,5 +239,4 @@ fixtures = [
     {"doctype": "Workflow Action Master", "filters": [["name", "in", FOLT_WORKFLOW_ACTIONS]]},
     {"doctype": "Salary Structure", "filters": [["name", "in", FOLT_SALARY_STRUCTURES]]},
     {"doctype": "Workflow", "filters": [["name", "in", FOLT_WORKFLOWS]]},
-    {"doctype": "Print Format", "filters": [["name", "in", FOLT_PRINT_FORMATS]]},
 ]

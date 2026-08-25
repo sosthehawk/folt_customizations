@@ -4,6 +4,9 @@ from frappe.desk.doctype.notification_log.notification_log import enqueue_create
 from frappe.utils import get_url_to_form
 from frappe.utils.user import get_users_with_role
 
+# The call to action belongs to the same lockup as the FoLT logo in the masthead above it,
+# so the accent is the shared one -- see branding.EMAIL_ACCENT.
+from folt_customizations.branding import EMAIL_ACCENT
 from folt_customizations.procurement import COMMITTEE_REVIEW_STATE, EVALUATION_DOCTYPE
 
 # FoLT runs nine approval workflows, and until now nobody was told when a document landed in
@@ -166,11 +169,6 @@ def notify_committee_members(doc):
         doc.log_error(_("Could not email the procurement committee"))
 
 
-# The logo's own blue, so the call to action belongs to the same lockup as the masthead above
-# it (#001a33 is the wordmark navy and reads as near-black on a button).
-BUTTON_COLOR = "#3c6a91"
-
-
 def _committee_email_body(doc, link, quotations):
     """The committee email as HTML, styled for a mail client rather than for the Desk.
 
@@ -203,10 +201,10 @@ def _committee_email_body(doc, link, quotations):
 <table role="presentation" cellpadding="0" cellspacing="0" border="0"
        style="margin:20px 0;font-size:14px">{detail}</table>
 <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:24px 0">
-    <tr><td align="center" bgcolor="{BUTTON_COLOR}" style="border-radius:6px">
+    <tr><td align="center" bgcolor="{EMAIL_ACCENT}" style="border-radius:6px">
         <a href="{link}" class="btn btn-primary"
-           style="display:inline-block;padding:11px 22px;background-color:{BUTTON_COLOR};
-                  border:1px solid {BUTTON_COLOR};border-radius:6px;color:#ffffff;
+           style="display:inline-block;padding:11px 22px;background-color:{EMAIL_ACCENT};
+                  border:1px solid {EMAIL_ACCENT};border-radius:6px;color:#ffffff;
                   font-size:14px;font-weight:600;text-decoration:none">{_("Score the quotations")}</a>
     </td></tr>
 </table>

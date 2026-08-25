@@ -151,6 +151,15 @@ scheduler_events = {
     ],
 }
 
+# ERPNext mails a Request for Quotation to its suppliers as the bare `Message for Supplier`
+# field: no FoLT mark, no statement of what is being asked for, and no link to the portal where
+# the quotation is actually entered. The subclass wraps that message in a branded frame carrying
+# the portal button and, for a supplier with no login yet, a set-password link. Nothing else on
+# the doctype is touched -- see rfq_email.py for why this is an override rather than a template.
+override_doctype_class = {
+    "Request for Quotation": "folt_customizations.rfq_email.FoLTRequestForQuotation",
+}
+
 # Client-side half of the same rule: leads the form with the category and restricts the
 # Supplier dropdown to that category's pre-qualified register.
 doctype_js = {"Purchase Order": "public/js/purchase_order.js"}

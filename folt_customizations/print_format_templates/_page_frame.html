@@ -1,0 +1,22 @@
+{#-
+  The page frame every FoLT print format needs and none of them get for free.
+
+  A `custom_format` template renders on its own: frappe's standard.html wrapper is bypassed,
+  so the letterhead, the DRAFT / CANCELLED stamp and the repeating PDF header all have to be
+  reproduced here. The id="header-html" div is what frappe.utils.pdf lifts out and hands to
+  wkhtmltopdf as --header-html, which is what repeats the letterhead on a form running to more
+  than one page. Kept in one file, included by each format, so the FoLT forms cannot drift
+  apart -- frappe's Jinja loader resolves an app-prefixed path against the app package dir
+  (frappe/utils/jinja.py: PrefixLoader over PackageLoader(app, ".")).
+-#}
+<div {% if print_settings.repeat_header_footer %}id="header-html" class="hidden-pdf"{% endif %}>
+  {%- if letter_head and not no_letterhead %}
+  <div class="letter-head">{{ letter_head }}</div>
+  {%- endif %}
+  {%- if doc.docstatus == 0 %}
+  <div class="text-center" document-status="draft"><h4 style="margin: 0px;">{{ _("DRAFT") }}</h4></div>
+  {%- endif %}
+  {%- if doc.docstatus == 2 %}
+  <div class="text-center" document-status="cancelled"><h4 style="margin: 0px;">{{ _("CANCELLED") }}</h4></div>
+  {%- endif %}
+</div>

@@ -12,6 +12,13 @@ from folt_customizations.participants import (
 )
 
 ACKNOWLEDGED = ("Signature", "Thumbprint")
+UNRESOLVED = (None, "", "Pending")
+
+# The state the list reaches once the payout is complete. Step 3 of the finance workflow --
+# collect the participants' acknowledgement, then pay -- is enforced by what has to be true to
+# get here, not by a state of its own: an approved list goes back to the programme officer, and
+# the evidence they bring back is what lets the Finance Assistant close it off.
+PAID = "Paid"
 
 
 class ParticipantReimbursementList(Document):
@@ -33,15 +40,53 @@ class ParticipantReimbursementList(Document):
 		self.validate_against_advance()
 
 	def before_update_after_submit(self):
-		"""Payouts are recorded against a verified list, so the paid roll-up and the
+		"""Payouts are recorded against an approved list, so the paid roll-up and the
 		acknowledgement rule have to hold here too — validate() does not run after submit.
 		"""
 		self.normalise_rows()
 		self.set_totals()
+		self.validate_payout_evidence()
+
+	def validate_payout_evidence(self):
+		"""A list is only fully paid once every payee has been accounted for, one way or another.
+
+		The paper process closed this gap with judgement: some participants signed, some gave a
+		thumbprint, a few cells were left blank, and the list was filed anyway. Marking the list
+		Paid is the assertion that the money reached the people on it, so it needs each row
+		resolved — paid and acknowledged, or explicitly not paid — and the acknowledged sheet
+		itself on the document, since that sheet is what an auditor asks for.
+		"""
+		if self.workflow_state != PAID:
+			return
+
+		unresolved = [row for row in self.participants or [] if row.payment_status in UNRESOLVED]
+		if unresolved:
+			frappe.throw(
+				_(
+					"{0} of {1} payees are still pending: {2}. Record what happened to each one "
+					"— paid, failed, or not paid — before marking the list paid."
+				).format(
+					len(unresolved),
+					len(self.participants),
+					", ".join(frappe.bold(row.participant_name) for row in unresolved[:5])
+					+ (_(" and others") if len(unresolved) > 5 else ""),
+				),
+				title=_("Payees still pending"),
+			)
+
+		if not self.signed_list:
+			frappe.throw(
+				_(
+					"Attach the signed reimbursement list before marking it paid. It is the "
+					"participants' own acknowledgement of receipt, and the retirement of the "
+					"float rests on it."
+				),
+				title=_("Signed list required"),
+			)
 
 	def before_submit(self):
 		if not self.participants:
-			frappe.throw(_("A reimbursement list cannot be verified with no participants."))
+			frappe.throw(_("A reimbursement list cannot be approved with no participants."))
 
 		if not self.attendance_reference and not all(row.off_register for row in self.participants):
 			frappe.throw(

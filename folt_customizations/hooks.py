@@ -115,16 +115,59 @@ doc_events = {
     },
     # Notify the role that can make the next move whenever a document enters a state that
     # waits on somebody. Frappe writes one Workflow Action per transition, so hooking its
-    # insert covers all eight FoLT workflows at once -- see notifications.py for why the
+    # insert covers every FoLT workflow at once -- see notifications.py for why the
     # Desk bell is used rather than relying on the workflows' own email alert.
     "Workflow Action": {
         "after_insert": "folt_customizations.notifications.notify_pending_approvers",
     },
+    # Steps 3 and 4 of FoLT's finance workflow -- disbursement, then accountability -- happen
+    # on documents *other* than the float: a Payment Entry funds it, an Expense Claim retires
+    # it. ERPNext already recomputes Employee Advance.status from those vouchers, so the float's
+    # workflow state is derived from them rather than clicked a second time. See
+    # float_lifecycle.py for why the sync is deferred to after the commit.
+    "Employee Advance": {
+        "validate": "folt_customizations.float_lifecycle.set_retirement_deadline",
+    },
+    "Payment Entry": {
+        "on_submit": "folt_customizations.float_lifecycle.sync_from_voucher",
+        "on_cancel": "folt_customizations.float_lifecycle.sync_from_voucher",
+    },
+    "Journal Entry": {
+        "on_submit": "folt_customizations.float_lifecycle.sync_from_voucher",
+        "on_cancel": "folt_customizations.float_lifecycle.sync_from_voucher",
+    },
+    "Expense Claim": {
+        "on_submit": "folt_customizations.float_lifecycle.sync_from_claim",
+        "on_cancel": "folt_customizations.float_lifecycle.sync_from_claim",
+    },
+}
+
+# The other half of the Float Request Form's own undertaking: a float unaccounted for more than
+# three days after the activity stops looking current. The sweep flags; recovery from salary
+# stays a human decision -- see float_lifecycle.flag_overdue_floats.
+scheduler_events = {
+    "daily": [
+        "folt_customizations.float_lifecycle.flag_overdue_floats",
+    ],
+}
+
+# ERPNext mails a Request for Quotation to its suppliers as the bare `Message for Supplier`
+# field: no FoLT mark, no statement of what is being asked for, and no link to the portal where
+# the quotation is actually entered. The subclass wraps that message in a branded frame carrying
+# the portal button and, for a supplier with no login yet, a set-password link. Nothing else on
+# the doctype is touched -- see rfq_email.py for why this is an override rather than a template.
+override_doctype_class = {
+    "Request for Quotation": "folt_customizations.rfq_email.FoLTRequestForQuotation",
 }
 
 # Client-side half of the same rule: leads the form with the category and restricts the
 # Supplier dropdown to that category's pre-qualified register.
 doctype_js = {"Purchase Order": "public/js/purchase_order.js"}
+
+# Called from frappe's `get_print` just before the PDF is built, and only on the PDF path.
+# `host_name` is the base of every link the site emails to a person, so it has to be the
+# browser's address; wkhtmltopdf needs one the container can reach. See print_formats.py.
+on_print_pdf = "folt_customizations.print_formats.use_internal_host_for_pdf"
 
 # Fixtures shipped with this app. `bench migrate` re-syncs these from disk into the
 # database on every run -- so this file on disk is the source of truth. If you edit a
@@ -152,6 +195,7 @@ FOLT_WORKFLOWS = [
     "FoLT Payroll Approval",
     "Activity Participant List Verification",
     "Participant Reimbursement List Verification",
+    "FoLT Float Retirement Approval",
 ]
 
 # Workflow State / Action masters referenced by the workflows above. ERPNext 16 validates
@@ -164,6 +208,9 @@ FOLT_WORKFLOW_STATES = [
     "Requested", "Checked", "Approved", "Rejected", "Pending Approval",
     "Pending Payroll Approval",
     "Pending Verification", "Verified", "Paid", "Partly Paid", "Disputed",
+    # The float's life after the approval decision (float_lifecycle.py), and the retirement
+    # claim's own settlement state.
+    "Disbursed", "Overdue", "Accounted", "Closed", "Settled",
 ]
 FOLT_WORKFLOW_ACTIONS = [
     "Submit for Review", "Approve", "Reject", "Send to Committee",
@@ -172,6 +219,7 @@ FOLT_WORKFLOW_ACTIONS = [
     "Submit for approval", "Submit Payroll for Approval",
     "Submit for Verification", "Verify", "Return for Correction",
     "Mark Paid", "Mark Partly Paid", "Raise Dispute", "Resolve Dispute",
+    "Record Disbursement", "Mark Accounted", "Flag Overdue", "Close Float", "Mark Settled",
 ]
 
 # Kenyan statutory payroll salary components (NSSF, SHIF, Housing Levy, PAYE + helpers).
@@ -184,15 +232,12 @@ FOLT_SALARY_STRUCTURES = ["FoLT Kenya Payroll"]
 # FoLT Supplier Groups acting as the pre-qualified supplier register (Section 4.1).
 FOLT_SUPPLIER_GROUPS = ["Catering", "Car Hire", "Travel & Accommodation", "ICT"]
 
-# Custom print formats matched to FoLT's existing paper forms. "FoLT Salary Slip" is
-# deliberately absent: its template is a file applied by the after_migrate hook above, and
-# listing it here would have `bench export-fixtures` write a second copy of that template
-# into print_format.json for the two to drift apart.
-FOLT_PRINT_FORMATS = [
-    "FoLT Intent to Award",
-    "FoLT Derogation Waiver Request",
-    "FoLT Float Expense Report",
-]
+# There is deliberately no Print Format fixture. Every FoLT print format is now file-backed --
+# template and stylesheet under print_format_templates/, upserted by the apply_print_formats
+# hook above -- so that the template has exactly one source of truth. Shipping them as fixtures
+# instead stored each template as a single JSON string, which no diff could review, and it hid
+# the bug that mattered: all three carried custom_format = 0 and were quietly printing frappe's
+# auto layout rather than their own markup. See print_formats.py.
 
 # Order matters: masters and Custom Fields (e.g. the Employee Advance `workflow_state` field)
 # must import before the Workflows that reference them, so a fresh `bench migrate` on an empty
@@ -208,5 +253,4 @@ fixtures = [
     {"doctype": "Workflow Action Master", "filters": [["name", "in", FOLT_WORKFLOW_ACTIONS]]},
     {"doctype": "Salary Structure", "filters": [["name", "in", FOLT_SALARY_STRUCTURES]]},
     {"doctype": "Workflow", "filters": [["name", "in", FOLT_WORKFLOWS]]},
-    {"doctype": "Print Format", "filters": [["name", "in", FOLT_PRINT_FORMATS]]},
 ]

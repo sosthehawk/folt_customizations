@@ -13,6 +13,11 @@ from frappe.permissions import add_permission, update_permission_property
 #                                     party details on every save, so submit alone is unusable.
 #   Employee Advance Float Approval   Finance Officer checks (draft), Executive Director approves (submit)
 #   FoLT Payroll Approval             Finance Assistant drafts, Finance Officer rejects, ED approves (submit)
+#   FoLT Float Retirement Approval    Finance Officer reviews (draft), ED approves (submit),
+#                                     Finance Assistant settles (after submit) -- plus permlevel 1
+#                                     on approval_status, see PERMLEVEL_1_PERMISSIONS below.
+#   Employee Advance Float Approval   ...and after approval: Finance Assistant records the
+#                                     disbursement, Head of Finance flags overdue and closes
 #
 # Permissions for FoLT's OWN doctypes are NOT here -- they live in each doctype's .json, which
 # `bench migrate` re-imports, so they stay standard DocPerms.
@@ -60,14 +65,49 @@ WORKFLOW_PERMISSIONS = {
 	"Account": {
 		"Finance Manager": ("select",),
 	},
+	# The float's life after approval is now tracked on the advance itself -- Disbursed,
+	# Overdue, Accounted, Closed -- and every one of those is a transition on an already
+	# submitted document. Frappe has no permission of its own for that: `check_if_latest` maps
+	# an update-after-submit to the `submit` ptype (document.py:check_docstatus_transition), so
+	# a role that only has `write` gets a bare PermissionError the moment it tries to move the
+	# state. Hence `submit` on roles that never approve a float: the doctype permission decides
+	# whether they may write to a submitted document at all, and the workflow decides which
+	# transition each of them may actually make. Frappe also hides the standard Submit button
+	# outright while a workflow is active, so this does not hand anybody an approval route
+	# around the chain.
 	"Employee Advance": {
+		"Finance Officer": ("read", "write", "submit"),
+		"Executive Director": ("read", "write", "submit"),
+		"Finance Assistant": ("read", "write", "submit"),
+		"Head of Finance": ("read", "write", "submit"),
+	},
+	# Step 4 of the finance workflow -- float accountability -- runs on the Expense Claim.
+	# hrms ships it with permissions for HR roles and Expense Approver, none of which FoLT
+	# uses; the retirement chain is Finance Officer -> Executive Director, then the Finance
+	# Assistant settles the balance after submission (hence `submit` there too, per above).
+	"Expense Claim": {
 		"Finance Officer": ("read", "write"),
 		"Executive Director": ("read", "write", "submit"),
+		"Finance Assistant": ("read", "write", "submit"),
 	},
 	"Salary Slip": {
 		"Finance Assistant": ("read", "write", "create"),
 		"Finance Officer": ("read", "write"),
 		"Executive Director": ("read", "write", "submit"),
+	},
+}
+
+# Expense Claim.approval_status sits at permlevel 1, and the retirement workflow writes it
+# (the Approved and Rejected states carry update_field). Frappe silently reverts a permlevel
+# field the acting user cannot write -- `Document.validate_higher_perm_levels` resets it to the
+# stored value -- so without these grants the Executive Director's Approve would save, the
+# field would snap back to Draft, and the submit would then fail with hrms's own
+# "Approval Status must be 'Approved' or 'Rejected'". Read comes with it so the field is
+# visible to the person being asked to act on it.
+PERMLEVEL_1_PERMISSIONS = {
+	"Expense Claim": {
+		"Finance Officer": ("read", "write"),
+		"Executive Director": ("read", "write"),
 	},
 }
 
@@ -117,58 +157,62 @@ def apply_role_permissions():
 	left alone, so this is a no-op once applied.
 	"""
 	changed = False
-	for perm_map in (WORKFLOW_PERMISSIONS, LINK_FIELD_PERMISSIONS):
+	for perm_map, permlevel in (
+		(WORKFLOW_PERMISSIONS, 0),
+		(LINK_FIELD_PERMISSIONS, 0),
+		(PERMLEVEL_1_PERMISSIONS, 1),
+	):
 		for doctype, roles in perm_map.items():
 			if not frappe.db.exists("DocType", doctype):
 				continue
 			for role, ptypes in roles.items():
 				if not frappe.db.exists("Role", role):
 					continue
-				if _grant(doctype, role, ptypes):
+				if _grant(doctype, role, ptypes, permlevel):
 					changed = True
 	if changed:
 		frappe.clear_cache()
 
 
-def _grant(doctype, role, ptypes):
+def _grant(doctype, role, ptypes, permlevel=0):
 	"""Ensure `role` has `ptypes` on `doctype`. Return True if anything was written."""
-	missing = [ptype for ptype in ptypes if not _has_perm(doctype, role, ptype)]
+	missing = [ptype for ptype in ptypes if not _has_perm(doctype, role, ptype, permlevel)]
 	if not missing:
 		return False
 
-	new_row = not _perm_row(doctype, role)
+	new_row = not _perm_row(doctype, role, permlevel)
 	if new_row:
 		# Creates the Custom DocPerm row (after copying the standard perms across) with the
 		# first missing permission already set.
-		add_permission(doctype, role, 0, ptype=missing.pop(0))
+		add_permission(doctype, role, permlevel, ptype=missing.pop(0))
 
 	for ptype in missing:
-		update_permission_property(doctype, role, 0, ptype, 1)
+		update_permission_property(doctype, role, permlevel, ptype, 1)
 
 	if new_row:
 		# Custom DocPerm ticks `read` and `export` by default, which would quietly turn a
 		# select-only grant into list access. Only rows this function just created are
 		# trimmed -- a permission that was already there, standard or not, is left alone.
 		for ptype in DEFAULT_ON_PTYPES:
-			if ptype not in ptypes and _has_perm(doctype, role, ptype):
-				update_permission_property(doctype, role, 0, ptype, 0)
+			if ptype not in ptypes and _has_perm(doctype, role, ptype, permlevel):
+				update_permission_property(doctype, role, permlevel, ptype, 0)
 
 	# get_meta caches per doctype; drop it so a later role in the same run sees the new rows.
 	frappe.clear_cache(doctype=doctype)
 	return True
 
 
-def _perm_row(doctype, role):
-	"""Return the resolved permlevel-0 rule for `role`, or None.
+def _perm_row(doctype, role, permlevel=0):
+	"""Return the resolved rule for `role` at `permlevel`, or None.
 
 	Reads through Meta so it sees whichever set is actually in force -- Custom DocPerm when the
 	doctype has any, the doctype's own DocPerms otherwise.
 	"""
 	for perm in frappe.get_meta(doctype).permissions:
-		if perm.role == role and perm.permlevel == 0 and not perm.if_owner:
+		if perm.role == role and perm.permlevel == permlevel and not perm.if_owner:
 			return perm
 
 
-def _has_perm(doctype, role, ptype):
-	perm = _perm_row(doctype, role)
+def _has_perm(doctype, role, ptype, permlevel=0):
+	perm = _perm_row(doctype, role, permlevel)
 	return bool(perm and perm.get(ptype))

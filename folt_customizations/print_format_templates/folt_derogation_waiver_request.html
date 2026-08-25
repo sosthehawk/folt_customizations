@@ -1,0 +1,83 @@
+{#-
+  FoLT Derogation / Waiver Request -- the single-sourcing form.
+
+  A waiver is a decision to step outside competitive procurement, so the form is mostly
+  justification: the procedure that should have been followed, the one being asked for, the
+  reasons, the risks that creates and what will be done about them. Those blocks print in full
+  and unwrapped -- an abridged justification is not one -- which is why they carry ruled boxes
+  rather than being squeezed into a table.
+-#}
+{% include "folt_customizations/print_format_templates/_page_frame.html" %}
+
+<div class="folt-form">
+
+  <div class="folt-title">{{ _("Derogation / Waiver Request") }}</div>
+  <div class="folt-subtitle">{{ _("Single sourcing") }} &middot; {{ doc.name }}</div>
+  <hr class="folt-rule">
+
+  <table class="folt-meta">
+    <tr>
+      <td class="label">{{ _("Organisation & Project") }}</td>
+      <td class="value">{{ doc.organisation_project_name or "&mdash;" }}</td>
+      <td class="label">{{ _("Estimated Value") }}</td>
+      <td class="value">{{ frappe.utils.fmt_money(doc.estimated_value or 0) }}</td>
+    </tr>
+    <tr>
+      <td class="label">{{ _("Proposed Supplier") }}</td>
+      <td class="value">{{ doc.supplier or "&mdash;" }}</td>
+      <td class="label">{{ _("Period of Derogation") }}</td>
+      <td class="value">{{ doc.period_of_derogation or "&mdash;" }}</td>
+    </tr>
+    <tr>
+      <td class="label">{{ _("Project") }}</td>
+      <td class="value">{{ doc.project or "&mdash;" }}</td>
+      <td class="label">{{ _("Cost Center") }}</td>
+      <td class="value">{{ doc.cost_center or "&mdash;" }}</td>
+    </tr>
+    <tr>
+      <td class="label">{{ _("Raised") }}</td>
+      <td class="value">{{ frappe.utils.formatdate(doc.creation) }}</td>
+      <td class="label">{{ _("Status") }}</td>
+      <td class="value">{{ _(doc.workflow_state) }}</td>
+    </tr>
+  </table>
+
+  <div class="folt-block">
+    <div class="heading">{{ _("Items / Service to be Purchased") }}</div>
+    <div class="body">{{ doc.items_service or "" }}</div>
+  </div>
+
+  <div class="folt-block">
+    <div class="heading">{{ _("Procedure That Should Have Been Followed") }}</div>
+    <div class="body">{{ doc.procedure_should_have or "" }}</div>
+  </div>
+
+  <div class="folt-block">
+    <div class="heading">{{ _("Requested Procedure") }}</div>
+    <div class="body">{{ doc.requested_procedure or "" }}</div>
+  </div>
+
+  <div class="folt-block">
+    <div class="heading">{{ _("Reasons for the Waiver") }}</div>
+    <div class="body">{{ doc.reasons or "" }}</div>
+  </div>
+
+  <div class="folt-block">
+    <div class="heading">{{ _("Risks Created") }}</div>
+    <div class="body">{{ doc.risks_created or "" }}</div>
+  </div>
+
+  <div class="folt-block">
+    <div class="heading">{{ _("Mitigating Actions") }}</div>
+    <div class="body">{{ doc.mitigating_actions or "" }}</div>
+  </div>
+
+  <table class="folt-signoff">
+    <tr>
+      <td><div class="line"></div><div class="role">{{ _("Prepared By") }}</div><div class="who">{{ _("Operations Support Officer") }}</div></td>
+      <td><div class="line"></div><div class="role">{{ _("Reviewed By") }}</div><div class="who">{{ _("Finance Officer") }}</div></td>
+      <td><div class="line"></div><div class="role">{{ _("Authorised By") }}</div><div class="who">{{ _("Executive Director") }}</div></td>
+    </tr>
+  </table>
+
+</div>

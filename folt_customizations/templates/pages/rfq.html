@@ -1,0 +1,132 @@
+{% extends "templates/web.html" %}
+{% from "templates/includes/rfq/rfq_macros.html" import item_name_and_description %}
+
+{% block header %}
+<h1 style="margin-top: 10px;">{{ doc.name }}</h1>
+{% endblock %}
+
+{% block script %}
+<script>{% include "templates/includes/folt_rfq.js" %}</script>
+{% endblock %}
+
+{% block breadcrumbs %}
+	{% include "templates/includes/breadcrumbs.html" %}
+{% endblock %}
+
+{% block header_actions %}
+{% if doc.items and editable %}
+<button class="btn btn-primary btn-sm folt-save-quotation" type="button">
+	{{ _("Update Quotation") if quotation else _("Submit Quotation") }}</button>
+{% endif %}
+{% endblock %}
+
+{% block page_content %}
+<div class="row">
+	<div class="col-6">
+		<div class="rfq-supplier">{{ doc.supplier }}</div>
+	</div>
+	<div class="col-6 text-muted text-right h6">
+		{{ doc.get_formatted("transaction_date") }}
+	</div>
+</div>
+
+{# What the supplier is looking at, in one line, because the same page is now three things:
+   a blank bid, a draft they can still change, and a submitted bid they cannot. #}
+<div class="folt-rfq-status text-muted small" style="margin-top:10px">
+	{% if quotation %}
+		{{ _("Your quotation {0} is saved as a draft. Change any price below and press Update Quotation -- FoLT sees the latest version.").format(quotation) }}
+	{% elif submitted %}
+		{{ _("Your quotation has been submitted and can no longer be changed here. Contact the buyer named in the request if it needs to be corrected.") }}
+	{% elif doc.docstatus != 1 %}
+		{{ _("This request is not open for quotation.") }}
+	{% else %}
+		{{ _("Enter your price for each line and press Submit Quotation. You can reopen this page and change it until FoLT closes the request.") }}
+	{% endif %}
+	{% if doc.schedule_date %}
+		{{ _("Required by {0}.").format(doc.get_formatted("schedule_date")) }}
+	{% endif %}
+</div>
+
+<div class="rfq-content" style="margin-top:15px">
+	<div id="order-container">
+		<div id="rfq-items">
+			<div class="row cart-item-header">
+				<div class="col-sm-5 col-12">{{ _("Items") }}</div>
+				<div class="col-sm-2 col-4 text-right">{{ _("Qty") }}</div>
+				<div class="col-sm-2 col-4 text-right">{{ _("Rate") }}</div>
+				<div class="col-sm-3 col-4 text-right">{{ _("Amount") }}</div>
+			</div>
+			<hr>
+			{% if doc.items %}
+			<div class="rfq-items">
+				{% for d in doc.items %}
+				<div class="rfq-item">
+					<div class="row">
+						<div class="col-sm-5 col-12" style="margin-bottom: 10px;margin-top: 5px;">
+							{{ item_name_and_description(d, doc) }}
+						</div>
+						<div class="col-sm-2 col-4 text-right">
+							<input type="text" class="form-control text-right rfq-qty"
+								style="margin-top: 5px;display: inline-block"
+								value="{{ '%.2f'|format(d.folt_qty) }}"
+								data-idx="{{ d.idx }}" {{ "readonly" if not editable }}>
+							<p class="text-muted small" style="margin-top: 10px;">
+								{{ _("UOM") + ": " + d.uom }}
+							</p>
+						</div>
+						<div class="col-sm-2 col-4 text-right">
+							<input type="text" class="form-control text-right rfq-rate"
+								style="margin-top: 5px;display: inline-block"
+								value="{{ '%.2f'|format(d.folt_rate) }}"
+								data-idx="{{ d.idx }}" {{ "readonly" if not editable }}>
+						</div>
+						<div class="col-sm-3 col-4 text-right" style="padding-top: 9px;">
+							{{ doc.currency_symbol }} <span class="rfq-amount" data-idx="{{ d.idx }}">0.00</span>
+						</div>
+					</div>
+				</div>
+				{% endfor %}
+			</div>
+			{% endif %}
+		</div>
+
+		{% if doc.items %}
+		<div class="row grand-total-row">
+			<div class="col-9 text-right">{{ _("Grand Total") }}</div>
+			<div class="col-3 text-right">
+				{{ doc.currency_symbol }} <span class="tax-grand-total">0.00</span>
+			</div>
+		</div>
+		{% endif %}
+
+		<div class="row terms">
+			<div class="col-6">
+				<br><br>
+				<p class="text-muted small">{{ _("Notes: ") }}</p>
+				<textarea class="form-control terms-feedback" style="height: 100px;"
+					{{ "readonly" if not editable }}>{{ folt_terms or "" }}</textarea>
+			</div>
+		</div>
+
+		{% if doc.rfq_links %}
+		<div class="row mt-5">
+			<div class="col-12">
+				<p class="text-muted small">{{ _("Quotations: ") }}</p>
+				<div class="result">
+					{% for d in doc.rfq_links %}
+					<a class="web-list-item transaction-list-item" style="display:block"
+						href="/supplier-quotations/{{ d.name | urlencode }}">
+						<div class="row">
+							<div class="col-sm-6"><span class="indicator gray">{{ d.name }}</span></div>
+							<div class="col-sm-3"><span class="small gray">{{ _(d.status) }}</span></div>
+							<div class="col-sm-3"><span class="small gray">{{ d.transaction_date }}</span></div>
+						</div>
+					</a>
+					{% endfor %}
+				</div>
+			</div>
+		</div>
+		{% endif %}
+	</div>
+</div>
+{% endblock %}

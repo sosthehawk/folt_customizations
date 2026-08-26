@@ -29,14 +29,26 @@ email_css = ["/assets/folt_customizations/css/folt_email.css"]
 # a string -- it only survives because JS coerces a one-element array to its element.
 # Declaring the app properly also gives FoLT a correct tile on the /apps screen. The logo
 # is the square desktop-icon tile, not the wordmark: the Desk renders these in a 32x32 box.
+#
+# `has_permission` is not decoration: frappe answers "where do I send this user after login"
+# with the route of the only app on their apps screen (frappe/apps.py:get_default_path), and
+# with FoLT as the only entry that was sending *suppliers* into a Desk workspace they cannot
+# open. Hiding the tile from portal users is what lets the login reach get_home_page() and the
+# supplier portal -- see supplier_portal.desk_app_visible.
 add_to_apps_screen = [
     {
         "name": "folt_customizations",
         "logo": "/assets/folt_customizations/icons/desktop_icons/solid/folt.svg",
         "title": "FoLT",
         "route": "/desk/folt",
+        "has_permission": "folt_customizations.supplier_portal.desk_app_visible",
     }
 ]
+
+# Where a supplier login lands. Called for every user logging in; it answers only for portal-only
+# supplier accounts and hands everybody else back to frappe -- see supplier_portal for why this
+# is a hook and not Role["Supplier"].home_page.
+get_website_user_home_page = "folt_customizations.supplier_portal.portal_home_page"
 
 # Replace the Frappe/ERPNext/Frappe HR app titles and logos in the boot payload. These
 # drive the Desk sidebar header subtitle and the /apps screen, and they are unreachable
@@ -82,6 +94,7 @@ after_install = [
     "folt_customizations.permissions.apply_role_permissions",
     "folt_customizations.access.apply_module_access",
     "folt_customizations.print_formats.apply_print_formats",
+    "folt_customizations.supplier_portal.link_portal_users",
 ]
 after_migrate = [
     "folt_customizations.branding.apply_branding",
@@ -90,6 +103,7 @@ after_migrate = [
     "folt_customizations.permissions.apply_role_permissions",
     "folt_customizations.access.apply_module_access",
     "folt_customizations.print_formats.apply_print_formats",
+    "folt_customizations.supplier_portal.link_portal_users",
 ]
 
 # A supplier pre-qualified for several FoLT categories carries the extras in the
@@ -98,6 +112,13 @@ after_migrate = [
 doc_events = {
     "Supplier": {
         "validate": "folt_customizations.supplier.validate",
+    },
+    # erpnext only ever adds a supplier's login to Supplier.portal_users when an RFQ is emailed
+    # to that exact address, and that table is the *only* thing the portal reads to decide which
+    # supplier a visitor is. Linking a contact to a supplier here is what makes the portal work
+    # for a login created any other way -- see supplier_portal.
+    "Contact": {
+        "on_update": "folt_customizations.supplier_portal.sync_portal_user",
     },
     # FoLT competes every order inside a pre-qualified category, so a Purchase Order carries
     # `folt_supplier_group` and its `supplier` has to be qualified for it -- enforced here as

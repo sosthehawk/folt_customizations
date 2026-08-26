@@ -158,6 +158,11 @@ scheduler_events = {
 # the doctype is touched -- see rfq_email.py for why this is an override rather than a template.
 override_doctype_class = {
     "Request for Quotation": "folt_customizations.rfq_email.FoLTRequestForQuotation",
+    # frappe's "your password has been changed" alert is two sentences of bare text with no FoLT
+    # mark and none of the facts a security notice needs -- which account, when, by whom. The
+    # subclass replaces just that notification; the password change itself is still upstream's.
+    # See user_security.py.
+    "User": "folt_customizations.user_security.FoLTUser",
 }
 
 # Client-side half of the same rule: leads the form with the category and restricts the

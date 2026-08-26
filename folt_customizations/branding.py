@@ -177,6 +177,8 @@ DESKTOP_ICON_LABELS = {
 # ERPNext Settings items) so that workspace_sidebar_item["folt settings"] exists, then point
 # both the label and link_to at it. erpnext's own sidebar doc is left untouched -- it simply
 # ends up with no Desktop Icon referencing it, which makes it invisible rather than broken.
+# That covers the Workspace *Sidebar* only: the Workspace of the same name is a separate
+# document this rename cannot reach, and it is retired in workspaces.HIDDEN_WORKSPACES instead.
 #
 # Trade-off worth knowing: the item list in folt_settings.json is a snapshot taken from
 # erpnext 16.30.0, so settings pages ERPNext adds later will not appear until it is

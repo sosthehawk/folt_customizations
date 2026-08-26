@@ -1,0 +1,106 @@
+{#-
+  FoLT Expense Voucher -- the first page of every accountability pack, printed from the
+  Payment Entry that released the money.
+
+  It is the authority to pay: who is being paid, out of which account, against which
+  reference, for what, and the signature of whoever authorised it. The paper version carries a
+  hand-written account code -- a petty cash sub-account and the holder it sits with; here that
+  is the account the payment actually posted against, so the voucher and the ledger cannot
+  disagree.
+-#}
+{%- macro money(v) -%}{{ frappe.utils.fmt_money(v or 0, currency=doc.paid_from_account_currency or doc.paid_to_account_currency) }}{%- endmacro -%}
+
+{%- set paying_out = doc.payment_type != "Receive" -%}
+{#- The account the money moves out of is the one a voucher is raised against; on a receipt it
+    is the other way round. -#}
+{%- set source_account = doc.paid_from if paying_out else doc.paid_to -%}
+{%- set lines = doc.references | selectattr("allocated_amount") | list -%}
+
+{% include "folt_customizations/print_format_templates/_page_frame.html" %}
+
+<div class="folt-form">
+
+  <div class="folt-title">{{ _("Expense Voucher") if paying_out else _("Receipt Voucher") }}</div>
+  <div class="folt-subtitle">{{ doc.name }}</div>
+  <hr class="folt-rule">
+
+  <table class="folt-meta">
+    <tr>
+      <td class="label">{{ _("Payment To") if paying_out else _("Received From") }}</td>
+      <td class="value">{{ doc.party_name or doc.party or "&mdash;" }}</td>
+      <td class="label">{{ _("Date") }}</td>
+      <td class="value">{{ frappe.utils.formatdate(doc.posting_date) }}</td>
+    </tr>
+    <tr>
+      <td class="label">{{ _("Reference No") }}</td>
+      <td class="value">{{ doc.reference_no or doc.name }}</td>
+      <td class="label">{{ _("Reference Date") }}</td>
+      <td class="value">{{ frappe.utils.formatdate(doc.reference_date) if doc.reference_date else "&mdash;" }}</td>
+    </tr>
+    <tr>
+      <td class="label">{{ _("Mode of Payment") }}</td>
+      <td class="value">{{ doc.mode_of_payment or "&mdash;" }}</td>
+      <td class="label">{{ _("Activity") }}</td>
+      <td class="value">{{ doc.project or "&mdash;" }}</td>
+    </tr>
+  </table>
+
+  <table class="folt-lines">
+    <tr>
+      <th style="width:34%">{{ _("Account / Item") }}</th>
+      <th style="width:46%">{{ _("Description") }}</th>
+      <th class="num" style="width:20%">{{ _("Amount") }}</th>
+    </tr>
+    {%- if lines %}
+    {#- A payment settling specific documents itemises them: an auditor reading the voucher can
+        see which advance, invoice or claim each shilling went against. -#}
+    {%- for row in lines %}
+    <tr>
+      <td>{{ row.account or source_account }}</td>
+      <td>{{ _(row.reference_doctype) }} {{ row.reference_name }}{% if row.bill_no %} &middot; {{ row.bill_no }}{% endif %}</td>
+      <td class="num">{{ money(row.allocated_amount) }}</td>
+    </tr>
+    {%- endfor %}
+    {%- else %}
+    {#- A direct payment against an account -- petty cash, a float release, a reimbursement --
+        has nothing to itemise, so the voucher carries the purpose instead. -#}
+    <tr>
+      <td>{{ source_account or "&mdash;" }}</td>
+      <td>{{ doc.remarks or _("Payment to {0}").format(doc.party_name or doc.party or "") }}</td>
+      <td class="num">{{ money(doc.paid_amount) }}</td>
+    </tr>
+    {%- endif %}
+    {%- for row in doc.deductions %}
+    <tr>
+      <td>{{ row.account }}</td>
+      <td>{{ row.description or _("Deduction") }}{% if row.cost_center %} &middot; {{ row.cost_center }}{% endif %}</td>
+      <td class="num">{{ money(row.amount) }}</td>
+    </tr>
+    {%- endfor %}
+    <tr class="total">
+      <td colspan="2" class="num">{{ _("Total") }}</td>
+      <td class="num">{{ money(doc.paid_amount) }}</td>
+    </tr>
+  </table>
+
+  <div class="folt-memo">
+    <b>{{ _("Memo") }}:</b> {{ doc.remarks or "&mdash;" }}
+  </div>
+
+  <table class="folt-signoff">
+    <tr>
+      <td><div class="line"></div><div class="role">{{ _("Prepared By") }}</div><div class="who">{{ _("Finance Assistant") }}</div></td>
+      <td><div class="line"></div><div class="role">{{ _("Checked By") }}</div><div class="who">{{ _("Finance Officer") }}</div></td>
+      <td><div class="line"></div><div class="role">{{ _("Authorised By") }}</div><div class="who">{{ _("Executive Director") }}</div></td>
+    </tr>
+  </table>
+
+  <table class="folt-signoff">
+    <tr>
+      <td><div class="line"></div><div class="role">{{ _("Received By") }}</div><div class="who">{{ doc.party_name or doc.party or "" }}</div></td>
+      <td></td>
+      <td></td>
+    </tr>
+  </table>
+
+</div>

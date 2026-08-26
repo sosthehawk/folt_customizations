@@ -1,0 +1,185 @@
+/*
+  Shared stylesheet for FoLT's file-backed print formats -- the voucher, the float expense
+  report, the intent to award and the derogation waiver. The payslip keeps its own, because it
+  is a one-page-at-all-costs layout with rules that make no sense anywhere else.
+
+  Two constraints shape everything here. wkhtmltopdf renders the print view at a narrow
+  viewport, so bootstrap grid classes collapse and every label/value pair costs two lines --
+  hence plain tables with explicit widths and no flexbox. And frappe's own print stylesheet
+  sets `.print-format td, th { padding: 6px !important }`, so a cell override has to carry
+  !important of its own to win.
+*/
+
+.folt-form {
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 10pt;
+  color: #000;
+}
+
+.folt-form h1,
+.folt-form h2,
+.folt-form h3 {
+  margin: 0;
+  font-weight: bold;
+}
+
+/* The form's own title, under the letterhead. */
+.folt-title {
+  font-size: 14pt;
+  letter-spacing: 0.3pt;
+  margin: 6px 0 2px;
+}
+
+.folt-subtitle {
+  font-size: 9.5pt;
+  color: #444;
+  margin-bottom: 8px;
+}
+
+.folt-rule {
+  border: 0;
+  border-top: 1.5px solid #000;
+  margin: 4px 0 8px;
+}
+
+/* Label / value header blocks: two columns of pairs, not a grid. */
+table.folt-meta {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 10px;
+}
+
+table.folt-meta td {
+  padding: 1.5px 6px 1.5px 0 !important;
+  vertical-align: top;
+  font-size: 9.5pt;
+}
+
+table.folt-meta td.label {
+  width: 18%;
+  color: #444;
+  white-space: nowrap;
+}
+
+table.folt-meta td.value {
+  width: 32%;
+  font-weight: bold;
+}
+
+/* The ruled tables that carry the actual lines of the form. */
+table.folt-lines {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 8px;
+}
+
+table.folt-lines th,
+table.folt-lines td {
+  border: 0.7px solid #555;
+  padding: 2.5px 5px !important;
+  font-size: 9pt;
+  vertical-align: top;
+}
+
+table.folt-lines th {
+  background: #e8eaed;
+  font-weight: bold;
+  text-align: left;
+}
+
+table.folt-lines td.num,
+table.folt-lines th.num {
+  text-align: right;
+  white-space: nowrap;
+}
+
+table.folt-lines td.mid,
+table.folt-lines th.mid {
+  text-align: center;
+}
+
+table.folt-lines tr.total td {
+  font-weight: bold;
+  background: #f4f5f7;
+}
+
+table.folt-lines tr.total td.negative {
+  color: #a11;
+}
+
+/* Free-text blocks: the justifications and memos that carry most of a waiver request. */
+.folt-block {
+  margin-bottom: 8px;
+  page-break-inside: avoid;
+}
+
+.folt-block .heading {
+  font-weight: bold;
+  font-size: 9.5pt;
+  margin-bottom: 1px;
+}
+
+.folt-block .body {
+  font-size: 9.5pt;
+  white-space: pre-line;
+  border: 0.7px solid #999;
+  padding: 4px 6px;
+  min-height: 16px;
+}
+
+.folt-memo {
+  border: 0.7px solid #555;
+  padding: 5px 6px;
+  font-size: 9.5pt;
+  margin-bottom: 14px;
+}
+
+.folt-state {
+  font-size: 9.5pt;
+  margin: 5px 0 6px;
+}
+
+.folt-state .pill {
+  border: 0.7px solid #555;
+  padding: 1px 6px;
+  font-weight: bold;
+}
+
+/*
+  The signature blocks. These are the point of printing any of these forms at all: the
+  workflow records who approved what, and the paper carries the wet signature the funder's
+  auditor still asks to see.
+*/
+table.folt-signoff {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 10px;
+  page-break-inside: avoid;
+}
+
+table.folt-signoff td {
+  padding: 0 10px 0 0 !important;
+  vertical-align: bottom;
+  font-size: 9.5pt;
+  width: 33%;
+}
+
+table.folt-signoff .line {
+  border-bottom: 0.7px solid #000;
+  height: 26px;
+}
+
+table.folt-signoff .role {
+  padding-top: 2px;
+  font-weight: bold;
+}
+
+table.folt-signoff .who {
+  color: #444;
+}
+
+.folt-note {
+  font-size: 8.5pt;
+  color: #555;
+  margin-top: 6px;
+}

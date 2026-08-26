@@ -12,6 +12,9 @@ import frappe
 WORKFLOW_STATES = [
 	("Pending Verification", "Warning"),
 	("Verified", "Success"),
+	("Pending Finance Officer Review", "Warning"),
+	("Pending Executive Director Approval", "Warning"),
+	("Approved", "Success"),
 	("Paid", "Success"),
 	("Partly Paid", "Warning"),
 	("Disputed", "Danger"),
@@ -20,6 +23,9 @@ WORKFLOW_STATES = [
 WORKFLOW_ACTIONS = [
 	"Submit for Verification",
 	"Verify",
+	"Submit for Review",
+	"Review & Forward",
+	"Approve",
 	"Return for Correction",
 	"Mark Paid",
 	"Mark Partly Paid",
@@ -134,7 +140,14 @@ def create_participant_list_workflow():
 
 
 def create_reimbursement_list_workflow():
-	"""W-04B: Draft > Pending Verification > Verified > Paid / Partly Paid, with Disputed."""
+	"""W-04B: Draft > Finance review > ED approval > Paid / Partly Paid, with Disputed.
+
+	The payout is money leaving the organisation, so it carries the same two signatures the
+	paper reimbursement list does — checked by Finance, approved by the Executive Director —
+	rather than the single verification this chain started with. The attendance register it
+	derives from keeps its one programme-side verification: that document evidences who turned
+	up, not what was paid.
+	"""
 	upsert_workflow(
 		{
 			"name": "Participant Reimbursement List Verification",
@@ -144,8 +157,9 @@ def create_reimbursement_list_workflow():
 			"send_email_alert": 0,
 			"states": [
 				{"state": "Draft", "doc_status": "0", "allow_edit": "Employee"},
-				{"state": "Pending Verification", "doc_status": "0", "allow_edit": "Finance Officer"},
-				{"state": "Verified", "doc_status": "1", "allow_edit": "Finance Officer"},
+				{"state": "Pending Finance Officer Review", "doc_status": "0", "allow_edit": "Finance Officer"},
+				{"state": "Pending Executive Director Approval", "doc_status": "0", "allow_edit": "Executive Director"},
+				{"state": "Approved", "doc_status": "1", "allow_edit": "Finance Officer"},
 				{"state": "Partly Paid", "doc_status": "1", "allow_edit": "Finance Assistant"},
 				{"state": "Paid", "doc_status": "1", "allow_edit": "Finance Officer"},
 				{"state": "Disputed", "doc_status": "1", "allow_edit": "Finance Officer"},
@@ -153,30 +167,44 @@ def create_reimbursement_list_workflow():
 			"transitions": [
 				{
 					"state": "Draft",
-					"action": "Submit for Verification",
-					"next_state": "Pending Verification",
+					"action": "Submit for Review",
+					"next_state": "Pending Finance Officer Review",
 					"allowed": "Employee",
 				},
 				{
-					"state": "Pending Verification",
-					"action": "Verify",
-					"next_state": "Verified",
+					"state": "Pending Finance Officer Review",
+					"action": "Review & Forward",
+					"next_state": "Pending Executive Director Approval",
 					"allowed": "Finance Officer",
+					"allow_self_approval": 0,
 				},
 				{
-					"state": "Pending Verification",
+					"state": "Pending Finance Officer Review",
 					"action": "Return for Correction",
 					"next_state": "Draft",
 					"allowed": "Finance Officer",
 				},
 				{
-					"state": "Verified",
+					"state": "Pending Executive Director Approval",
+					"action": "Approve",
+					"next_state": "Approved",
+					"allowed": "Executive Director",
+					"allow_self_approval": 0,
+				},
+				{
+					"state": "Pending Executive Director Approval",
+					"action": "Return for Correction",
+					"next_state": "Draft",
+					"allowed": "Executive Director",
+				},
+				{
+					"state": "Approved",
 					"action": "Mark Partly Paid",
 					"next_state": "Partly Paid",
 					"allowed": "Finance Assistant",
 				},
 				{
-					"state": "Verified",
+					"state": "Approved",
 					"action": "Mark Paid",
 					"next_state": "Paid",
 					"allowed": "Finance Assistant",

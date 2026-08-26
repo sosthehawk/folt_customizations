@@ -145,5 +145,40 @@
   "modified": "2026-08-11 17:37:59.235232",
   "name": "Resolve Dispute",
   "workflow_action_name": "Resolve Dispute"
+ },
+ {
+  "docstatus": 0,
+  "doctype": "Workflow Action Master",
+  "modified": "2026-08-22 09:00:00.000000",
+  "name": "Record Disbursement",
+  "workflow_action_name": "Record Disbursement"
+ },
+ {
+  "docstatus": 0,
+  "doctype": "Workflow Action Master",
+  "modified": "2026-08-22 09:00:00.000000",
+  "name": "Mark Accounted",
+  "workflow_action_name": "Mark Accounted"
+ },
+ {
+  "docstatus": 0,
+  "doctype": "Workflow Action Master",
+  "modified": "2026-08-22 09:00:00.000000",
+  "name": "Flag Overdue",
+  "workflow_action_name": "Flag Overdue"
+ },
+ {
+  "docstatus": 0,
+  "doctype": "Workflow Action Master",
+  "modified": "2026-08-22 09:00:00.000000",
+  "name": "Close Float",
+  "workflow_action_name": "Close Float"
+ },
+ {
+  "docstatus": 0,
+  "doctype": "Workflow Action Master",
+  "modified": "2026-08-22 09:00:00.000000",
+  "name": "Mark Settled",
+  "workflow_action_name": "Mark Settled"
  }
 ]

@@ -28,24 +28,12 @@
 {%- set tax_block = doc.ctc or doc.annual_taxable_amount or doc.total_income_tax
                     or doc.income_tax_deducted_till_date or doc.tax_exemption_declaration -%}
 
-{#- A `custom_format` template renders on its own -- frappe's standard.html wrapper
-    (letterhead, draft/cancelled stamp, repeating PDF header/footer) is bypassed, so the
-    pieces worth keeping are reproduced here. The id="header-html" / id="footer-html"
-    divs are what frappe.utils.pdf lifts out and hands to wkhtmltopdf as --header-html /
-    --footer-html, which is what repeats the letterhead on a slip that runs to two pages. -#}
 <div class="page-break">
 
-  <div {% if print_settings.repeat_header_footer %}id="header-html" class="hidden-pdf"{% endif %}>
-    {%- if letter_head and not no_letterhead %}
-    <div class="letter-head">{{ letter_head }}</div>
-    {%- endif %}
-    {%- if doc.docstatus == 0 %}
-    <div class="text-center" document-status="draft"><h4 style="margin: 0px;">{{ _("DRAFT") }}</h4></div>
-    {%- endif %}
-    {%- if doc.docstatus == 2 %}
-    <div class="text-center" document-status="cancelled"><h4 style="margin: 0px;">{{ _("CANCELLED") }}</h4></div>
-    {%- endif %}
-  </div>
+  {#- The letterhead, the draft/cancelled stamp and the repeating PDF header, none of which a
+      `custom_format` template gets for free -- shared with the other FoLT formats so they
+      cannot drift apart. See _page_frame.html. -#}
+  {% include "folt_customizations/print_format_templates/_page_frame.html" %}
 
 <div class="folt-slip">
 

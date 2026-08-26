@@ -68,6 +68,19 @@ LETTERHEAD_IMAGE = "images/folt-letterhead.png"
 # assumed. Change it here and re-run apply_branding.
 LETTERHEAD_WIDTH_PX = 160
 
+# The wordmark's own blue, and the one colour every FoLT-built email uses for its accents --
+# the masthead rule, section headings and the call-to-action button. Lives here rather than in
+# either sending module so the committee email (notifications.py) and the supplier RFQ email
+# (rfq_email.py) cannot drift apart. Note it is deliberately NOT the wordmark navy #001a33,
+# which reads as near-black on a button.
+EMAIL_ACCENT = "#3c6a91"
+
+# The rest of the email palette, lifted from frappe's own email stylesheet so a FoLT-built email
+# sits beside a frappe-built one without a seam: body text, secondary text, hairline rules.
+EMAIL_TEXT = "#171717"
+EMAIL_MUTED = "#6b7280"
+EMAIL_RULE = "#ededed"
+
 # The Letter Head record every printed document picks up. One default, no per-doctype variants.
 LETTER_HEAD = "FoLT"
 

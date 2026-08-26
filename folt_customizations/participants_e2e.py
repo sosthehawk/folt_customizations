@@ -286,14 +286,19 @@ def run():
 	final.participants[0].acknowledgement = ""
 	final.save()
 
-	apply_workflow(final, "Submit for Verification")
-	check("W-04B  Draft > Pending Verification", final.workflow_state == "Pending Verification", final.workflow_state)
+	apply_workflow(final, "Submit for Review")
+	check("W-04B  Draft > Finance review", final.workflow_state == "Pending Finance Officer Review", final.workflow_state)
 
-	apply_workflow(final, "Verify")
-	check("W-04B  Pending Verification > Verified, submitted", final.workflow_state == "Verified" and final.docstatus == 1, f"{final.workflow_state}/docstatus {final.docstatus}")
+	apply_workflow(final, "Review & Forward")
+	check("W-04B  Finance review > ED approval, still draft", final.workflow_state == "Pending Executive Director Approval" and final.docstatus == 0, f"{final.workflow_state}/docstatus {final.docstatus}")
 
-	# The payout happens after verification: acknowledgements and references are recorded
-	# against a submitted list, which only works if those fields are editable on submit.
+	apply_workflow(final, "Approve")
+	check("W-04B  ED approval > Approved, submitted", final.workflow_state == "Approved" and final.docstatus == 1, f"{final.workflow_state}/docstatus {final.docstatus}")
+
+	# Step 3 of the finance workflow: an approved list goes back to the programme officer for
+	# the participants' acknowledgement, and only then is it paid. Acknowledgements and
+	# references are therefore recorded against a submitted list, which only works if those
+	# fields are editable on submit.
 	final.reload()
 	for row in final.participants:
 		row.payment_status = "Paid"
@@ -302,11 +307,19 @@ def run():
 	final.save()
 	final.reload()
 
-	check("payout recorded against a verified list", final.total_paid == final.total_amount, f"paid {final.total_paid} of {final.total_amount}")
+	check("payout recorded against an approved list", final.total_paid == final.total_amount, f"paid {final.total_paid} of {final.total_amount}")
 	check("transaction references captured", all(row.payment_reference for row in final.participants), "")
 
+	expect_throw(
+		"F-04-E4  paid list without the acknowledged sheet is refused",
+		lambda: apply_workflow(final, "Mark Paid"),
+	)
+
+	final.reload()
+	final.signed_list = "/files/e2e-signed-reimbursement-list.pdf"
+	final.save()
 	apply_workflow(final, "Mark Paid")
-	check("W-04B  Verified > Paid", final.workflow_state == "Paid", final.workflow_state)
+	check("W-04B  Approved > Paid", final.workflow_state == "Paid", final.workflow_state)
 
 	print("\n--- workflow wiring ---")
 

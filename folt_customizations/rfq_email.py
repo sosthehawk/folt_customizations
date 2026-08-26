@@ -47,7 +47,13 @@ from frappe.utils.user import get_user_fullname
 # Note the lowercase `f` -- erpnext's class is `RequestforQuotation`, not `RequestForQuotation`.
 from erpnext.buying.doctype.request_for_quotation.request_for_quotation import RequestforQuotation
 
-from folt_customizations.branding import EMAIL_ACCENT, LOGO_EMAIL
+from folt_customizations.branding import (
+    EMAIL_ACCENT,
+    EMAIL_MUTED as MUTED,
+    EMAIL_RULE as RULE,
+    EMAIL_TEXT as TEXT,
+    LOGO_EMAIL,
+)
 
 # How many item rows are printed before the table gives up and points at the portal. An RFQ
 # with fifty lines is a document, not an email; the email's job is to let the reader recognise
@@ -58,10 +64,6 @@ MAX_ITEM_ROWS = 12
 # a Text Editor field holding specifications, so it is stripped to text and cut -- the full text
 # is on the portal page and on the attached print, both a click away.
 MAX_DESCRIPTION_CHARS = 160
-
-TEXT = "#171717"
-MUTED = "#6b7280"
-RULE = "#ededed"
 
 
 class FoLTRequestForQuotation(RequestforQuotation):

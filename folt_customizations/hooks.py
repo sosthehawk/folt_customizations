@@ -29,14 +29,26 @@ email_css = ["/assets/folt_customizations/css/folt_email.css"]
 # a string -- it only survives because JS coerces a one-element array to its element.
 # Declaring the app properly also gives FoLT a correct tile on the /apps screen. The logo
 # is the square desktop-icon tile, not the wordmark: the Desk renders these in a 32x32 box.
+#
+# `has_permission` is not decoration: frappe answers "where do I send this user after login"
+# with the route of the only app on their apps screen (frappe/apps.py:get_default_path), and
+# with FoLT as the only entry that was sending *suppliers* into a Desk workspace they cannot
+# open. Hiding the tile from portal users is what lets the login reach get_home_page() and the
+# supplier portal -- see supplier_portal.desk_app_visible.
 add_to_apps_screen = [
     {
         "name": "folt_customizations",
         "logo": "/assets/folt_customizations/icons/desktop_icons/solid/folt.svg",
         "title": "FoLT",
         "route": "/desk/folt",
+        "has_permission": "folt_customizations.supplier_portal.desk_app_visible",
     }
 ]
+
+# Where a supplier login lands. Called for every user logging in; it answers only for portal-only
+# supplier accounts and hands everybody else back to frappe -- see supplier_portal for why this
+# is a hook and not Role["Supplier"].home_page.
+get_website_user_home_page = "folt_customizations.supplier_portal.portal_home_page"
 
 # Replace the Frappe/ERPNext/Frappe HR app titles and logos in the boot payload. These
 # drive the Desk sidebar header subtitle and the /apps screen, and they are unreachable
@@ -82,6 +94,7 @@ after_install = [
     "folt_customizations.permissions.apply_role_permissions",
     "folt_customizations.access.apply_module_access",
     "folt_customizations.print_formats.apply_print_formats",
+    "folt_customizations.supplier_portal.link_portal_users",
 ]
 after_migrate = [
     "folt_customizations.branding.apply_branding",
@@ -90,6 +103,7 @@ after_migrate = [
     "folt_customizations.permissions.apply_role_permissions",
     "folt_customizations.access.apply_module_access",
     "folt_customizations.print_formats.apply_print_formats",
+    "folt_customizations.supplier_portal.link_portal_users",
 ]
 
 # A supplier pre-qualified for several FoLT categories carries the extras in the
@@ -98,6 +112,13 @@ after_migrate = [
 doc_events = {
     "Supplier": {
         "validate": "folt_customizations.supplier.validate",
+    },
+    # erpnext only ever adds a supplier's login to Supplier.portal_users when an RFQ is emailed
+    # to that exact address, and that table is the *only* thing the portal reads to decide which
+    # supplier a visitor is. Linking a contact to a supplier here is what makes the portal work
+    # for a login created any other way -- see supplier_portal.
+    "Contact": {
+        "on_update": "folt_customizations.supplier_portal.sync_portal_user",
     },
     # FoLT competes every order inside a pre-qualified category, so a Purchase Order carries
     # `folt_supplier_group` and its `supplier` has to be qualified for it -- enforced here as
@@ -158,16 +179,26 @@ scheduler_events = {
 # the doctype is touched -- see rfq_email.py for why this is an override rather than a template.
 override_doctype_class = {
     "Request for Quotation": "folt_customizations.rfq_email.FoLTRequestForQuotation",
+    # frappe's "your password has been changed" alert is two sentences of bare text with no FoLT
+    # mark and none of the facts a security notice needs -- which account, when, by whom. The
+    # subclass replaces just that notification; the password change itself is still upstream's.
+    # See user_security.py.
+    "User": "folt_customizations.user_security.FoLTUser",
 }
 
 # Client-side half of the same rule: leads the form with the category and restricts the
 # Supplier dropdown to that category's pre-qualified register.
 doctype_js = {"Purchase Order": "public/js/purchase_order.js"}
 
-# Called from frappe's `get_print` just before the PDF is built, and only on the PDF path.
-# `host_name` is the base of every link the site emails to a person, so it has to be the
-# browser's address; wkhtmltopdf needs one the container can reach. See print_formats.py.
-on_print_pdf = "folt_customizations.print_formats.use_internal_host_for_pdf"
+# `host_name` is the base of every link AND every image URL the site emails to a person, so it
+# has to be the browser's address; wkhtmltopdf, running inside the container, needs one the
+# container can reach. The guard swaps the second in for the duration of `get_pdf` and puts the
+# first back in a `finally`. It replaces an `on_print_pdf` hook that set host_name and never
+# restored it, which left every workflow action email -- built by attaching a print and only
+# then sending -- with a masthead logo pointing at a host no mail client can resolve.
+# Installed once per process from this app's __init__.py, which is the only entry point that runs
+# in every context -- web request, background job, bench execute and plain script. See
+# print_formats.guard_pdf_host, and folt_customizations/__init__.py for why not a hook.
 
 # Fixtures shipped with this app. `bench migrate` re-syncs these from disk into the
 # database on every run -- so this file on disk is the source of truth. If you edit a

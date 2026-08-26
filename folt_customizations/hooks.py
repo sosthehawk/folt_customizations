@@ -190,10 +190,15 @@ override_doctype_class = {
 # Supplier dropdown to that category's pre-qualified register.
 doctype_js = {"Purchase Order": "public/js/purchase_order.js"}
 
-# Called from frappe's `get_print` just before the PDF is built, and only on the PDF path.
-# `host_name` is the base of every link the site emails to a person, so it has to be the
-# browser's address; wkhtmltopdf needs one the container can reach. See print_formats.py.
-on_print_pdf = "folt_customizations.print_formats.use_internal_host_for_pdf"
+# `host_name` is the base of every link AND every image URL the site emails to a person, so it
+# has to be the browser's address; wkhtmltopdf, running inside the container, needs one the
+# container can reach. The guard swaps the second in for the duration of `get_pdf` and puts the
+# first back in a `finally`. It replaces an `on_print_pdf` hook that set host_name and never
+# restored it, which left every workflow action email -- built by attaching a print and only
+# then sending -- with a masthead logo pointing at a host no mail client can resolve.
+# Installed once per process from this app's __init__.py, which is the only entry point that runs
+# in every context -- web request, background job, bench execute and plain script. See
+# print_formats.guard_pdf_host, and folt_customizations/__init__.py for why not a hook.
 
 # Fixtures shipped with this app. `bench migrate` re-syncs these from disk into the
 # database on every run -- so this file on disk is the source of truth. If you edit a

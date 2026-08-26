@@ -15,12 +15,28 @@ import frappe
 #   EVERYONE, managers included. is_hidden=1 is kept as belt-and-suspenders for the
 #   non-manager path. The workspaces still exist, so their doctypes/reports remain
 #   reachable by URL and global search -- only the sidebar icon is gone.
+#
+# "ERPNext Settings" is in this list for a different reason from the five above: it is not
+# unused, it is *superseded*. branding.RELINKED_DESKTOP_ICONS re-points its Desktop Icon at the
+# Workspace Sidebar we ship as "FoLT Settings", and the comment there says erpnext's own doc
+# "ends up with no Desktop Icon referencing it, which makes it invisible rather than broken".
+# That is true of the **Workspace Sidebar** named "ERPNext Settings" -- and only of it. The
+# separately named **Workspace** of the same name (module Setup, app erpnext) is a different
+# document that no Desktop Icon ever referenced, so retiring the icon did nothing to it: it
+# stayed public=1 / is_hidden=0 and kept reaching the browser through boot.workspaces.pages,
+# which desk.js:305 assigns to frappe.boot.allowed_workspaces and then spreads into
+# frappe.workspaces["erpnext-settings"] (routable at /app/erpnext-settings),
+# frappe.modules[page.module], and frappe.visible_modules in breadcrumbs.js. It was the last
+# "ERPNext" wording a FoLT user could actually see. Verified orphaned before hiding -- no
+# Workspace Sidebar Item, Workspace Shortcut or child page links to it -- and "Setup" keeps a
+# workspace in frappe.modules either way, because Home carries that module too.
 HIDDEN_WORKSPACES = [
     "Manufacturing",
     "Selling",
     "Stock",
     "Projects",
     "Quality",
+    "ERPNext Settings",
 ]
 
 

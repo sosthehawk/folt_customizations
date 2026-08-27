@@ -275,6 +275,43 @@ def run():
 		lambda: fetch_participants(prl.name, register_b.name),
 	)
 
+	# The same rule as the dropdown sees it. Filters do not reach a link query in the shape the
+	# form script set them: frappe normalises each one into an `[operator, value]` pair on the way
+	# to search_link, and a two-element list bound into raw SQL is a row constructor, which
+	# MariaDB refuses to compare against a varchar. That is how picking a register came to fail
+	# with a traceback instead of a list, so the exact posted shape is what is checked here.
+	from folt_customizations.folt_customizations.doctype.activity_participant_list.activity_participant_list import (
+		get_verified_registers,
+	)
+
+	def offered(filters):
+		return [row[0] for row in get_verified_registers("Activity Participant List", "", "name", 0, 20, filters)]
+
+	posted = {"activity": ["=", project_a], "docstatus": ["=", 1]}
+	check(
+		"F-04-D5   the register dropdown answers the filters a link field actually posts",
+		offered(posted) == [register.name],
+		str(offered(posted)),
+	)
+	check(
+		"F-04-D5   and a plain filter from a script means the same thing",
+		offered({"activity": project_a}) == [register.name],
+		str(offered({"activity": project_a})),
+	)
+	check(
+		"F-04-D5   another project's register is not offered",
+		register_b.name not in offered(posted),
+	)
+
+	unverified = frappe.get_doc(
+		{"doctype": "Activity Participant List", "activity": project_a, "session_date": nowdate()}
+	).insert(ignore_permissions=True)
+	check(
+		"F-04A-D3  an unverified register is never offered, even when asked for by docstatus",
+		unverified.name not in offered({"activity": ["=", project_a], "docstatus": ["=", 0]}),
+	)
+	frappe.delete_doc("Activity Participant List", unverified.name, force=True, ignore_permissions=True)
+
 	print("\n--- verification and payout ---")
 
 	from frappe.model.workflow import apply_workflow

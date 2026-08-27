@@ -1,5 +1,6 @@
 import frappe
 from frappe.model.document import Document
+from frappe.utils import flt
 
 from folt_customizations.notifications import notify_committee_members
 from folt_customizations.procurement import COMMITTEE_REVIEW_STATE, rfq_quotations
@@ -8,11 +9,23 @@ from folt_customizations.procurement import COMMITTEE_REVIEW_STATE, rfq_quotatio
 # Committee sign-off must be complete (quorum met) before the document may enter it.
 PENDING_APPROVAL_STATE = "Pending Head of Finance Approval"
 
+# The fields on each grid that belong to one named member, per table. Nobody may fill these in
+# on somebody else's behalf -- see enforce_self_scoring. `member` itself is absent on purpose:
+# who is on the committee is the preparer's business (enforce_committee_composition), and the
+# derived columns of the scoring grid are read_only on the doctype for everybody already.
+SELF_ONLY_FIELDS = {
+	"members": ("reviewed", "score", "comments"),
+	"quotation_scores": ("score", "comments"),
+}
+
 
 class ProcurementCommitteeEvaluation(Document):
 	def validate(self):
 		self.enforce_conflict_of_interest()
+		self.enforce_committee_composition()
 		self.sync_quotation_scores()
+		# After the rebuild, so it judges the grid that is actually about to be stored.
+		self.enforce_self_scoring()
 		if self.workflow_state == PENDING_APPROVAL_STATE:
 			self.enforce_quorum()
 
@@ -78,6 +91,78 @@ class ProcurementCommitteeEvaluation(Document):
 		# deleted and re-inserted on every save.
 		self.set("quotation_scores", rows)
 
+	def enforce_self_scoring(self):
+		"""Nobody may enter or alter a score, a comment or a sign-off in somebody else's name.
+
+		This is what makes the grid evidence rather than a shared spreadsheet. Without it any
+		holder of the Procurement Committee role can score for the whole committee -- the
+		workflow hands that role write on the entire document while the evaluation sits in
+		`Committee Reviewing` (fixtures/workflow.json: allow_edit) -- and, worse, tick another
+		member's `reviewed` box and carry the quorum on their own. A score somebody else typed
+		is not that member's opinion, and an award recommendation built out of them is not a
+		committee decision.
+
+		Enforced here rather than by permission because the rule is about *which rows* changed,
+		and Frappe's permissions cannot see inside a child table: permlevel hides a field from
+		everyone at once, and `if_owner` asks who owns the evaluation, not whose row it is. So
+		the check is a comparison against the stored document -- what changed, and whose it was.
+
+		Administrator is exempt. Patches, fixtures and the e2e scripts save these documents with
+		no member session behind them at all, and a mis-keyed score that has to be corrected
+		after the fact is corrected from the console, deliberately and traceably, rather than by
+		somebody clicking in a form.
+		"""
+		if frappe.session.user == "Administrator":
+			return
+
+		before = self.get_doc_before_save()
+		for table, fields in SELF_ONLY_FIELDS.items():
+			stored = {}
+			for row in (before.get(table) if before else None) or []:
+				stored.setdefault(row.name, row)
+
+			for row in self.get(table) or []:
+				if row.member == frappe.session.user:
+					continue
+				old = stored.get(row.name)
+				# `old` missing means a row that did not exist before this save. On a new
+				# evaluation, or a row appended by hand, the same rule applies: an empty row is
+				# fine (the rebuild creates one per member per bid), a pre-filled one is not.
+				if any(not _unchanged(row.get(field), old.get(field) if old else None) for field in fields):
+					_throw_not_your_row(table, row)
+
+	def enforce_committee_composition(self):
+		"""A member of the committee may not change who else is on it.
+
+		The other half of self-scoring, one step earlier. The quorum is counted against the
+		member list -- `required = self.quorum or total` in enforce_quorum -- so a member who can
+		drop the colleagues who have not signed yet reaches Intent to Award on their own vote,
+		without ever touching anybody else's score. And the list is editable by them: from
+		`Committee Reviewing` onwards the workflow gives the Procurement Committee role write on
+		the whole document.
+
+		The test is membership, not role, because that is what the conflict is: the people being
+		asked to score cannot pick who scores alongside them. Whoever prepares the evaluation is
+		barred from sitting on it anyway (enforce_conflict_of_interest), so this never gets in
+		the way of a buyer correcting the list, and a first save has no previous list to compare.
+		"""
+		if frappe.session.user == "Administrator":
+			return
+
+		before = self.get_doc_before_save()
+		if not before:
+			return
+
+		was = [row.member for row in before.get("members") or []]
+		now = [row.member for row in self.members or []]
+		if was == now or frappe.session.user not in set(was) | set(now):
+			return
+
+		frappe.throw(
+			frappe._("The committee cannot be changed by a member of it. Ask the buyer who raised this evaluation, or a System Manager, to add or remove members."),
+			title=frappe._("Committee is fixed"),
+		)
+
 	def enforce_quorum(self):
 		"""Block the move to Intent-to-Award until a quorum of members has signed."""
 		total = len(self.members or [])
@@ -89,3 +174,32 @@ class ProcurementCommitteeEvaluation(Document):
 			frappe.throw(
 				frappe._("Quorum not met: {0} of {1} required members have signed off.").format(signed, required)
 			)
+
+
+def _throw_not_your_row(table, row):
+	"""Refuse the save, naming whose row it is -- which is the part the reader can act on."""
+	if table == "quotation_scores":
+		message = frappe._("The score for {0} from {1} is {2}'s to enter -- each member fills in their own row.")
+		message = message.format(row.supplier_quotation, row.supplier, row.member)
+	else:
+		message = frappe._("The sign-off for {0} is theirs to give -- each member signs their own review.")
+		message = message.format(row.member)
+	frappe.throw(message, title=frappe._("Not your row"))
+
+
+def _unchanged(new, old):
+	"""Whether a grid cell holds what it held before, treating blank and zero as one value.
+
+	Frappe hands back None for a Float never touched and "" for a cleared Small Text, and a
+	round-trip through the form turns one into the other -- so a plain `!=` would read an
+	untouched row as an edit and refuse a save that changed nothing.
+	"""
+	if new in (None, "") and old in (None, ""):
+		return True
+	if isinstance(new, str) or isinstance(old, str):
+		return (new or "").strip() == (old or "").strip()
+	# A zero therefore reads the same as a blank, which is the only workable reading -- an
+	# untouched Float comes back as 0.0 and there is nothing to tell the two apart. It costs
+	# nothing: a nought planted in another member's row changes no ranking, while clearing a
+	# sign-off (1 -> 0) or a real score still shows up as the change it is.
+	return flt(new) == flt(old)

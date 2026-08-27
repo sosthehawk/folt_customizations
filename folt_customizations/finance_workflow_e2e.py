@@ -276,6 +276,42 @@ def run():
 		advance.workflow_state,
 	)
 
+	print("\n--- X-02  a submitted float belongs to the step it is on ---")
+
+	# `Disbursed` is the Finance Assistant's step (fixtures/workflow.json: allow_edit). Frappe
+	# enforces a workflow's transitions and not its `allow_edit` -- that field is read only by the
+	# Desk form, which greys the fields out -- so until workflow_access.enforce_state_custodian
+	# this document was open to every role holding write on Employee Advance, through the API, a
+	# list-view edit or any script. A submitted document is also saved through
+	# `before_update_after_submit`, a path the doctype's own validate() never sees at all.
+	# The accountability deadline is the field to push on: it is one of only three on Employee
+	# Advance that Frappe will accept a change to after submission at all, and W-06 below
+	# recomputes it from the activity anyway, so moving it here proves the rule without
+	# disturbing what the sweep is then checked on.
+	def edit_deadline(user, days):
+		def _edit():
+			doc = frappe.get_doc("Employee Advance", advance.name)
+			doc.folt_retire_by = add_days(nowdate(), days)
+			doc.save()
+
+		return lambda: as_user(user, _edit)
+
+	expect_throw(
+		"a disbursed float cannot be edited from somebody else's step",
+		edit_deadline(FINANCE_OFFICER, 30),
+	)
+	edit_deadline(FINANCE_ASSISTANT, 20)()
+	advance.reload()
+	check(
+		"the step's own custodian can still edit it",
+		getdate(advance.folt_retire_by) == getdate(add_days(nowdate(), 20)),
+		str(advance.folt_retire_by),
+	)
+	# The exemption for transitions is proved further down without any extra checks: the Finance
+	# Assistant settles a claim out of the Executive Director's step, and the Head of Finance
+	# closes the float out of the Finance Officer's. A move is made by whoever the transition
+	# allows, not by whoever holds the step it leaves.
+
 	print("\n--- W-06  the three-day accountability rule ---")
 
 	# The activity is moved into the past rather than the deadline: the sweep recomputes the

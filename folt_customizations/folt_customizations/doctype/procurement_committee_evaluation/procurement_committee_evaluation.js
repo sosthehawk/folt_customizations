@@ -7,7 +7,19 @@
 // created over the API, or one whose bids arrive after the RFQ was picked, ends up identical.
 // Keep the two in step.
 
+// The fields on each grid that belong to one named member. Kept in step with SELF_ONLY_FIELDS
+// in procurement_committee_evaluation.py, which is the rule; this only stops the form inviting
+// an edit the server is going to refuse.
+const SELF_ONLY_FIELDS = {
+	members: ["reviewed", "score", "comments"],
+	quotation_scores: ["score", "comments"],
+};
+
 frappe.ui.form.on("Procurement Committee Evaluation", {
+	refresh(frm) {
+		lock_rows_of_other_members(frm);
+	},
+
 	request_for_quotation(frm) {
 		// Only the RFQ change reports what it found. Changing the committee is a deliberate
 		// edit whose effect is visible in the grid; changing the RFQ is where a buyer needs
@@ -26,6 +38,29 @@ frappe.ui.form.on("Procurement Committee Member", {
 		sync_quotation_scores(frm);
 	},
 });
+
+// Grey out the cells that belong to the other members, so the committee sees whose row is whose
+// instead of discovering it from a validation error after typing. The rule itself is
+// enforce_self_scoring() on the server -- this is only the form being honest about it, which is
+// why Administrator is left alone: they are exempt there, and a form that disagreed with the
+// save would be worse than one that says nothing.
+//
+// `set_df_property` with a row name reaches the per-row copy of the docfield that each grid row
+// renders from (frappe.meta.get_docfield_copy), so this is per row rather than per column, and
+// it covers the field wherever it appears -- the grid cell and the expanded row, including the
+// `comments` box that is not a grid column at all.
+function lock_rows_of_other_members(frm) {
+	if (frappe.session.user === "Administrator") return;
+
+	for (const [table, fields] of Object.entries(SELF_ONLY_FIELDS)) {
+		for (const row of frm.doc[table] || []) {
+			const read_only = row.member === frappe.session.user ? 0 : 1;
+			for (const field of fields) {
+				frm.set_df_property(table, "read_only", read_only, frm.doc.name, field, row.name);
+			}
+		}
+	}
+}
 
 // Carrying scores across a rebuild means matching rows on (member, quotation) -- the same pair
 // the server matches on. JSON, rather than joining on a separator, because both halves are
@@ -72,6 +107,8 @@ async function sync_quotation_scores(frm, { announce = false } = {}) {
 		}
 	}
 	frm.refresh_field("quotation_scores");
+	// The rebuild replaced every row, so the locks have to go back on the new ones.
+	lock_rows_of_other_members(frm);
 
 	if (!announce) return;
 

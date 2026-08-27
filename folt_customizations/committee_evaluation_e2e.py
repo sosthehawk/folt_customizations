@@ -1,8 +1,9 @@
 """End-to-end check of the Procurement Committee Evaluation scoring grid and its notification.
 
-Covers the two halves of competitive bidding that key off the Request for Quotation:
-picking the RFQ gives every committee member a row to score against every bid received, and
-entering `Committee Reviewing` tells those members -- and only those members -- to go and score.
+Covers the three halves of competitive bidding that key off the Request for Quotation:
+picking the RFQ gives every committee member a row to score against every bid received,
+entering `Committee Reviewing` tells those members -- and only those members -- to go and score,
+and once they are scoring each of them can fill in their own row and nobody else's.
 
 Idempotent: tears down its own fixtures first. Run with
 
@@ -380,6 +381,61 @@ def run():
 		pluck="recipient",
 	)
 	check("both committee members were emailed too", set(MEMBERS) <= set(emailed), str(sorted(set(emailed))))
+
+	# --- a member fills in their own row and nobody else's ------------------------------------
+	# Everything above ran as Administrator, who is exempt from the self-scoring rule on purpose
+	# (see enforce_self_scoring); the guardrail only means anything from inside a member's own
+	# session, which is the only place a real score is ever entered.
+	scored_quotation = quotations[cheapest].name
+	try:
+		frappe.set_user(MEMBERS[0])
+
+		def reopen():
+			return frappe.get_doc("Procurement Committee Evaluation", evaluation.name)
+
+		def score_in_another_name():
+			doc = reopen()
+			grid(doc)[(MEMBERS[1], scored_quotation)].score = 95
+			doc.save()
+
+		expect_throw("a member cannot score in another member's name", score_in_another_name)
+
+		def sign_off_in_another_name():
+			doc = reopen()
+			for row in doc.members:
+				if row.member == MEMBERS[1]:
+					row.reviewed = 1
+			doc.save()
+
+		expect_throw("a member cannot sign off another member's review", sign_off_in_another_name)
+
+		def drop_a_colleague():
+			doc = reopen()
+			doc.members = [row for row in doc.members if row.member != MEMBERS[1]]
+			doc.save()
+
+		expect_throw("a member cannot drop a colleague off the committee", drop_a_colleague)
+
+		doc = reopen()
+		grid(doc)[(MEMBERS[0], scored_quotation)].score = 91
+		grid(doc)[(MEMBERS[0], scored_quotation)].comments = "Cheapest, and prequalified."
+		for row in doc.members:
+			if row.member == MEMBERS[0]:
+				row.reviewed = 1
+		doc.save()
+		saved = reopen()
+		check(
+			"a member can still score and sign their own row",
+			grid(saved)[(MEMBERS[0], scored_quotation)].score == 91
+			and any(row.reviewed for row in saved.members if row.member == MEMBERS[0]),
+		)
+		check(
+			"the other member's row is untouched",
+			not grid(saved)[(MEMBERS[1], scored_quotation)].score
+			and not any(row.reviewed for row in saved.members if row.member == MEMBERS[1]),
+		)
+	finally:
+		frappe.set_user("Administrator")
 
 	# --- and the award still cannot be recommended without a quorum --------------------------
 	expect_throw(

@@ -115,6 +115,12 @@ ROLE_EXPECTATIONS = {
 # read from it. Its key in the boot payload is the sidebar name, lowercased.
 FOLT_SIDEBAR = "folt"
 
+# Sidebar items every FoLT role must reach, whatever its steps are. Stated here rather than
+# repeated in all ten must_reach lists, so it cannot end up true of nine roles and quietly not the
+# tenth. My Tasks is the post-login landing page (hooks.add_to_apps_screen) and the Page carries
+# no `roles`, so a role that cannot reach it lands somewhere it was not meant to.
+ALWAYS_REACHABLE = ["My Tasks"]
+
 # Modules nobody outside System Manager has any business being offered. Checked by name as well
 # as through the mapping, because these are the ones that matter: user administration, the
 # doctype builder, and the modules FoLT does not run at all.
@@ -193,7 +199,11 @@ def run():
 
         # sufficiency and containment at item level, inside the sidebar FoLT works out of
         items = set(seen["sidebars"].get(FOLT_SIDEBAR, []))
-        unreachable = [item for item in expectation["must_reach"] if item not in items]
+        unreachable = [
+            item
+            for item in ALWAYS_REACHABLE + expectation["must_reach"]
+            if item not in items
+        ]
         check(
             f"{role}: reaches every document its workflow steps are on",
             not unreachable,

@@ -122,25 +122,34 @@ class ActivityParticipantList(Document):
 
 
 @frappe.whitelist()
+@frappe.validate_and_sanitize_search_inputs
 def get_verified_registers(doctype, txt, searchfield, start, page_len, filters):
-	"""Link query used by the reimbursement list: verified registers, this project only."""
-	project = (filters or {}).get("activity")
+	"""Link query used by the reimbursement list: verified registers, this project only.
 
-	conditions = ["docstatus = 1"]
-	values = {"txt": f"%{txt or ''}%", "start": start, "page_len": page_len}
+	The filters are handed straight to `get_all` rather than pasted into SQL, and that is the
+	whole point of the shape of this function. A link field does not post the filters the form
+	script set: frappe normalises each one into an `[operator, value]` pair on its way to
+	`search_link`, so `{"activity": "PROJ-0005"}` arrives as `{"activity": ["=", "PROJ-0005"]}`.
+	Bound into a query as a parameter, a two-element list is rendered by MySQLdb as a row
+	constructor and MariaDB rejects the comparison outright -- "Illegal parameter data types
+	varchar and row for operation '='" -- so picking a register failed with a traceback rather
+	than a wrong result. `get_all` is built for that form and takes either.
 
-	if project:
-		conditions.append("activity = %(project)s")
-		values["project"] = project
+	`docstatus` is set last and deliberately overrides whatever arrived: this query exists to
+	offer verified registers, and a draft one must never reach the dropdown even if the caller
+	asks for it. Nothing may be reimbursed that is not on a verified register (see the class
+	docstring), and this is where that starts.
+	"""
+	applied = dict(filters or {})
+	applied["docstatus"] = 1
 
-	return frappe.db.sql(
-		f"""
-		select name, activity_title, session_date
-		from `tabActivity Participant List`
-		where {' and '.join(conditions)}
-			and (name like %(txt)s or activity_title like %(txt)s)
-		order by session_date desc
-		limit %(start)s, %(page_len)s
-		""",
-		values,
+	return frappe.get_all(
+		"Activity Participant List",
+		fields=["name", "activity_title", "session_date"],
+		filters=applied,
+		or_filters=[["name", "like", f"%{txt}%"], ["activity_title", "like", f"%{txt}%"]] if txt else None,
+		order_by="session_date desc",
+		start=start,
+		page_length=page_len,
+		as_list=True,
 	)

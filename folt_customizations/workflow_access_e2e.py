@@ -110,6 +110,29 @@ def workflow_comments(doctype, name):
 	)
 
 
+def make_requisition(budget):
+	"""A requisition with just enough on it to be saved.
+
+	`float_required` is off: this suite is about who may change a document at which step, and a
+	requisition with no cash component exercises that without dragging the float chain in. See
+	activity_chain_e2e for the chain itself.
+	"""
+	return frappe.get_doc(
+		{
+			"doctype": "Activity Requisition",
+			"activity_program": PROGRAM,
+			"requested_by": frappe.db.get_value("Employee", {"user_id": REQUESTER, "status": "Active"})
+			or frappe.get_all("Employee", filters={"status": "Active"}, pluck="name")[0],
+			"activity_date": frappe.utils.nowdate(),
+			"company": frappe.defaults.get_defaults().get("company")
+			or frappe.get_all("Company", pluck="name")[0],
+			"budget_amount": budget,
+			"budget_line": "2.2.2",
+			"float_required": 0,
+		}
+	).insert()
+
+
 def edit_budget(name, amount):
 	"""Change the requested figure -- the thing an approver is being asked to sign."""
 
@@ -170,12 +193,7 @@ def run():
 
 	print("\n--- and it holds: a requisition belongs to the step it is on ---")
 
-	requisition = as_user(
-		REQUESTER,
-		lambda: frappe.get_doc(
-			{"doctype": "Activity Requisition", "activity_program": PROGRAM, "budget_amount": 50_000}
-		).insert(),
-	)
+	requisition = as_user(REQUESTER, lambda: make_requisition(50_000))
 	check("the requester raises it in Draft", requisition.workflow_state == "Draft", requisition.workflow_state)
 
 	as_user(REQUESTER, edit_budget(requisition.name, 60_000))
@@ -227,12 +245,7 @@ def run():
 
 	print("\n--- turning one down says why, and the reason reaches the next person ---")
 
-	turned_down = as_user(
-		REQUESTER,
-		lambda: frappe.get_doc(
-			{"doctype": "Activity Requisition", "activity_program": PROGRAM, "budget_amount": 40_000}
-		).insert(),
-	)
+	turned_down = as_user(REQUESTER, lambda: make_requisition(40_000))
 	as_user(REQUESTER, lambda: apply_workflow(frappe.get_doc("Activity Requisition", turned_down.name), "Submit for Review"))
 
 	expect_throw(

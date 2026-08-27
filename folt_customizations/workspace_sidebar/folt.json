@@ -9,6 +9,18 @@
   {
    "child": 0,
    "collapsible": 1,
+   "icon": "list",
+   "indent": 0,
+   "keep_closed": 0,
+   "label": "My Tasks",
+   "link_to": "folt-tasks",
+   "link_type": "Page",
+   "show_arrow": 0,
+   "type": "Link"
+  },
+  {
+   "child": 0,
+   "collapsible": 1,
    "icon": "home",
    "indent": 0,
    "keep_closed": 0,

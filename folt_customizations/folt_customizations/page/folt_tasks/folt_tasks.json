@@ -1,0 +1,17 @@
+{
+ "creation": "2026-08-27 09:00:00.000000",
+ "docstatus": 0,
+ "doctype": "Page",
+ "icon": "list",
+ "idx": 0,
+ "modified": "2026-08-27 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Folt Customizations",
+ "name": "folt-tasks",
+ "owner": "Administrator",
+ "page_name": "folt-tasks",
+ "roles": [],
+ "standard": "Yes",
+ "system_page": 0,
+ "title": "My Tasks"
+}

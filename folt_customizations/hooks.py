@@ -35,12 +35,18 @@ email_css = ["/assets/folt_customizations/css/folt_email.css"]
 # with FoLT as the only entry that was sending *suppliers* into a Desk workspace they cannot
 # open. Hiding the tile from portal users is what lets the login reach get_home_page() and the
 # supplier portal -- see supplier_portal.desk_app_visible.
+# `route` is also where a FoLT staff login lands -- but NOT on the strength of this hook alone.
+# get_default_path() only returns an app's own route when the user has exactly one app on their
+# apps screen, and this site has three (erpnext, hrms, folt_customizations), so it falls through
+# to a bare "/desk". System Settings.default_app is what makes frappe consult this route, and
+# workspaces.set_landing_page sets it -- the full reasoning is there. Both halves are needed: the
+# setting names the app, this names the page inside it.
 add_to_apps_screen = [
     {
         "name": "folt_customizations",
         "logo": "/assets/folt_customizations/icons/desktop_icons/solid/folt.svg",
         "title": "FoLT",
-        "route": "/desk/folt",
+        "route": "/desk/folt-tasks",
         "has_permission": "folt_customizations.supplier_portal.desk_app_visible",
     }
 ]
@@ -56,22 +62,32 @@ get_website_user_home_page = "folt_customizations.supplier_portal.portal_home_pa
 # add_turn_downs_to_bootinfo hands the Desk the list of workflow actions that turn a document
 # down, derived from the workflows themselves, so folt_workflow.js can ask for a reason before
 # the action runs rather than after the server has refused it. See workflow_access.
-# add_chain_to_bootinfo does the same job for the activity float chain: it hands the Desk the
-# doctypes that are steps in FoLT's Finance SOP, so folt_next_step.js can put "step 3 of 6,
-# waiting for the Finance Officer, next raise the reimbursement list" on the document itself
-# instead of leaving it in the SOP. See activity_chain.
+# add_guide_to_bootinfo hands the Desk the shape of every active workflow -- the steps in order,
+# whose step each one is, and which of them are also steps in FoLT's six-document Finance SOP --
+# so folt_guide.js can put "step 3 of 6, waiting for the Finance Officer, next raise the
+# reimbursement list" on the document itself instead of leaving it in the SOP. It replaces the
+# older add_chain_to_bootinfo, which carried a subset of the same fact. See document_guide.
 extend_bootinfo = [
     "folt_customizations.branding.rebrand_bootinfo",
     "folt_customizations.workflow_access.add_turn_downs_to_bootinfo",
-    "folt_customizations.activity_chain.add_chain_to_bootinfo",
+    "folt_customizations.document_guide.add_guide_to_bootinfo",
 ]
 
 # Plain path rather than a `.bundle.js` one, for the same reason email_css is: anything without
 # ".bundle." is passed through untouched, so this needs no build step.
 app_include_js = [
     "/assets/folt_customizations/js/folt_workflow.js",
-    "/assets/folt_customizations/js/folt_next_step.js",
+    "/assets/folt_customizations/js/folt_guide.js",
 ]
+
+# web_include_css above reaches the *website* only -- which is why folt_branding.css has never had
+# any effect on the Desk, as its own comments say. The Desk is a separate template:
+# frappe/www/desk.py collects the `app_include_css` hook and desk.html emits it in <head>.
+# folt_customizations is last in get_installed_apps(), so this is the last stylesheet the Desk
+# loads and an equal-specificity rule wins on order -- there is no !important in the file.
+# Plain path again, so no build step. Everything in it is scoped to `.folt-` classes this app
+# generates, so it cannot reach a form, a list or the print preview. See folt_desk.css.
+app_include_css = "/assets/folt_customizations/css/folt_desk.css"
 
 # splash_image is the animated mark, not the plain emblem: it is what shows during the
 # login wait, and it needs intrinsic width/height to render at all inside frappe's
@@ -109,6 +125,7 @@ after_install = [
     "folt_customizations.branding.apply_branding",
     "folt_customizations.workspaces.hide_workspaces",
     "folt_customizations.workspaces.sync_workspace_sidebars",
+    "folt_customizations.workspaces.set_landing_page",
     "folt_customizations.permissions.apply_role_permissions",
     "folt_customizations.access.apply_module_access",
     "folt_customizations.print_formats.apply_print_formats",
@@ -118,6 +135,7 @@ after_migrate = [
     "folt_customizations.branding.apply_branding",
     "folt_customizations.workspaces.hide_workspaces",
     "folt_customizations.workspaces.sync_workspace_sidebars",
+    "folt_customizations.workspaces.set_landing_page",
     "folt_customizations.permissions.apply_role_permissions",
     "folt_customizations.access.apply_module_access",
     "folt_customizations.print_formats.apply_print_formats",

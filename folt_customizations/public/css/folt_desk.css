@@ -1,0 +1,519 @@
+/* The guided layer on a FoLT document: step tracker, approval timeline, evidence checklist.
+
+   THE DESK, NOT THE WEBSITE. folt_branding.css is `web_include_css` and never reaches /app --
+   its own comments say so ("the v16 Desk has no navbar brand at all"). This file is the other
+   half: `app_include_css`, collected by frappe/www/desk.py and emitted by desk.html. Keeping
+   them as two files rather than one is deliberate; a single stylesheet spanning both surfaces
+   makes it impossible to tell, of any given rule, which one it is reaching.
+
+   THREE RULES, AND THEY ARE THE WHOLE OF WHY THIS SURVIVES AN UPGRADE.
+
+   1. Every selector begins with `.folt-`. The tracker, timeline and checklist are DOM this app
+      generates, so styling them cannot break a form, a list, a report or the print preview --
+      and the print preview matters, because the Desk renders `.print-format` in this same
+      document and an unscoped rule would change what a user believes the PDF looks like.
+      Notably this means NOT restyling `.frappe-card`, tempting though it is: ERPNext uses it on
+      pages this project has never looked at.
+
+   2. No colour is written down. Everything is a frappe custom property, because frappe
+      redefines those under [data-theme="dark"] (scss/desk/dark.scss) -- so tokens get dark mode
+      for free and a hex literal is a bug that only shows up for the people who use dark mode.
+
+   3. No `!important`, anywhere. folt_branding.css earns its specificity fight because
+      login.bundle.css loads after it; this file has no such problem -- folt_customizations is
+      last in get_installed_apps(), so app_include_css is the last stylesheet the Desk loads and
+      an equal-specificity rule already wins on order. If a rule here ever seems to need
+      `!important`, it is selecting a frappe node and breaking rule 1.
+
+   Everything is nested under `body.folt-guided`, which folt_guide.js sets on boot. That is the
+   kill switch: commenting out one line of JS reverts every visual change in this file without
+   redeploying a stylesheet. */
+
+body.folt-guided .folt-guide {
+  display: flex;
+  flex-direction: column;
+  gap: var(--padding-md);
+}
+
+/* --- where this document is in the SOP ------------------------------------------------- */
+
+body.folt-guided .folt-chain {
+  display: flex;
+  align-items: baseline;
+  gap: var(--padding-sm);
+  flex-wrap: wrap;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+body.folt-guided .folt-chain-step {
+  font-weight: var(--weight-semibold);
+  color: var(--heading-color);
+}
+
+/* --- the step tracker ------------------------------------------------------------------ */
+
+body.folt-guided .folt-steps {
+  display: flex;
+  align-items: flex-start;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  /* Wide chains (Employee Advance has six steps) scroll rather than wrapping into an
+     unreadable stack, and rather than making the page scroll sideways. */
+  overflow-x: auto;
+  gap: 0;
+}
+
+body.folt-guided .folt-step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: 1 1 0;
+  min-width: 96px;
+  position: relative;
+  text-align: center;
+  padding: 0 var(--padding-xs);
+}
+
+/* The connector between steps, drawn as a border on a pseudo-element rather than as a
+   separate node, so the markup stays a plain list of steps. */
+body.folt-guided .folt-step + .folt-step::before {
+  content: "";
+  position: absolute;
+  top: 11px;
+  left: 0;
+  width: 100%;
+  transform: translateX(-50%);
+  border-top: 1px solid var(--border-color);
+  z-index: 0;
+}
+
+body.folt-guided .folt-step.is-done + .folt-step.is-done::before,
+body.folt-guided .folt-step.is-done + .folt-step.is-current::before {
+  border-top-color: var(--green-500);
+}
+
+body.folt-guided .folt-step-mark {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--border-radius-full);
+  border: 1px solid var(--border-color);
+  background: var(--card-bg);
+  color: var(--text-light);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  line-height: 1;
+}
+
+body.folt-guided .folt-step.is-done .folt-step-mark {
+  background: var(--green-500);
+  border-color: var(--green-500);
+  color: var(--neutral-white);
+}
+
+body.folt-guided .folt-step.is-current .folt-step-mark {
+  background: var(--blue-500);
+  border-color: var(--blue-500);
+  color: var(--neutral-white);
+}
+
+body.folt-guided .folt-step-label {
+  margin-top: var(--padding-xs);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  line-height: 1.3;
+}
+
+body.folt-guided .folt-step.is-current .folt-step-label {
+  color: var(--heading-color);
+  font-weight: var(--weight-semibold);
+}
+
+/* Whose step it is. Muted deliberately: it is the answer to a question the reader has only
+   sometimes, and at full contrast it competes with the step name itself. */
+body.folt-guided .folt-step-role {
+  font-size: var(--text-xs);
+  color: var(--text-light);
+  line-height: 1.3;
+}
+
+/* A state the document need not pass through at all -- `Overdue` on a float, `Partly Paid` on
+   a reimbursement list. Rendered as a note on the step it leads into, never as a step. */
+body.folt-guided .folt-step-optional {
+  font-size: var(--text-xs);
+  color: var(--text-light);
+  font-style: italic;
+}
+
+body.folt-guided .folt-step.is-at-optional .folt-step-mark {
+  background: var(--orange-500);
+  border-color: var(--orange-500);
+  color: var(--neutral-white);
+}
+
+/* --- turned down ----------------------------------------------------------------------- */
+
+/* The alert-* tokens rather than red-50 / red-600 directly, and this is the one place in the
+   file where the difference is load-bearing: dark.scss redefines --alert-bg-danger to red-900
+   and --alert-text-danger to red-300, while the raw red-50 stays a pale pink in both themes.
+   Written with the literal ramp this banner would be white text on near-white in dark mode. */
+body.folt-guided .folt-turned-down {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--padding-sm) var(--padding-md);
+  border-radius: var(--border-radius-md);
+  background: var(--alert-bg-danger);
+  color: var(--alert-text-danger);
+  font-size: var(--text-sm);
+}
+
+body.folt-guided .folt-turned-down-head {
+  font-weight: var(--weight-semibold);
+}
+
+/* --- the panels ------------------------------------------------------------------------ */
+
+body.folt-guided .folt-panels {
+  display: grid;
+  /* Two columns where there is room, one where there is not. `auto-fit` with a minimum does
+     this without a media query, so there is no breakpoint here to keep in step with frappe's. */
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: var(--padding-md);
+}
+
+body.folt-guided .folt-panel {
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius-md);
+  background: var(--card-bg);
+  padding: var(--padding-md);
+}
+
+body.folt-guided .folt-panel-title {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--heading-color);
+  margin-bottom: var(--padding-sm);
+}
+
+/* --- approval timeline ----------------------------------------------------------------- */
+
+body.folt-guided .folt-timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+body.folt-guided .folt-event {
+  position: relative;
+  padding: 0 0 var(--padding-md) var(--padding-lg);
+  font-size: var(--text-sm);
+  color: var(--text-color);
+}
+
+body.folt-guided .folt-event:last-child {
+  padding-bottom: 0;
+}
+
+body.folt-guided .folt-event::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 5px;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--border-radius-full);
+  background: var(--gray-400);
+}
+
+body.folt-guided .folt-event.is-forward::before,
+body.folt-guided .folt-event.is-finished::before {
+  background: var(--green-500);
+}
+
+body.folt-guided .folt-event.is-turned-down::before {
+  background: var(--red-500);
+}
+
+body.folt-guided .folt-event.is-derived::before {
+  background: var(--orange-500);
+}
+
+/* The rail joining the events. Stops at the last one, so the timeline does not trail off
+   into an implied future it knows nothing about. */
+body.folt-guided .folt-event:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 13px;
+  bottom: 0;
+  border-left: 1px solid var(--border-color);
+}
+
+body.folt-guided .folt-event-head {
+  font-weight: var(--weight-medium);
+  color: var(--heading-color);
+}
+
+body.folt-guided .folt-event-meta {
+  font-size: var(--text-xs);
+  color: var(--text-light);
+}
+
+/* The reason a document was sent back. Given real weight rather than muted: it is the one part
+   of the timeline somebody has to act on. */
+body.folt-guided .folt-event-reason {
+  margin-top: 2px;
+  color: var(--text-color);
+}
+
+body.folt-guided .folt-pending {
+  margin-top: var(--padding-sm);
+  padding-top: var(--padding-sm);
+  border-top: 1px solid var(--border-color);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+/* A role nobody holds means the document is stuck and chasing will not move it. */
+body.folt-guided .folt-unassigned {
+  color: var(--alert-text-danger);
+  font-weight: var(--weight-medium);
+}
+
+/* --- evidence checklist ---------------------------------------------------------------- */
+
+body.folt-guided .folt-documents {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--padding-sm);
+}
+
+body.folt-guided .folt-document {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--padding-sm);
+  font-size: var(--text-sm);
+}
+
+body.folt-guided .folt-document-label {
+  color: var(--text-color);
+}
+
+body.folt-guided .folt-document.is-blocking .folt-document-label {
+  font-weight: var(--weight-medium);
+  color: var(--heading-color);
+}
+
+body.folt-guided .folt-document-why {
+  display: block;
+  font-size: var(--text-xs);
+  color: var(--text-light);
+  line-height: 1.4;
+}
+
+/* A missing document is worth a pointer at where to put it, and the pointer is a button
+   because that is what it does. */
+body.folt-guided .folt-document-action {
+  flex-shrink: 0;
+}
+
+/* --- actions --------------------------------------------------------------------------- */
+
+body.folt-guided .folt-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--padding-sm);
+  flex-wrap: wrap;
+}
+
+/* Turn-downs sit beside the forward action rather than competing with it: they are already
+   gated by the reason dialog, and giving them equal weight invites the wrong click. */
+body.folt-guided .folt-action-secondary {
+  font-size: var(--text-sm);
+}
+
+body.folt-guided .folt-blocked-note {
+  font-size: var(--text-sm);
+  color: var(--alert-text-warning);
+}
+
+/* --- the My Tasks page ------------------------------------------------------------------
+   A full surface this app owns end to end, unlike the guide, which sits inside a form frappe
+   built. Still `.folt-` prefixed throughout: the page body is ours, but it is rendered inside
+   frappe's own `.page-main`, and a bare `ul` or `li` rule here would reach the rest of it. */
+
+body.folt-guided .folt-tasks {
+  display: flex;
+  flex-direction: column;
+  gap: var(--padding-md);
+}
+
+body.folt-guided .folt-tasks-nav {
+  display: flex;
+  gap: var(--padding-xs);
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: var(--padding-sm);
+}
+
+body.folt-guided .folt-tasks-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--padding-xs);
+  padding: var(--padding-xs) var(--padding-sm);
+  border: 1px solid transparent;
+  border-radius: var(--border-radius-md);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+body.folt-guided .folt-tasks-tab:hover {
+  background: var(--fg-hover-color);
+  color: var(--text-color);
+}
+
+body.folt-guided .folt-tasks-tab.is-active {
+  background: var(--card-bg);
+  border-color: var(--border-color);
+  color: var(--heading-color);
+  font-weight: var(--weight-semibold);
+}
+
+body.folt-guided .folt-tasks-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  padding: 0 5px;
+  height: 18px;
+  border-radius: var(--border-radius-full);
+  background: var(--bg-color);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+}
+
+body.folt-guided .folt-tasks-tab.is-active .folt-tasks-count {
+  background: var(--blue-500);
+  color: var(--neutral-white);
+}
+
+body.folt-guided .folt-tasks-empty {
+  padding: var(--padding-lg);
+  text-align: center;
+  color: var(--text-light);
+  font-size: var(--text-sm);
+}
+
+body.folt-guided .folt-tasks-group {
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius-md);
+  background: var(--card-bg);
+  overflow: hidden;
+  margin-bottom: var(--padding-md);
+}
+
+body.folt-guided .folt-tasks-group-head {
+  display: flex;
+  align-items: center;
+  gap: var(--padding-sm);
+  padding: var(--padding-sm) var(--padding-md);
+  border-bottom: 1px solid var(--border-color);
+  font-size: var(--text-sm);
+}
+
+body.folt-guided .folt-tasks-group-title {
+  font-weight: var(--weight-semibold);
+  color: var(--heading-color);
+}
+
+body.folt-guided .folt-tasks-group-step {
+  color: var(--text-light);
+  font-size: var(--text-xs);
+}
+
+/* Pushes the count to the right without a spacer node. */
+body.folt-guided .folt-tasks-group-head .folt-tasks-count {
+  margin-left: auto;
+}
+
+body.folt-guided .folt-tasks-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+body.folt-guided .folt-tasks-row {
+  display: flex;
+  align-items: center;
+  gap: var(--padding-md);
+  padding: var(--padding-sm) var(--padding-md);
+  border-top: 1px solid var(--border-color);
+  cursor: pointer;
+}
+
+body.folt-guided .folt-tasks-rows > .folt-tasks-row:first-child {
+  border-top: none;
+}
+
+body.folt-guided .folt-tasks-row:hover {
+  background: var(--fg-hover-color);
+}
+
+body.folt-guided .folt-tasks-row-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+body.folt-guided .folt-tasks-row-title {
+  font-size: var(--text-sm);
+  color: var(--text-color);
+  /* A long activity title truncates rather than wrapping a queue row to three lines. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body.folt-guided .folt-tasks-row-meta {
+  font-size: var(--text-xs);
+  color: var(--text-light);
+}
+
+body.folt-guided .folt-tasks-amount {
+  flex-shrink: 0;
+  font-size: var(--text-sm);
+  color: var(--text-color);
+  font-variant-numeric: tabular-nums;
+}
+
+body.folt-guided .folt-tasks-age {
+  flex-shrink: 0;
+  min-width: 44px;
+  text-align: right;
+  font-size: var(--text-xs);
+  color: var(--text-light);
+  font-variant-numeric: tabular-nums;
+}
+
+/* A week in somebody's queue is the thing worth noticing on this page. */
+body.folt-guided .folt-tasks-age.is-stale {
+  color: var(--alert-text-warning);
+  font-weight: var(--weight-medium);
+}

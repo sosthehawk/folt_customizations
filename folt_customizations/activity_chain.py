@@ -567,14 +567,7 @@ def _expense_claim_type(company: str) -> str:
 	return configured[0]
 
 
-def add_chain_to_bootinfo(bootinfo):
-	"""Tell the Desk which doctypes are steps in the activity chain. `extend_bootinfo` hook.
-
-	The form script needs the list before any form is opened, and the list is CHAIN_STEPS above
-	-- so it is sent with the boot payload rather than repeated in the JS, for the same reason
-	the turn-down pairs are (workflow_access.add_turn_downs_to_bootinfo). Five entries.
-	"""
-	bootinfo.folt_chain = {
-		doctype: {"step": step, "of": CHAIN_LENGTH, "title": title}
-		for doctype, (step, title) in CHAIN_STEPS.items()
-	}
+# Which doctypes are steps in this chain used to be sent to the Desk from here, as
+# `bootinfo.folt_chain`. document_guide.add_guide_to_bootinfo now carries it, alongside the step
+# plan of every workflow -- CHAIN_STEPS and CHAIN_LENGTH above are what it reads. One boot key
+# describing where a document sits, rather than two describing overlapping halves of it.

@@ -65,6 +65,44 @@ def hide_workspaces():
         frappe.clear_cache()
 
 
+# Where a FoLT staff login lands. The route itself is the one on `add_to_apps_screen` in hooks.py
+# (/desk/folt-tasks); this is the setting that makes frappe consult it.
+#
+# WHY THE HOOK ALONE IS NOT ENOUGH, because it looks as though it should be.
+# frappe/apps.py:get_default_path() only returns an app's own route when the user has exactly one
+# app on their apps screen:
+#
+#     if len(_apps) == 1:      return _apps[0].get("route") or "/desk"
+#     elif is_desk_apps(_apps): return "/desk"          # <- this site takes this branch
+#
+# erpnext, hrms and folt_customizations all declare `add_to_apps_screen`, so `_apps` is three long
+# and every route starts with /desk -- which lands every staff login on /desk, the apps-screen-ish
+# page, no matter what FoLT's own route says. `default_app` is read *before* that branch and
+# resolves through the same get_route(), so setting it is what makes the hook's route the answer.
+#
+# Set on System Settings rather than per User: it is where FoLT staff should start, not a personal
+# preference, and `User.default_app` still overrides it for anyone who sets one (get_default_path
+# checks the user's value first). Suppliers are unaffected -- get_apps() drops the FoLT tile for
+# them via supplier_portal.desk_app_visible, and get_default_path returns None on an empty list
+# before it ever reads this setting, so the portal home page still wins.
+LANDING_APP = "folt_customizations"
+
+
+def set_landing_page():
+    """Send FoLT staff to My Tasks after login rather than to /desk.
+
+    Idempotent and safe on every migrate: the value is compared first, so a second run is a
+    no-op. In code rather than a Desk edit for the same reason the branding is -- a rebuilt
+    container or a fresh site should come up landing in the right place.
+    """
+    if frappe.db.get_single_value("System Settings", "default_app") == LANDING_APP:
+        return False
+
+    frappe.db.set_single_value("System Settings", "default_app", LANDING_APP)
+    frappe.clear_cache()
+    return True
+
+
 # The Workspace Sidebar definitions this app ships under folt_customizations/workspace_sidebar/.
 # `bench migrate` does NOT import them: those files are *exports*, written out by
 # WorkspaceSidebar.export_sidebar whenever the sidebar is edited in the Desk with developer_mode

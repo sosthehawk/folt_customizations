@@ -8,6 +8,7 @@ from frappe.utils.user import get_users_with_role
 # so the accent is the shared one -- see branding.EMAIL_ACCENT.
 from folt_customizations.branding import EMAIL_ACCENT
 from folt_customizations.procurement import COMMITTEE_REVIEW_STATE, EVALUATION_DOCTYPE
+from folt_customizations.workflow import is_own_todo
 
 # FoLT runs nine approval workflows, and until now nobody was told when a document landed in
 # their queue. Two things were switched off, and both gates have to be open for frappe to send
@@ -54,15 +55,11 @@ def notify_pending_approvers(doc, method=None):
     # Frappe writes a Workflow Action for the initial state too, where the pending action is
     # the author's own -- submitting their own draft. Notifying every holder of the author's
     # role about an unsubmitted document is pure noise: before this guard, one new Purchase
-    # Order alerted every Purchase User on the site while it was still in Draft.
-    #
-    # "The author's own to-do" is the actor still being the owner AND holding a role that can
-    # make the next move -- not simply "the first state". Employee Advance Float Approval is
-    # created in `Requested`, and the action out of it belongs to the Finance Officer, so a
-    # rule keyed on the initial state would suppress the one notification that matters there.
+    # Order alerted every Purchase User on the site while it was still in Draft. The rule is
+    # stated in workflow.is_own_todo, because the My Tasks page needs the same answer to sort a
+    # document into Drafts rather than Awaiting.
     owner = frappe.db.get_value(doc.reference_doctype, doc.reference_name, "owner")
-    actor = frappe.session.user
-    if actor == owner and not set(roles).isdisjoint(frappe.get_roles(actor)):
+    if frappe.session.user == owner and is_own_todo(owner, roles):
         return
 
     recipients = {user for role in roles for user in get_users_with_role(role)}

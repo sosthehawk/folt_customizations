@@ -38,6 +38,31 @@ def get_pending_approvers(doctype: str, name: str) -> dict:
     return get_approvers_for_state(workflow, state)
 
 
+def is_own_todo(owner: str, roles: list[str]) -> bool:
+    """Whether the action pending on a document belongs to the person who raised it.
+
+    True when the author themselves holds a role that can make the next move -- so the document
+    is not waiting on an approver at all, it is waiting on its own author to finish with it.
+
+    NOT "the document is in its first state", and the difference is the whole point. Employee
+    Advance Float Approval is created in `Requested` and the action out of `Requested` belongs to
+    the Finance Officer, so a rule keyed on the initial state would hide the one item there that
+    genuinely is somebody's task. An Activity Requisition in `Draft` moves on by `Employee`, which
+    the requester holds, so that one is theirs.
+
+    Stated once because two places need it and they get it wrong in opposite directions:
+
+      notifications.notify_pending_approvers stays quiet. Before this guard, one new Purchase
+      Order alerted every Purchase User on the site while it was still a draft.
+
+      folt_tasks.my_tasks keeps it out of *everybody's* approval queue -- the author's included,
+      but everybody else's too. Somebody else's unfinished draft is not a task: it is going to be
+      submitted by the person writing it, and a queue full of other people's drafts is a queue
+      nobody reads. It still shows in its author's Drafts, which is where unfinished work belongs.
+    """
+    return not set(roles).isdisjoint(frappe.get_roles(owner))
+
+
 def get_approvers_for_state(workflow, state: str) -> dict:
     """The roles allowed to act on `state`, resolved to the users holding them.
 

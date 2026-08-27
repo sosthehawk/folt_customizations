@@ -53,7 +53,17 @@ get_website_user_home_page = "folt_customizations.supplier_portal.portal_home_pa
 # Replace the Frappe/ERPNext/Frappe HR app titles and logos in the boot payload. These
 # drive the Desk sidebar header subtitle and the /apps screen, and they are unreachable
 # from any hook we can declare -- see branding.rebrand_bootinfo for why.
-extend_bootinfo = ["folt_customizations.branding.rebrand_bootinfo"]
+# add_turn_downs_to_bootinfo hands the Desk the list of workflow actions that turn a document
+# down, derived from the workflows themselves, so folt_workflow.js can ask for a reason before
+# the action runs rather than after the server has refused it. See workflow_access.
+extend_bootinfo = [
+    "folt_customizations.branding.rebrand_bootinfo",
+    "folt_customizations.workflow_access.add_turn_downs_to_bootinfo",
+]
+
+# Plain path rather than a `.bundle.js` one, for the same reason email_css is: anything without
+# ".bundle." is passed through untouched, so this needs no build step.
+app_include_js = "/assets/folt_customizations/js/folt_workflow.js"
 
 # splash_image is the animated mark, not the plain emblem: it is what shows during the
 # login wait, and it needs intrinsic width/height to render at all inside frappe's
@@ -110,6 +120,28 @@ after_migrate = [
 # `folt_additional_supplier_groups` Table MultiSelect (Custom Field fixture). The hook
 # keeps that table consistent with the primary `supplier_group` -- see supplier.py.
 doc_events = {
+    # Every doctype, because the rule is about workflows rather than about any one document, and
+    # it bails out on a cached lookup for the doctypes that have none. Both events are needed and
+    # only one runs per save: Frappe skips `validate` when a submitted document is edited and
+    # calls `before_update_after_submit` instead, which is where half of FoLT's approval states
+    # live. See workflow_access -- `allow_edit` is a Desk-only convention until this runs.
+    #
+    # A rejection is a step in the chain aimed at a named person, so it carries the reason they
+    # need -- required on the way down, cleared on the way back out, and written into the timeline
+    # once the save has stuck. This is FoLT's answer to "how does a document get turned down"; a
+    # cancellation, which says nothing to anybody, is not it.
+    "*": {
+        "validate": [
+            "folt_customizations.workflow_access.enforce_state_custodian",
+            "folt_customizations.workflow_access.require_rejection_reason",
+        ],
+        "before_update_after_submit": [
+            "folt_customizations.workflow_access.enforce_state_custodian",
+            "folt_customizations.workflow_access.require_rejection_reason",
+        ],
+        "on_update": "folt_customizations.workflow_access.record_rejection_reason",
+        "on_update_after_submit": "folt_customizations.workflow_access.record_rejection_reason",
+    },
     "Supplier": {
         "validate": "folt_customizations.supplier.validate",
     },

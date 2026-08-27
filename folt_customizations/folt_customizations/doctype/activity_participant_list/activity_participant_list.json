@@ -22,6 +22,7 @@
     { "fieldname": "participants", "fieldtype": "Table", "options": "Activity Participant Entry", "label": "Attendees" },
     { "fieldname": "section_break_status", "fieldtype": "Section Break" },
     { "fieldname": "workflow_state", "fieldtype": "Link", "options": "Workflow State", "label": "Workflow State", "read_only": 1, "no_copy": 1, "in_standard_filter": 1, "in_list_view": 1 },
+    { "fieldname": "folt_rejection_reason", "fieldtype": "Small Text", "label": "Rejection Reason", "read_only": 1, "no_copy": 1, "allow_on_submit": 1, "depends_on": "eval:doc.folt_rejection_reason", "description": "Why this was rejected or returned. Written when a document is turned down and cleared when it goes back for another attempt -- the wording of each one is kept in the timeline." },
     { "fieldname": "amended_from", "fieldtype": "Link", "options": "Activity Participant List", "label": "Amended From", "read_only": 1, "no_copy": 1, "print_hide": 1 }
   ],
   "permissions": [

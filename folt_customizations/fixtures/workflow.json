@@ -1054,7 +1054,7 @@
     "workflow_builder_id": null
    },
    {
-    "allow_edit": "Finance Officer",
+    "allow_edit": "Finance Assistant",
     "avoid_status_override": 0,
     "doc_status": "1",
     "evaluate_as_expression": 0,

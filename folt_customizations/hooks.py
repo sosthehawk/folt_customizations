@@ -56,14 +56,22 @@ get_website_user_home_page = "folt_customizations.supplier_portal.portal_home_pa
 # add_turn_downs_to_bootinfo hands the Desk the list of workflow actions that turn a document
 # down, derived from the workflows themselves, so folt_workflow.js can ask for a reason before
 # the action runs rather than after the server has refused it. See workflow_access.
+# add_chain_to_bootinfo does the same job for the activity float chain: it hands the Desk the
+# doctypes that are steps in FoLT's Finance SOP, so folt_next_step.js can put "step 3 of 6,
+# waiting for the Finance Officer, next raise the reimbursement list" on the document itself
+# instead of leaving it in the SOP. See activity_chain.
 extend_bootinfo = [
     "folt_customizations.branding.rebrand_bootinfo",
     "folt_customizations.workflow_access.add_turn_downs_to_bootinfo",
+    "folt_customizations.activity_chain.add_chain_to_bootinfo",
 ]
 
 # Plain path rather than a `.bundle.js` one, for the same reason email_css is: anything without
 # ".bundle." is passed through untouched, so this needs no build step.
-app_include_js = "/assets/folt_customizations/js/folt_workflow.js"
+app_include_js = [
+    "/assets/folt_customizations/js/folt_workflow.js",
+    "/assets/folt_customizations/js/folt_next_step.js",
+]
 
 # splash_image is the animated mark, not the plain emblem: it is what shows during the
 # login wait, and it needs intrinsic width/height to render at all inside frappe's

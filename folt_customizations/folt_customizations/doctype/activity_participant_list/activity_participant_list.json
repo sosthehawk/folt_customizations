@@ -15,6 +15,7 @@
     { "fieldname": "session_date", "fieldtype": "Date", "label": "Session date", "reqd": 1, "in_list_view": 1, "description": "One register per session. A participant may legitimately appear on more than one session of the same project." },
     { "fieldname": "column_break_head", "fieldtype": "Column Break" },
     { "fieldname": "venue", "fieldtype": "Data", "label": "Venue" },
+    { "fieldname": "activity_requisition", "fieldtype": "Link", "options": "Activity Requisition", "label": "Activity Requisition", "read_only": 1, "description": "The approved requisition this register was opened from. Set when the register is derived; blank on one raised by hand." },
     { "fieldname": "total_attendees", "fieldtype": "Int", "label": "Attendees", "read_only": 1, "in_list_view": 1 },
     { "fieldname": "total_eligible", "fieldtype": "Int", "label": "Eligible for reimbursement", "read_only": 1 },
     { "fieldname": "attendance_sheet", "fieldtype": "Attach", "label": "Signed attendance sheet", "description": "Mandatory before verification: the scanned sheet signed at the activity." },

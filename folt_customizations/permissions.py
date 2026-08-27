@@ -85,10 +85,14 @@ WORKFLOW_PERMISSIONS = {
 	# hrms ships it with permissions for HR roles and Expense Approver, none of which FoLT
 	# uses; the retirement chain is Finance Officer -> Executive Director, then the Finance
 	# Assistant settles the balance after submission (hence `submit` there too, per above).
+	# `create` on top of that, because the retirement claim is no longer typed from scratch: it
+	# is raised from the paid reimbursement list by whoever is closing the activity off, and on
+	# FoLT's chain that is the Finance Officer or the Finance Assistant, not the claimant. See
+	# activity_chain.make_float_retirement.
 	"Expense Claim": {
-		"Finance Officer": ("read", "write"),
+		"Finance Officer": ("read", "write", "create"),
 		"Executive Director": ("read", "write", "submit"),
-		"Finance Assistant": ("read", "write", "submit"),
+		"Finance Assistant": ("read", "write", "create", "submit"),
 	},
 	"Salary Slip": {
 		"Finance Assistant": ("read", "write", "create"),
@@ -131,6 +135,21 @@ LINK_FIELD_PERMISSIONS = {
 	"Cost Center": {
 		role: ("select",)
 		for role in ("Employee", "Head of Programs", "Head of Finance", "Operations Support Officer")
+	},
+	# An Activity Requisition names two people -- who is asking, and who will hold the float --
+	# and they are frequently not the same person (in the worked float pack the requester was the
+	# Programme Officer and the holder the Finance Assistant). Without `select` the second field
+	# cannot be filled at all, and the float would go out in the requester's name.
+	"Employee": {
+		role: ("select",)
+		for role in (
+			"Employee",
+			"Head of Programs",
+			"Head of Finance",
+			"Finance Officer",
+			"Finance Assistant",
+			"Operations Support Officer",
+		)
 	},
 	"Supplier": {
 		role: ("select",) for role in ("Operations Support Officer", "Procurement Committee", "Head of Finance")

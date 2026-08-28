@@ -217,6 +217,55 @@ def run():
 	problems = document_guide.audit(verbose=False)["problems"]
 	check("every DOCUMENTS entry names a real attachment and real states", not problems, "; ".join(problems))
 
+	# The Custom Field fixtures are part of the same contract, and they carry a failure mode the
+	# Desk hides. `folt_rejection_reason` shipped with mandatory_depends_on
+	# "eval:!doc.folt_waiver_request" on four doctypes -- copy-pasted from
+	# Purchase Order.folt_supplier_group, where it is correct -- and only Purchase Order has a
+	# folt_waiver_request field. On the other three the expression names nothing, is therefore
+	# always truthy, and makes a read_only field mandatory. Invisible in the Desk because the field
+	# is also depends_on-hidden, and fatal to any client that evaluates the expression honestly.
+	#
+	# So this asserts the class, not the instance: every doc.<field> reference in every conditional
+	# expression in the fixture must name a field that doctype actually has.
+	import json
+	import re
+
+	with open(frappe.get_app_path("folt_customizations", "fixtures", "custom_field.json")) as fh:
+		custom_fields = json.load(fh)
+
+	dangling = []
+	for row in custom_fields:
+		if not frappe.db.exists("DocType", row["dt"]):
+			continue
+		meta = frappe.get_meta(row["dt"])
+		for prop in ("depends_on", "mandatory_depends_on", "read_only_depends_on"):
+			for referenced in re.findall(r"doc\.(\w+)", row.get(prop) or ""):
+				if not meta.has_field(referenced):
+					dangling.append(f"{row['dt']}.{row['fieldname']}.{prop} -> doc.{referenced}")
+
+	check(
+		"no conditional expression on a custom field names a field its doctype lacks",
+		not dangling,
+		"; ".join(dangling) if dangling else f"{len(custom_fields)} custom fields checked",
+	)
+
+	# The dangling check above catches three of the four rows the bug shipped on, and misses
+	# Purchase Order -- because folt_waiver_request genuinely exists there, so the expression was
+	# evaluable and merely wrong. This is the invariant that covers all four: a field nobody can
+	# type into must not be required. FoLT populates folt_rejection_reason from
+	# workflow_access.require_rejection_reason, so demanding it from the person filling the form is
+	# asking for something the form does not let them give.
+	contradictory = [
+		f"{row['dt']}.{row['fieldname']}"
+		for row in custom_fields
+		if row.get("read_only") and (row.get("mandatory_depends_on") or row.get("reqd"))
+	]
+	check(
+		"no read-only custom field is also required",
+		not contradictory,
+		"; ".join(contradictory) if contradictory else "none",
+	)
+
 	print("\n--- a register that has not got its evidence yet ---")
 
 	requisition = approve_requisition(as_user(REQUESTER, make_requisition))

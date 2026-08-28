@@ -229,13 +229,18 @@ def record_rejection_reason(doc, method=None):
 	forget_held_reason(doc.doctype, doc.name, before.modified)
 
 
-def add_turn_downs_to_bootinfo(bootinfo):
-	"""Tell the Desk which workflow actions turn a document down. `extend_bootinfo` hook.
+def turn_down_map() -> dict:
+	"""Which actions turn a document down, per doctype: {doctype: {state_field, turn_downs}}.
 
-	The form script has to know before a form is opened, and the answer is derived from the
-	workflows (is_turn_down), so it is sent with the boot payload rather than hard-coded in the
-	JS -- a chain that gains a Reject next month gains the dialog with it, and there is no second
-	list to keep in step. Small: fifteen pairs across nine doctypes.
+	Derived from the workflows through is_turn_down rather than written down, so a chain that gains
+	a Reject next month gains the dialog with it and there is no second list to keep in step.
+	Small: fifteen pairs across nine doctypes.
+
+	Split out of add_turn_downs_to_bootinfo so a second caller can have it. The Desk receives it
+	through `extend_bootinfo`, which never runs outside /app -- so anything served from a website
+	route has to call this rather than grow its own copy of the same derivation. Whoever calls it
+	owes the user the same thing the Desk does: ask for the reason *before* the action, because
+	require_rejection_reason refuses the transition without one.
 	"""
 	turn_downs = {}
 	for name in frappe.get_all("Workflow", filters={"is_active": 1}, pluck="name"):
@@ -251,7 +256,16 @@ def add_turn_downs_to_bootinfo(bootinfo):
 				"turn_downs": pairs,
 			}
 
-	bootinfo.folt_turn_downs = turn_downs
+	return turn_downs
+
+
+def add_turn_downs_to_bootinfo(bootinfo):
+	"""Tell the Desk which workflow actions turn a document down. `extend_bootinfo` hook.
+
+	The form script has to know before a form is opened, which is why this is in the boot payload
+	rather than fetched per form. See turn_down_map for the derivation.
+	"""
+	bootinfo.folt_turn_downs = turn_down_map()
 
 
 @frappe.whitelist()

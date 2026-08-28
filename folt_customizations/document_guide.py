@@ -370,24 +370,32 @@ def _next_states(doc, doctype: str) -> set[str]:
 # --- the Desk's copy of the static half -------------------------------------------------
 
 
-def add_guide_to_bootinfo(bootinfo):
-	"""Hand the Desk the shape of every active workflow. `extend_bootinfo` hook.
+def guide_map(only_permitted: bool = False) -> dict:
+	"""The shape of every active workflow, keyed by doctype: the static half of the guide.
 
-	A form script can only be attached by doctype and the list of doctypes has to be known
-	before any form is opened, which is the same reason add_turn_downs_to_bootinfo exists. What
-	is sent is the static half -- the steps and whose they are, which is a property of the
-	workflow and identical for every document under it -- so the per-document call (get_guide)
-	is the only thing that has to happen on a form open.
+	Static meaning a property of the *workflow* rather than of any document -- the steps, whose
+	each one is, which are also steps in the six-document SOP -- so it is the same answer for
+	every Activity Requisition in the system. That is what makes it cheap enough to hand a client
+	once per session and then place documents against without another round trip.
 
-	This replaces activity_chain.add_chain_to_bootinfo rather than sitting beside it. That key
-	said which doctypes are steps in the six-document SOP, which is a subset of what is here, and
-	two boot keys describing one fact is exactly the drift this app writes its comments to avoid.
+	Split out of add_guide_to_bootinfo so a second caller can have it. The Desk gets it through
+	`extend_bootinfo`, which does not run outside /app, so anything served from a website route
+	needs this function directly rather than a second implementation of it.
+
+	`only_permitted` filters to the doctypes the session user can read. The boot payload does not
+	do that -- it hands every user all nine workflows and the role names on each step -- which is
+	tolerable for the Desk, where the same user could read the Workflow list anyway, and is worth
+	tightening for anything new. It is off by default so the bootinfo hook keeps its exact
+	existing output; document_guide_e2e asserts that shape.
 	"""
 	guided = {}
 	for name in frappe.get_all("Workflow", filters={"is_active": 1}, pluck="name"):
 		workflow = frappe.get_cached_doc("Workflow", name)
 		shaped = workflow_shape.shape(workflow.document_type)
 		if not shaped:
+			continue
+
+		if only_permitted and not frappe.has_permission(workflow.document_type, "read"):
 			continue
 
 		step, title = CHAIN_STEPS.get(workflow.document_type, (None, None))
@@ -409,7 +417,20 @@ def add_guide_to_bootinfo(bootinfo):
 			"documents": [entry.fieldname for entry in DOCUMENTS.get(workflow.document_type) or []],
 		}
 
-	bootinfo.folt_guide = guided
+	return guided
+
+
+def add_guide_to_bootinfo(bootinfo):
+	"""Hand the Desk the shape of every active workflow. `extend_bootinfo` hook.
+
+	A form script can only be attached by doctype and the list of doctypes has to be known before
+	any form is opened, which is the same reason add_turn_downs_to_bootinfo exists.
+
+	This replaced activity_chain.add_chain_to_bootinfo rather than sitting beside it. That key said
+	which doctypes are steps in the six-document SOP, which is a subset of what is here, and two
+	boot keys describing one fact is exactly the drift this app writes its comments to avoid.
+	"""
+	bootinfo.folt_guide = guide_map()
 
 
 # --- audit ------------------------------------------------------------------------------

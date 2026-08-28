@@ -1,0 +1,28 @@
+{#- No {% extends %}, deliberately. templates/web.html and base.html wrap the body in
+    .page_content with the website navbar, footer and theme bundles -- none of which a
+    full-viewport app wants, and every one of which is a hashed bundle whose name this page would
+    then also have to be right about. See folt.py for the manifest read and the no_cache flag. -#}
+<!DOCTYPE html>
+<html lang="{{ frappe.lang or 'en' }}">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+	<meta name="color-scheme" content="light dark">
+	<title>{{ _("FoLT") }}</title>
+	<link rel="icon" href="/assets/folt_customizations/images/folt-emblem.svg">
+	{%- for href in styles %}
+	<link rel="stylesheet" href="{{ href }}">
+	{%- endfor %}
+</head>
+<body>
+	<div id="folt-app"></div>
+
+	{#- Rendered with |safe because folt.py has already JSON-encoded it and escaped the only
+	    sequence that can terminate a <script> element early. -#}
+	<script type="application/json" id="folt-boot">{{ boot | safe }}</script>
+
+	{%- for src in scripts %}
+	<script type="module" src="{{ src }}"></script>
+	{%- endfor %}
+</body>
+</html>

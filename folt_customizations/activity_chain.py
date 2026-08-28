@@ -281,8 +281,31 @@ def make_reimbursement_list(register: str, employee_advance: str | None = None) 
 
 @frappe.whitelist()
 def funded_floats(activity: str) -> list[dict]:
-	"""Floats on this activity that have money in them, newest first."""
-	return frappe.get_all(
+	"""Floats on this activity that have money in them, newest first.
+
+	`get_list` rather than `get_all`, and that swap is the whole of the fix. `get_all` ignores
+	permissions by design, and this is whitelisted -- so it was reachable by any logged-in session,
+	including a supplier's portal login, and it returned employee names and float amounts for any
+	project name somebody cared to guess. `get_list` applies the doctype's own DocPerms, User
+	Permissions and permission query conditions, which is the rule folt_tasks.py already commits
+	this app to in its module docstring.
+
+	`limit_page_length=0` is not optional: `get_all` sets it to 0 for you and `get_list` defaults it
+	to 20, so leaving it out would silently cap an activity at twenty floats.
+
+	The explicit check on top is for the *message*, not the security. A role with no Employee
+	Advance read would otherwise get an empty list back, and make_reimbursement_list would report
+	"No disbursed float on {activity}" -- which is false, and leaves them nothing to act on. FoLT's
+	chain raises the reimbursement list as the requesting Employee, who is `Draft`'s custodian, and
+	every role holding a step on a float holds read on it.
+
+	Deliberately NOT a check on the Project. Several roles hold `select` only there
+	(permissions.LINK_FIELD_PERMISSIONS) and `has_permission` asks for `read`, so a Project check
+	would refuse precisely the people who raise these lists.
+	"""
+	frappe.has_permission("Employee Advance", throw=True)
+
+	return frappe.get_list(
 		"Employee Advance",
 		filters={
 			"folt_project": activity,
@@ -291,6 +314,7 @@ def funded_floats(activity: str) -> list[dict]:
 		},
 		fields=["name", "employee_name", "advance_amount", "paid_amount", "workflow_state"],
 		order_by="posting_date desc",
+		limit_page_length=0,
 	)
 
 

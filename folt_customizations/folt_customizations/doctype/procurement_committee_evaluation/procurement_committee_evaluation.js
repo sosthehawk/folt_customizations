@@ -94,16 +94,34 @@ async function sync_quotation_scores(frm, { announce = false } = {}) {
 	for (const member of members) {
 		for (const quotation of quotations) {
 			const previous = scored.get(score_key(member, quotation.supplier_quotation));
-			frm.add_child("quotation_scores", {
+			const row = frm.add_child("quotation_scores", {
 				member,
 				supplier: quotation.supplier,
 				supplier_quotation: quotation.supplier_quotation,
 				quotation_amount: quotation.grand_total,
 				currency: quotation.currency,
 				valid_till: quotation.valid_till,
-				score: previous?.score,
-				comments: previous?.comments,
 			});
+
+			// CARRYING A SCORE ACROSS THE REBUILD MEANS CARRYING THE ROW'S IDENTITY WITH IT.
+			//
+			// enforce_self_scoring pairs each submitted row with the stored one **by row name**
+			// (`stored.get(row.name)`), and add_child mints a fresh `new-...` name. So copying only
+			// the value re-presented a colleague's existing score as a brand-new row with a score
+			// already in it -- which is exactly what that check exists to refuse. Changing the RFQ
+			// on an evaluation others had scored threw "Not your row", naming a colleague, at the
+			// buyer who had touched nothing of theirs.
+			//
+			// Restoring `name` and `__islocal` puts the row back to being the same row. The server
+			// then finds its stored twin, compares score against score, sees no change, and lets
+			// the save through. A genuinely new row keeps its fresh name and arrives blank, which
+			// is the case that check already allows.
+			if (previous) {
+				row.name = previous.name;
+				row.__islocal = previous.__islocal;
+				row.score = previous.score;
+				row.comments = previous.comments;
+			}
 		}
 	}
 	frm.refresh_field("quotation_scores");

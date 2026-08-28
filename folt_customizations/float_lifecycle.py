@@ -159,7 +159,8 @@ def flag_overdue_floats():
 		# again to pick it up.
 		deadline = _retirement_deadline(advance.folt_project, advance.posting_date)
 		if deadline != advance.folt_retire_by:
-			frappe.db.set_value(ADVANCE, advance.name, "folt_retire_by", deadline, update_modified=False)
+			# `modified` is allowed to move here, deliberately -- see _apply for the reasoning.
+			frappe.db.set_value(ADVANCE, advance.name, "folt_retire_by", deadline)
 			advance.folt_retire_by = deadline
 
 		if not _is_overdue(deadline):
@@ -185,13 +186,38 @@ def _apply(advance: str, current: str, target: str, reason: str) -> bool:
 	attribute the move to, and `apply_workflow` would check that user's roles. The comment is
 	what keeps the change auditable -- a state that changes with nothing in the timeline
 	explaining it is worse than one nobody updated.
+
+	WHY `modified` IS ALLOWED TO MOVE. This used to pass `update_modified=False`, on the reasoning
+	quoted above: there is no acting user. But that is an argument about `modified_by`, not about
+	`modified` -- and a document whose workflow state just changed *has* been modified. Freezing the
+	timestamp defeated Frappe's optimistic lock for every client, the Desk included: a float could
+	go Disbursed -> Overdue -> Accounted with no token that changed, so `check_if_latest` passed on
+	a form loaded before the move and the stale `workflow_state` went back to the server.
+
+	That was survivable only by accident. `enforce_state_custodian` sees the state differ, concludes
+	"this is a transition" and steps aside; `validate_workflow` then refuses it -- but only because
+	this workflow happens to have no backward edges. The reimbursement list has `Paid` <-> `Disputed`
+	in both directions, so on any doctype shaped like that a stale write is a *valid* transition and
+	moves the document silently. Letting the timestamp tell the truth is what closes it.
+
+	The interaction with workflow_access._reason_key is in favour, not against: that cache keys a
+	held rejection reason on `modified`, so bumping it invalidates the hold and the person is asked
+	for the reason again -- which is the right answer once the document has moved underneath them.
+
+	The realtime event is the other half. There is no event for a `db.set_value`, so a client with
+	this float open has nothing to invalidate on; `folt_state_derived` gives it one, and says why the
+	state moved rather than merely that it did.
 	"""
 	if current not in DERIVED_STATES or current == target:
 		return False
 
-	frappe.db.set_value(ADVANCE, advance, "workflow_state", target, update_modified=False)
+	frappe.db.set_value(ADVANCE, advance, "workflow_state", target)
 	frappe.get_doc(ADVANCE, advance).add_comment(
 		"Workflow", _("{0} &rarr; {1} ({2})").format(current, target, reason)
+	)
+	frappe.publish_realtime(
+		"folt_state_derived",
+		{"doctype": ADVANCE, "name": advance, "from": current, "to": target, "reason": reason},
 	)
 	return True
 

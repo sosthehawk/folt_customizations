@@ -150,7 +150,16 @@ def qualified_supplier_query(doctype, txt, searchfield, start, page_len, filters
 def is_qualified(supplier: str, supplier_group: str) -> bool:
     """Whether `supplier` may be awarded work in `supplier_group` right now -- filed under
     the group AND still within its pre-qualification period. Used by the PO form to decide
-    if a supplier already on the document survives a change of category."""
+    if a supplier already on the document survives a change of category.
+
+    Whitelisted, so it needs the check: without one it is a pre-qualification oracle any logged-in
+    session can query about any supplier name it can guess. Far milder than an unguarded list --
+    the answer is one boolean and the caller must already know the supplier -- but the fix is a
+    line, and `read` is the right level: the two roles that edit a Purchase Order and therefore
+    reach this from purchase_order.js (Purchase User, Finance Manager) both hold it, while the
+    three that hold only `select` on Supplier never edit one."""
+    frappe.has_permission("Supplier", throw=True)
+
     if qualification_expiry(supplier):
         return False
     return supplier_group in get_supplier_groups(supplier)

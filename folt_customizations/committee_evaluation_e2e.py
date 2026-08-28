@@ -437,6 +437,73 @@ def run():
 	finally:
 		frappe.set_user("Administrator")
 
+	# --- the grid rebuild has to carry row identity, not just row values ----------------------
+	#
+	# The form script rebuilds this grid the moment the RFQ changes, so the buyer sees the bids
+	# without saving. It used to do that with clear_table + add_child, which mints fresh `new-...`
+	# row names, and carried each existing score forward by value. enforce_self_scoring pairs
+	# submitted rows with stored ones **by row name** -- so a colleague's score arrived looking like
+	# a brand-new row with a score already in it, which is precisely what that check refuses. The
+	# buyer got "Not your row" naming a colleague whose row they had never touched.
+	#
+	# Both payload shapes are simulated here rather than clicked, because the bug is in what the
+	# client sends and this is the contract it has to meet. sync_quotation_scores matches on
+	# (member, quotation) taken from the *submitted* rows, so it happily reuses a fresh-named row
+	# and the mismatch survives to enforce_self_scoring.
+	as_admin_doc = frappe.get_doc("Procurement Committee Evaluation", evaluation.name)
+	grid(as_admin_doc)[(MEMBERS[1], scored_quotation)].score = 77
+	as_admin_doc.save()
+
+	def rebuilt_payload(doc, keep_names):
+		"""What the form script sends after a rebuild: same pairs and values, names optional."""
+		snapshot = [
+			{
+				"name": row.name,
+				"member": row.member,
+				"supplier": row.supplier,
+				"supplier_quotation": row.supplier_quotation,
+				"quotation_amount": row.quotation_amount,
+				"currency": row.currency,
+				"valid_till": row.valid_till,
+				"score": row.score,
+				"comments": row.comments,
+			}
+			for row in doc.quotation_scores
+		]
+		doc.set("quotation_scores", [])
+		for values in snapshot:
+			row = doc.append("quotation_scores", {k: v for k, v in values.items() if k != "name"})
+			if keep_names:
+				row.name = values["name"]
+		return doc
+
+	try:
+		frappe.set_user(MEMBERS[0])
+
+		expect_throw(
+			"a rebuild that drops row names is refused, blaming the wrong person",
+			lambda: rebuilt_payload(reopen(), keep_names=False).save(),
+		)
+
+		try:
+			rebuilt_payload(reopen(), keep_names=True).save()
+			check("a rebuild that keeps row names saves untouched colleagues' scores", True)
+		except Exception as e:  # noqa: BLE001
+			check(
+				"a rebuild that keeps row names saves untouched colleagues' scores",
+				False,
+				f"{type(e).__name__}: {frappe.utils.strip_html(str(e))[:90]}",
+			)
+
+		survived = grid(reopen())[(MEMBERS[1], scored_quotation)]
+		check(
+			"and the colleague's score is still theirs, and still there",
+			survived.score == 77,
+			f"score={survived.score}",
+		)
+	finally:
+		frappe.set_user("Administrator")
+
 	# --- and the award still cannot be recommended without a quorum --------------------------
 	expect_throw(
 		"quorum still gates the move to Intent to Award",

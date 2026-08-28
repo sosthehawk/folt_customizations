@@ -32,6 +32,10 @@ HEAD_OF_PROGRAMS = "hop.test@folt.test"
 HEAD_OF_FINANCE = "hof.test@folt.test"
 FINANCE_OFFICER = "finofficer.test@folt.test"
 FINANCE_ASSISTANT = "finassistant.test@folt.test"
+
+# Spelled out because the `modified` assertion below reads the row directly rather than through
+# the loaded document, whose own timestamp is whatever it was when it was last fetched.
+ADVANCE_DOCTYPE = "Employee Advance"
 EXECUTIVE_DIRECTOR = "ed.test@folt.test"
 
 USERS = (
@@ -61,10 +65,12 @@ def check(label, condition, detail=""):
 	print(f"  {'PASS' if condition else 'FAIL'}  {label}{'  — ' + detail if detail else ''}")
 
 
-def expect_throw(label, fn):
+def expect_throw(label, fn, exc=frappe.ValidationError):
+	"""`exc` because frappe.PermissionError does not descend from frappe.ValidationError, so a
+	permission check asserted with the default reports "wrong error type" while the code is right."""
 	try:
 		fn()
-	except frappe.ValidationError as e:
+	except exc as e:
 		check(label, True, str(e)[:100].replace("\n", " "))
 		return
 	except Exception as e:  # noqa: BLE001
@@ -254,11 +260,22 @@ def run():
 
 	as_user(FINANCE_OFFICER, lambda: apply_workflow(advance, "Check"))
 	as_user(EXECUTIVE_DIRECTOR, lambda: apply_workflow(advance, "Approve"))
+
+	before_derived = frappe.db.get_value(ADVANCE_DOCTYPE, advance.name, "modified")
 	record_disbursement(advance, FLOAT)
 	check(
 		"the float reaches Disbursed with nobody clicking it",
 		advance.workflow_state == "Disbursed",
 		advance.workflow_state,
+	)
+	# A derived state has to move `modified` with it. float_lifecycle._apply used to pass
+	# update_modified=False, which meant a float could change state with no token that changed --
+	# so Frappe's optimistic lock passed on a form loaded before the move and the stale state went
+	# back to the server. Nothing else in this suite would notice the flag being put back.
+	check(
+		"and the derived state moves `modified`, so a stale client cannot overwrite it",
+		frappe.db.get_value(ADVANCE_DOCTYPE, advance.name, "modified") != before_derived,
+		f"{before_derived} -> {frappe.db.get_value(ADVANCE_DOCTYPE, advance.name, 'modified')}",
 	)
 
 	print("\n--- step 1 -> step 4  the attendance register, headed and empty ---")
@@ -349,6 +366,26 @@ def run():
 	expect_throw(
 		"a second list cannot be derived from the same register",
 		lambda: as_user(REQUESTER, lambda: activity_chain.make_reimbursement_list(register.name)),
+	)
+
+	print("\n--- the float list is not readable by everybody who can guess a project ---")
+
+	# funded_floats is whitelisted and used to be a bare frappe.get_all, so any logged-in session
+	# -- a supplier's portal login included -- could name a project and get employee names and
+	# float amounts back. Both directions are asserted because a permission fix that also breaks
+	# the people who need the data is not a fix: the requester raises the reimbursement list and
+	# has to be able to resolve the float behind it.
+	visible = as_user(REQUESTER, lambda: activity_chain.funded_floats(requisition.project))
+	check(
+		"the requester who raises the list still sees the float it pays from",
+		[row["name"] for row in visible] == [advance.name],
+		f"{[row['name'] for row in visible]}",
+	)
+
+	expect_throw(
+		"a role with no Employee Advance read is refused, not handed an empty list",
+		lambda: as_user(HEAD_OF_PROGRAMS, lambda: activity_chain.funded_floats(requisition.project)),
+		exc=frappe.PermissionError,
 	)
 
 	print("\n--- step 5  approval and payout ---")

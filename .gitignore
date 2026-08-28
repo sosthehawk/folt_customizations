@@ -2,3 +2,15 @@ __pycache__/
 *.pyc
 .DS_Store
 node_modules/
+
+# Vite output. Built into the image by images/layered/Containerfile (and by the host, for the
+# working-tree local image) -- never committed. It sits inside the app's public/ dir on purpose;
+# see frontend/vite.config.ts for why that placement is load-bearing.
+folt_customizations/public/folt/
+
+# Only ever created if a package.json appears at the app root, which this design deliberately
+# avoids -- frappe would symlink node_modules into public/ and a dangling link under /assets is a
+# needless 404 surface.
+folt_customizations/public/node_modules
+
+frontend/.vite/

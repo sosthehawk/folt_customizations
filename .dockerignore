@@ -1,0 +1,9 @@
+# The build context for images/layered/Containerfile.folt-local-src is this checkout, and it had
+# no .dockerignore -- so frontend/node_modules would be copied straight in, complete with a
+# darwin-arm64 esbuild binary that cannot run in the container.
+.git
+frontend/node_modules
+folt_customizations/public/node_modules
+**/__pycache__
+**/*.pyc
+**/.DS_Store

@@ -51,6 +51,14 @@ add_to_apps_screen = [
     }
 ]
 
+# Deep links into the Vue app at /folt. The bare path resolves by filename (www/folt.html), but
+# frappe's router 404s everything below it unless a rule says otherwise -- so /folt/<anything> is
+# mapped onto the same document and the tail arrives as frappe.form_dict.app_path for the SPA
+# router to pick up. This is the app's first website_route_rules entry. See www/folt.py.
+website_route_rules = [
+    {"from_route": "/folt/<path:app_path>", "to_route": "folt"},
+]
+
 # Where a supplier login lands. Called for every user logging in; it answers only for portal-only
 # supplier accounts and hands everybody else back to frappe -- see supplier_portal for why this
 # is a hook and not Role["Supplier"].home_page.

@@ -1,0 +1,446 @@
+/* The FoLT brand: typeface, primary colour, heading colour, focus ring.
+   ONE FILE FOR BOTH SURFACES -- it is `app_include_css` (the Desk) AND `web_include_css`
+   (the website and the supplier portal). See hooks.py.
+
+   THIS FILE RESTYLES FRAPPE'S OWN CHROME. That is why it is not folt_desk.css, whose
+   rule 1 is "every selector begins with .folt-" and whose whole upgrade-survival
+   argument rests on never selecting a frappe node. A theme cannot obey that rule, so it
+   gets its own file and its own contract rather than weakening that one.
+
+   WHY THE SAME FILE SERVES THE WEBSITE, verified rather than assumed: every token below is
+   declared in website.bundle.css as well as desk.bundle.css, with exactly one definition
+   each; `.btn.btn-primary{background-color:var(--btn-primary)}` and bootstrap's competing
+   `.btn-primary:hover` literal are present in both bundles in the same order; and the website
+   has NO dark theme at all -- templates/base.html renders `<html lang dir>` and never a
+   data-theme attribute, and website.bundle.css has no prefers-color-scheme and only three
+   stray [data-theme=dark] rules inherited from shared partials. So section 4 is inert on the
+   website today and correct if that ever changes. The alternative -- a second copy of the
+   brand for the portal -- is how a product ends up with two blues.
+
+   In app_include_css this file is listed FIRST, so folt_desk.css remains literally "the last
+   stylesheet the Desk loads" -- the sentence its no-!important rule depends on. In
+   web_include_css it is first for the same reason, with folt_branding.css last.
+
+   FIVE RULES.
+
+   1. Frappe nodes are selected ONLY in section 5, and every rule there quotes the
+      compiled selector it is fighting and where it sits in desk.bundle.*.css. Anything
+      above section 5 is a custom-property declaration and touches no element.
+
+   2. EXACTLY THREE top-level token selectors (section 2). No fourth. Which block a
+      declaration sits in is the only thing that decides whether it is theme-independent,
+      light, or dark. See section 2 for why these three and not the obvious ones.
+
+   3. Every brand value is written down ONCE, as a --folt-brand-* variable in section 1.
+      Everything below references it. Reverting the brand is a six-line edit in one
+      place, and -- because this file is plain CSS under public/ -- a `docker cp` can
+      apply that edit to a running site without a redeploy. That matters, because unlike
+      folt_desk.css this file has no runtime kill switch: see section 6.
+
+   4. FRAPPE'S SEMANTIC RAMPS ARE UNTOUCHED. Every --red-*, --green-*, --orange-*,
+      --amber-*, --yellow-*, --bg-*, --text-on-*, --alert-*, --indicator-dot-*, --diff-*,
+      --ink-*, --surface-* (except --surface-menu-bar), --danger and --success keeps its
+      stock value. Green means done, red means danger, orange means optional, yellow
+      means warning. In a tool whose entire job is moving documents through approval
+      states, shifting a status hue is a correctness bug, not a taste question.
+
+   5. No !important. Nothing here needs it: folt_customizations is last in
+      get_installed_apps(), so this file loads after frappe's, erpnext's and hrms'
+      bundles, and section 5's selectors also win on specificity. If a rule here ever
+      seems to need !important, check whether frappe used it first -- and if it did, say
+      so in the comment. */
+
+/* ═══ 0. THE TYPEFACE ══════════════════════════════════════════════════════════════════
+
+   Lexend is not a new choice. It is already FoLT's typeface: public/images/folt-logo.svg
+   sets font-family "Lexend-Bold" on the wordmark. Until now it existed in the product
+   only as outlines inside an SVG.
+
+   THE VARIABLE FILE IS MANDATORY, NOT AN OPTIMISATION. frappe sets
+   `--weight-regular: 420` (espresso/_typography.scss), a weight only a variable font can
+   hit. Per CSS Fonts 4 §5.2.2, a request in the 400-500 band checks weights ASCENDING
+   first -- so with static 400/500 instances installed, 420 resolves UP to 500 and every
+   regular-weight string in the Desk (list rows, filter chips, sidebar items, .btn
+   labels) silently renders at Medium. The whole UI would look uniformly overweight with
+   nothing to point at. `font-weight: 100 900` here is a RANGE descriptor, which lets the
+   browser interpolate 420 exactly.
+
+   This mechanism is already load-bearing in this deployment, not merely specified:
+   desk.bundle.*.css contains
+   `@font-face{font-family:InterVariable;font-weight:100 900;...}`.
+
+   Do NOT "simplify" this by remapping --weight-regular to 400. 420 is frappe's
+   deliberate choice -- a hair above regular so 13px UI text holds against a white
+   ground -- and remapping throws away the only reason the variable file is needed.
+
+   Files are Google Fonts' own pre-subset woff2 for Lexend v26, with their unicode-range
+   kept verbatim. Taking theirs rather than subsetting the upstream TTF ourselves is
+   deliberate: re-subsetting IS modification under OFL §4, which is a question worth not
+   having. latin + latin-ext only (74 KB together); the vietnamese subset is dropped.
+
+   OFL 1.1: fonts/lexend/OFL.txt, shipped because baking the font into an image and
+   serving it over HTTP is redistribution, and §2 requires the licence to accompany it.
+   Sitting under public/ it is also served at
+   /assets/folt_customizations/fonts/lexend/OFL.txt.
+
+   format("woff2"), not format("woff2-variations") -- the latter is a deprecated draft
+   spelling that some parsers reject, and plain woff2 already carries the fvar table.
+   frappe's own InterVariable declaration uses the plain form.
+
+   No italic face: Lexend does not ship one. The browser synthesises an oblique from this
+   face rather than falling through to the next family, so italics stay Lexend-shaped.
+
+   font-display: swap, matching frappe. `optional` is tempting (no layout shift) but on a
+   cold first visit it may decline to use the font at all -- i.e. the brand would be
+   absent exactly when it is being seen for the first time. */
+
+@font-face {
+  font-family: "Lexend";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("/assets/folt_customizations/fonts/lexend/lexend-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
+    U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215,
+    U+FEFF, U+FFFD;
+}
+
+/* Donor, supplier and participant names need latin-ext. */
+@font-face {
+  font-family: "Lexend";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("/assets/folt_customizations/fonts/lexend/lexend-latin-ext.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304,
+    U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB,
+    U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+/* ═══ 1. BRAND CONSTANTS — the only place a colour is written down ════════════════════
+
+   Declared on bare :root, which is safe for these six because they are ours: frappe
+   never declares a --folt-brand-* token, so there is no dark-mode block to lose to.
+   (Contrast with section 2, where declaring frappe's OWN tokens on bare :root is a bug.)
+
+   The two primaries are the same values the rest of the product already uses, so there
+   is one FoLT blue and one dark tint across desk, email and the Vue app:
+   branding.py EMAIL_ACCENT and frontend/src/App.vue's --folt-link. */
+
+:root {
+  /* The wordmark's blue (Asset-1FOLT.svg). Deliberately NOT the wordmark navy #001a33,
+     which reads as near-black on a button -- branding.py makes the same call for email. */
+  --folt-brand-primary: #3c6a91;
+  --folt-brand-primary-hover: #356083;
+
+  /* Headings only, and only in light mode. On frappe's #171717 dark ground this is
+     1.28:1, so section 4 deliberately does not carry it across. */
+  --folt-brand-navy: #001a33;
+
+  /* #3c6a91 on a #171717 ground is 3.13:1 -- below AA, and it reads as a hole rather
+     than an accent. This tint is 8.20:1 on the same ground. */
+  --folt-brand-primary-dark: #8ab4d8;
+  --folt-brand-primary-dark-hover: #a6c8e3;
+
+  /* Washes for the icon rail and the selected workspace item: a few per cent of primary
+     over frappe's neutrals, which is the whole of "restrained". Each dark value stays
+     darker than --bg-color (#171717) so the rail keeps reading as recessed. */
+  --folt-brand-tint: #f4f7fa;
+  --folt-brand-tint-strong: #eaf1f7;
+  --folt-brand-tint-dark: #0e141a;
+  --folt-brand-tint-dark-strong: #1b262f;
+}
+
+/* ═══ 2. THE THREE BLOCKS, AND WHY THESE THREE ════════════════════════════════════════
+
+   THE TRAP THIS SECTION EXISTS TO AVOID. frappe's light values sit on `:root` and
+   `:root, [data-theme="light"]`; its dark values sit on `[data-theme="dark"]`
+   (scss/desk/dark.scss, one block). All of those are specificity (0,1,0), and this file
+   loads after all of them. So overriding a COLOUR token on bare :root wins in light mode
+   -- and also beats [data-theme="dark"], silently painting light brand values in dark
+   mode. The bug would ship looking correct to whoever wrote it.
+
+   Hence: (0,2,0) selectors for anything with a light/dark distinction.
+
+     :root                            (0,1,0)   frappe's, and ours for theme-independent
+     :root, [data-theme="light"]      (0,1,0)   frappe's
+     [data-theme="dark"]              (0,1,0)   frappe's
+     :root:not([data-theme="dark"])   (0,2,0)   OURS, light   -- :not() takes the
+                                                specificity of its argument
+     :root[data-theme="dark"]         (0,2,0)   OURS, dark
+
+   WHY :not([data-theme="dark"]) RATHER THAN [data-theme="light"] -- the decisive point.
+   data-theme is always present (www/desk.html line 2 renders
+   data-theme="{{ desk_theme.lower() }}"), but User.desk_theme is
+   Literal["Light","Dark","Automatic"], and theme_switcher.js only resolves "automatic"
+   to a concrete value after desk.js boots. So an Automatic user carries
+   data-theme="automatic" at first paint, matching NEITHER [data-theme="light"] nor
+   [data-theme="dark"]. With [data-theme="light"] we would fall through to frappe's
+   bare-:root light values and repaint frappe-grey -> brand on every page load for every
+   Automatic user. :not([data-theme="dark"]) matches light AND automatic AND a missing
+   attribute, so we paint brand immediately -- exactly what frappe does with its own
+   bare-:root light values in that same window. We inherit frappe's flash behaviour
+   instead of adding a second one.
+
+   WHY :root[data-theme="dark"] RATHER THAN BARE [data-theme="dark"]. Bare would already
+   win on source order. Qualifying with :root costs nothing and gives two independent
+   reasons to win -- specificity AND order -- so a future reshuffle of frappe's bundle
+   order cannot quietly break dark mode. Both our blocks then sit at (0,2,0) and are
+   mutually exclusive by matching, so nothing in this file depends on source order at all.
+
+   Accepted cost of that choice: theme_switcher.js puts data-theme on nested <div>s to
+   render the theme-preview swatches in the Switch Theme dialog, and :root[...] does not
+   match those. The "Timeless Night" tile therefore previews frappe's stock dark palette,
+   not FoLT's. It is a picture of a theme rather than of your theme. If that ever needs
+   fixing, add `[data-theme="dark"]:not(:root)` to section 4's selector list -- do not
+   relax :root[data-theme="dark"] to the bare form and trade a real robustness guarantee
+   for a 40x20px swatch.
+
+   WHAT MAY LIVE IN THIS BLOCK: only tokens frappe never redefines under
+   [data-theme="dark"]. --font-stack qualifies (verified: `grep font-stack
+   scss/desk/dark.scss` is empty). That verification is also this file's main upgrade
+   tripwire -- if frappe ever adds --font-stack to dark.scss, this override loses in dark
+   mode and the Desk silently reverts to Inter for dark-mode users only.
+
+   AND IT IS STILL NOT ALLOWED TO SIT ON BARE :root. Dark mode is not the only way a
+   (0,1,0) declaration loses. login.bundle.css re-declares the WHOLE espresso token set --
+   --font-stack included -- on its own bare `:root`, and it is emitted AFTER web_include_css
+   in the login page's <head>. Two bare-:root declarations tie on specificity, so the later
+   one wins, and the login page rendered in Inter while every other page rendered in Lexend.
+   Nothing about that is visible in this file, in dark mode, or in the Desk: it showed up
+   only in a getComputedStyle probe of the actual login page.
+   So the "theme-independent" block carries BOTH (0,2,0) selectors rather than one (0,1,0)
+   one. They are mutually exclusive by matching, so listing both is exactly "every document,
+   at (0,2,0)" -- and nothing frappe declares on :root can outrank it whatever the load
+   order. The same reasoning would apply to any future theme-independent token. */
+
+:root:not([data-theme="dark"]),
+:root[data-theme="dark"] {
+  /* Lexend, then the OS UI font -- and deliberately NOT frappe's Inter ladder behind it.
+     Inter is what font-display:swap paints during the swap period, so leaving
+     "InterVariable" in second position makes the browser fetch InterVariable.woff2
+     (345,588 bytes, measured in this image) on every cold load IN ADDITION to Lexend.
+     Handing the swap period to a locally-installed system font costs zero bytes and zero
+     latency, and drops frappe's own webfont fetch entirely: the two Lexend subsets are
+     74 KB together, so the net first-load saving on the Desk is around 270 KB.
+
+     Reaches everything -- scss/common/global.scss:7 (html, body),
+     scss/desk/global.scss:420, and scss/desk/typography.scss:6 ($font-family-base).
+
+     Cannot reach the print preview or the PDF, and that is verified rather than hoped:
+     print.js renders into an IFRAME served from print_format.bundle.css / print.bundle.css,
+     each of which carries its own complete :root. app_include_css never gets there, so
+     changing --font-stack here cannot desync what the preview shows from what the PDF
+     prints.
+
+     Non-issue, checked: scss/common/global.scss sets
+     `font-variation-settings: "opsz" 24` on html, body. Lexend has no opsz axis; per CSS
+     Fonts 4 an unknown axis tag is ignored, and because wght is not named there,
+     font-weight still drives wght. No rule needed. */
+  --font-stack: "Lexend", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+
+  /* IF LEXEND RUNS WIDE, TUNE HERE AND NOWHERE ELSE.
+     Lexend is wide-set by design (it was drawn for reading proficiency), and frappe bakes
+     0.02em tracking on top at sm/base via a SCSS mixin -- compiled into literal values on
+     dozens of classes, so it is NOT reachable through any token. Compounded, 13px Lexend
+     can run wider than Inter against --btn-height/--input-height 28px,
+     --list-row-height 30px, and the 220px workspace sidebar.
+
+     size-adjust scales outlines AND advance widths against the same font-size, so it
+     narrows text without touching one frappe selector. It belongs on the @font-face rule;
+     it is repeated as a comment here only because this is where someone will look.
+     Start at 100%, drop in 2% steps, stop as soon as truncation clears. Below ~94% the
+     knob is telling you to reconsider the typeface.
+
+     Do NOT chase the tracking instead: correcting 0.02em means overriding letter-spacing
+     on dozens of frappe classes, forever, and re-auditing them every release. */
+}
+
+/* ═══ 3. LIGHT ════════════════════════════════════════════════════════════════════════ */
+
+:root:not([data-theme="dark"]) {
+  /* THE BIG ONE: 17 consumers, and the non-obvious half is what makes it worth a comment.
+     Direct: the checked fill on every checkbox and radio, .list-sidebar .sidebar-action,
+     .filter-area .remove-filter, .group-by-popover .remove-group-by, global-search result
+     links, --icon-stroke on .filter-icon.active / .group-by-icon.active, the active
+     in-grid form tab (label AND border-bottom-color), .btn-primary-light's label, and
+     .fc-now-indicator.
+     DERIVED, and deliberately not restated below -- these follow automatically, and
+     restating them would create four more places to forget:
+       --brand-color      (common/css_variables.scss:6)
+       --checkbox-gradient (common/css_variables.scss:143)
+       --progress-bar-bg  (desk/css_variables.scss:52)
+       --plyr-color-main  (the video player accent)
+     Note --primary is bootstrap's, not espresso's: it lands via bootstrap's _root.scss,
+     which is why grepping frappe's own scss for `--primary:` finds nothing. */
+  --primary: var(--folt-brand-primary);
+
+  /* NOT an alias of --primary, despite the name -- separately declared as var(--gray-900)
+     at common/css_variables.scss:130. Missing this leaves the notification-list active
+     underline, .recent-item.event .event-border and the theme-switcher swatches
+     near-black while everything around them turns blue. */
+  --primary-color: var(--folt-brand-primary);
+
+  /* Also not derived from --primary (common/css_variables.scss:99). This is the token
+     that actually paints primary buttons, via
+     `.btn.btn-primary{background-color:var(--btn-primary);color:var(--neutral)}`.
+     That rule sits at byte ~332,690 of desk.bundle.*.css while bootstrap's literal
+     `.btn-primary:hover{background-color:#040404}` sits at ~164,813 -- equal specificity
+     (0,2,0), ours 168 KB later -- so this token wins on the base, hover AND disabled
+     states, and bootstrap's border-color literals are dead anyway because .btn{border:none}
+     already beats them. The consequence is that stock v16 primary buttons have no visible
+     hover feedback at all; section 5 adds it. Also feeds --icon-fill-bg on the same rule.
+     White label on #3c6a91 is 5.73:1. */
+  --btn-primary: var(--folt-brand-primary);
+
+  /* 9 consumers, all of them headings: h1-h6/.h1-.h6, .head-title, .comment-title,
+     .form-section .section-head, .form-dashboard-section .section-head,
+     .form-column .column-label, .about-dialog .modal-title, .widget-group-title,
+     .onboarding-widget-box .widget-title, .layout-side-section .sidebar-label. 17.56:1.
+
+     --text-color IS DELIBERATELY NOT SET. Body copy stays --gray-800 (11.73:1). Navy body
+     text would read as a colour choice rather than as hierarchy, and that is precisely
+     the line between "restrained" and "themed". */
+  --heading-color: var(--folt-brand-navy);
+
+  /* A fix, not just a brand gesture: stock is #c9c9c9, which is 1.66:1 against white and
+     therefore already fails WCAG 2.2 SC 1.4.11 (non-text contrast needs 3:1) on .btn:active,
+     .btn.btn-secondary:focus-visible, .btn.btn-ghost:focus-visible, .btn-primary-light:focus,
+     the switch, .theme-grid .selected, and the datatable filter input. Brand ring is 5.73:1.
+     Blast radius worth naming: dark.scss:148 chains --checkbox-focus-shadow to this token,
+     which is why section 4 must carry a dark value rather than leaving it in section 2. */
+  --focus-default: 0px 0px 0px 2px var(--folt-brand-primary);
+
+  /* BOTH OF THESE ARE INERT TODAY -- verified zero consumers of var(--brand-color) and
+     var(--border-primary) in the compiled desk bundle. Set anyway, because they are the
+     names a third-party frappe app reaches for and they cost one line each. Stated here so
+     that nobody changes a value, sees nothing move, and goes looking for a bug. */
+  --brand-color: var(--folt-brand-primary);
+  --border-primary: var(--folt-brand-primary);
+
+  /* The icon rail (.body-sidebar, 50px), the settings dialog and its sidebar. Stock
+     #f8f8f8 -> a blue-cast near-white. Navy heading on it is 16.34:1, body text 10.91:1. */
+  --surface-menu-bar: var(--folt-brand-tint);
+
+  /* .standard-sidebar-item on :hover / :focus-within / .selected -- the workspace list and
+     the search dialog's sidebar. Stock --gray-100. */
+  --sidebar-select-color: var(--folt-brand-tint-strong);
+}
+
+/* ═══ 4. DARK ═════════════════════════════════════════════════════════════════════════
+
+   Overriding --primary here is a BUG FIX before it is a brand change. dark.scss never
+   mentions --primary, so in stock v16 `var(--primary)` is #171717 on a --bg-color of
+   var(--gray-900) = #171717. That is 1.00:1, and it makes ten nodes invisible in dark
+   mode: .sidebar-action, .remove-filter, .remove-group-by, global-search links, the two
+   .active icon strokes, the active in-grid tab and its underline, .btn-primary-light and
+   .fc-now-indicator. */
+
+:root[data-theme="dark"] {
+  --primary: var(--folt-brand-primary-dark);
+  --primary-color: var(--folt-brand-primary-dark);
+  --btn-primary: var(--folt-brand-primary-dark);
+  --brand-color: var(--folt-brand-primary-dark);
+  --border-primary: var(--folt-brand-primary-dark);
+
+  /* 8.20:1 on #171717, 7.19:1 on --control-bg #232323. */
+  --focus-default: 0px 0px 0px 2px var(--folt-brand-primary-dark);
+
+  --surface-menu-bar: var(--folt-brand-tint-dark);
+  --sidebar-select-color: var(--folt-brand-tint-dark-strong);
+
+  /* Restated because it does NOT follow --primary in dark the way it does in light:
+     dark.scss:138-142 overrides --checkbox-gradient to a flat --neutral-white. Left alone,
+     light checkboxes would go brand blue while dark ones stayed white. Restating is also
+     the better contrast: the dark tick is $check-icon-dark (a black stroke, dark.scss:1),
+     and black on #8ab4d8 is 9.60:1. */
+  --checkbox-gradient: linear-gradient(
+    180deg,
+    var(--folt-brand-primary-dark) -124.51%,
+    var(--folt-brand-primary-dark) 100%
+  );
+
+  /* DELIBERATELY NOT SET IN DARK, each for a reason:
+
+     --heading-color   dark.scss:15 sets --gray-50. Navy on #171717 is 1.28:1, so headings
+                       stay near-white. The navy is a light-mode-only gesture, and
+                       pretending otherwise is exactly the hex-literal-in-dark-mode bug
+                       that folt_desk.css's rule 2 exists to prevent.
+     --progress-bar-bg dark.scss:128 sets var(--light) = #f3f3f3 explicitly, and this
+                       block simply does not restate it. Setting it to the brand tint
+                       would be WORSE: .progress-bar hardcodes color:#fff for its label,
+                       and white on #8ab4d8 is 2.19:1. (White on #f3f3f3 is 1.14:1 -- so
+                       it is already broken, but not by us. Leave frappe's bug frappe's.)
+     --text-color, --text-muted, --text-light   dark.scss:12-14. Untouched. */
+}
+
+/* ═══ 5. THE ONLY RULES IN THIS FILE THAT SELECT A FRAPPE NODE ════════════════════════
+
+   Two of them. Both exist because a token cannot reach the declaration in question, and
+   both are here rather than scattered so that a frappe upgrade has one place to check. */
+
+/* (1) PRIMARY BUTTON HOVER — free polish, and a real gap.
+   `.btn.btn-primary{background-color:var(--btn-primary)}` (desk.bundle.*.css, byte
+   ~332,690) beats bootstrap's `.btn-primary:hover{background-color:#040404}` (byte
+   ~164,813) on source order at equal specificity (0,2,0). So once --btn-primary is a
+   token, the hover literal never applies and stock v16 primary buttons have NO visible
+   hover feedback whatsoever. This restores it, in brand.
+   (0,3,0) beats both, so order is irrelevant here. */
+.btn.btn-primary:hover {
+  background-color: var(--folt-brand-primary-hover);
+}
+
+:root[data-theme="dark"] .btn.btn-primary:hover {
+  background-color: var(--folt-brand-primary-dark-hover);
+}
+
+/* (2) PRIMARY BUTTON FOCUS RING.
+   Fighting bootstrap's
+   `.btn-primary:focus,.btn-primary.focus{...;box-shadow:inset 0 1px #ffffff26,
+    0 1px 1px #00000013,0 0 0 2px #3a3a3a80}`.
+   The background-color in that rule is already overridden by .btn.btn-primary on order,
+   but the BOX-SHADOW is not set there at all, so the grey #3a3a3a80 ring survives on a
+   now-blue button. --focus-default cannot help: this rule writes box-shadow literally
+   rather than reading the token. Hence an element rule.
+   Both inset highlights are kept so the button keeps frappe's shape; only the ring
+   colour changes. (0,3,0) vs (0,2,0) -- wins on specificity.
+   The declaration is repeated in full for dark rather than routed through another
+   variable: three lines of duplication read better here than an indirection token that
+   exists for one rule. */
+.btn.btn-primary:focus,
+.btn.btn-primary.focus {
+  box-shadow: inset 0 1px #ffffff26, 0 1px 1px #00000013,
+    0 0 0 2px var(--folt-brand-primary);
+}
+
+:root[data-theme="dark"] .btn.btn-primary:focus,
+:root[data-theme="dark"] .btn.btn-primary.focus {
+  box-shadow: inset 0 1px #ffffff26, 0 1px 1px #00000013,
+    0 0 0 2px var(--folt-brand-primary-dark);
+}
+
+/* ═══ 6. REVERTING ═══════════════════════════════════════════════════════════════════
+
+   folt_desk.css reverts by commenting out one line of JS: everything in it is nested
+   under body.folt-guided, which folt_guide.js adds on boot.
+
+   A THEME CANNOT WORK THAT WAY. Tokens have to be present at first paint or the entire
+   Desk visibly repaints, which is worse than the thing being reverted. So this file is
+   unconditional, and a true revert means deleting its line from app_include_css in
+   hooks.py -> commit, redeploy, bench clear-cache, restart the backend (gunicorn is
+   long-lived and will otherwise keep serving the old hook).
+
+   What softens that: rule 3. Every brand value routes through the six --folt-brand-*
+   variables in section 1, so NEUTRALISING the theme needs no deploy at all -- point them
+   at frappe's own tokens (--gray-900, --gray-50, --gray-100) and `docker cp` this file
+   into the running container. Assets under public/ are served straight off disk through
+   the sites/assets symlink, so a hard reload picks it up.
+
+   One caveat that already applies to folt_desk.css and is worth knowing before someone
+   reports the revert "didn't work": utils/jinja_globals.py's bundled_asset adds a
+   cache-buster only to paths containing ".bundle.", and nginx serves /assets/ with
+   `expires 1h`. An already-open browser can therefore hold this stylesheet for up to an
+   hour. That 1h is itself deliberate -- nginx.conf.template records that marking the
+   stable-path assets `immutable` was a correctness bug that made shipped branding
+   changes look like failed deploys for up to a month. */

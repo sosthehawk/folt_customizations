@@ -1,8 +1,38 @@
 {% extends "templates/web.html" %}
-{% from "templates/includes/rfq/rfq_macros.html" import item_name_and_description %}
+
+{#
+	The supplier's pricing form. See rfq.py for why this page shadows erpnext's, and
+	folt_portal.css for the styling contract.
+
+	THE MARKUP IS OURS, NOT ERPNEXT'S, AND THAT IS THE CHANGE HERE. What this replaced was
+	erpnext's bootstrap column grid with nine inline `style=` attributes and a `.row` nested
+	inside every item cell. Three things were wrong with it for the person it is for -- a
+	supplier, often on a phone, who has been emailed a link and has one job:
+
+	  - the two inputs they are here to fill in were `form-control` fields on a white card,
+	    which frappe paints as a borderless grey fill: they read as read-only chips, not boxes
+	    to type in;
+	  - at the col-sm breakpoint all four columns went full width, so on a phone every number
+	    was separated from the word (Qty, Rate, Amount) that gave it meaning;
+	  - the sentence saying whether the bid was still open, already sent, or closed -- the one
+	    thing that decides whether typing here is worth their time -- was the smallest, faintest
+	    text on the page.
+
+	Everything that is erpnext's business is still erpnext's and still comes from rfq.py: which
+	supplier the visitor is, the currency, the item rows, the already-quoted prices. The one
+	piece of erpnext's own template logic inlined below is the Item Supplier part-number lookup,
+	which came from the `item_name_and_description` macro; it is kept because a supplier's own
+	part number is genuinely useful to them, and inlined because the macro's other half is a
+	nested bootstrap row that cannot live inside a CSS grid cell. The macro's remaining feature,
+	an initials-in-a-grey-box placeholder for items with no image, is dropped deliberately.
+
+	The class names folt_rfq.js binds to -- rfq-items, rfq-qty, rfq-rate, rfq-amount,
+	tax-grand-total, terms-feedback, folt-save-quotation, and every data-idx -- are unchanged,
+	so the pricing logic is untouched by this.
+#}
 
 {% block header %}
-<h1 style="margin-top: 10px;">{{ doc.name }}</h1>
+<h1 class="folt-rfq-title">{{ doc.name }}</h1>
 {% endblock %}
 
 {% block script %}
@@ -15,118 +45,145 @@
 
 {% block header_actions %}
 {% if doc.items and editable %}
-<button class="btn btn-primary btn-sm folt-save-quotation" type="button">
+<button class="btn btn-primary folt-save-quotation" type="button">
 	{{ _("Update Quotation") if quotation else _("Submit Quotation") }}</button>
 {% endif %}
 {% endblock %}
 
 {% block page_content %}
-<div class="row">
-	<div class="col-6">
-		<div class="rfq-supplier">{{ doc.supplier }}</div>
-	</div>
-	<div class="col-6 text-muted text-right h6">
-		{{ doc.get_formatted("transaction_date") }}
-	</div>
-</div>
+<div class="folt-rfq">
 
-{# What the supplier is looking at, in one line, because the same page is now three things:
-   a blank bid, a draft they can still change, and a submitted bid they cannot. #}
-<div class="folt-rfq-status text-muted small" style="margin-top:10px">
+	<div class="folt-rfq-meta">
+		<span class="folt-rfq-supplier">{{ doc.supplier }}</span>
+		<span>{{ _("Issued {0}").format(doc.get_formatted("transaction_date")) }}</span>
+		{% if doc.schedule_date %}
+		<span class="folt-rfq-due">{{ _("Required by {0}").format(doc.get_formatted("schedule_date")) }}</span>
+		{% endif %}
+	</div>
+
+	{# The same page is four different things, and which one decides whether there is anything
+	   for the reader to do. Blue means FoLT is waiting on them; green means FoLT already has
+	   their prices; grey means the request is closed. A saved draft is GREEN because
+	   procurement.rfq_quotations scores drafts too -- see the note in folt_portal.css. #}
 	{% if quotation %}
-		{{ _("Your quotation {0} is saved as a draft. Change any price below and press Update Quotation -- FoLT sees the latest version.").format(quotation) }}
-	{% elif submitted %}
-		{{ _("Your quotation has been submitted and can no longer be changed here. Contact the buyer named in the request if it needs to be corrected.") }}
-	{% elif doc.docstatus != 1 %}
-		{{ _("This request is not open for quotation.") }}
-	{% else %}
-		{{ _("Enter your price for each line and press Submit Quotation. You can reopen this page and change it until FoLT closes the request.") }}
-	{% endif %}
-	{% if doc.schedule_date %}
-		{{ _("Required by {0}.").format(doc.get_formatted("schedule_date")) }}
-	{% endif %}
-</div>
-
-<div class="rfq-content" style="margin-top:15px">
-	<div id="order-container">
-		<div id="rfq-items">
-			<div class="row cart-item-header">
-				<div class="col-sm-5 col-12">{{ _("Items") }}</div>
-				<div class="col-sm-2 col-4 text-right">{{ _("Qty") }}</div>
-				<div class="col-sm-2 col-4 text-right">{{ _("Rate") }}</div>
-				<div class="col-sm-3 col-4 text-right">{{ _("Amount") }}</div>
-			</div>
-			<hr>
-			{% if doc.items %}
-			<div class="rfq-items">
-				{% for d in doc.items %}
-				<div class="rfq-item">
-					<div class="row">
-						<div class="col-sm-5 col-12" style="margin-bottom: 10px;margin-top: 5px;">
-							{{ item_name_and_description(d, doc) }}
-						</div>
-						<div class="col-sm-2 col-4 text-right">
-							<input type="text" class="form-control text-right rfq-qty"
-								style="margin-top: 5px;display: inline-block"
-								value="{{ '%.2f'|format(d.folt_qty) }}"
-								data-idx="{{ d.idx }}" {{ "readonly" if not editable }}>
-							<p class="text-muted small" style="margin-top: 10px;">
-								{{ _("UOM") + ": " + d.uom }}
-							</p>
-						</div>
-						<div class="col-sm-2 col-4 text-right">
-							<input type="text" class="form-control text-right rfq-rate"
-								style="margin-top: 5px;display: inline-block"
-								value="{{ '%.2f'|format(d.folt_rate) }}"
-								data-idx="{{ d.idx }}" {{ "readonly" if not editable }}>
-						</div>
-						<div class="col-sm-3 col-4 text-right" style="padding-top: 9px;">
-							{{ doc.currency_symbol }} <span class="rfq-amount" data-idx="{{ d.idx }}">0.00</span>
-						</div>
-					</div>
-				</div>
-				{% endfor %}
-			</div>
-			{% endif %}
-		</div>
-
-		{% if doc.items %}
-		<div class="row grand-total-row">
-			<div class="col-9 text-right">{{ _("Grand Total") }}</div>
-			<div class="col-3 text-right">
-				{{ doc.currency_symbol }} <span class="tax-grand-total">0.00</span>
-			</div>
-		</div>
-		{% endif %}
-
-		<div class="row terms">
-			<div class="col-6">
-				<br><br>
-				<p class="text-muted small">{{ _("Notes: ") }}</p>
-				<textarea class="form-control terms-feedback" style="height: 100px;"
-					{{ "readonly" if not editable }}>{{ folt_terms or "" }}</textarea>
-			</div>
-		</div>
-
-		{% if doc.rfq_links %}
-		<div class="row mt-5">
-			<div class="col-12">
-				<p class="text-muted small">{{ _("Quotations: ") }}</p>
-				<div class="result">
-					{% for d in doc.rfq_links %}
-					<a class="web-list-item transaction-list-item" style="display:block"
-						href="/supplier-quotations/{{ d.name | urlencode }}">
-						<div class="row">
-							<div class="col-sm-6"><span class="indicator gray">{{ d.name }}</span></div>
-							<div class="col-sm-3"><span class="small gray">{{ _(d.status) }}</span></div>
-							<div class="col-sm-3"><span class="small gray">{{ d.transaction_date }}</span></div>
-						</div>
-					</a>
-					{% endfor %}
-				</div>
-			</div>
-		</div>
-		{% endif %}
+	<div class="folt-note is-received">
+		{{ _("FoLT has your prices. Quotation {0} is saved and the buyers can see it. Change any price below and press Update Quotation — they will see the latest version.").format(quotation) }}
 	</div>
+	{% elif submitted %}
+	<div class="folt-note is-received">
+		{{ _("Your quotation has been submitted and can no longer be changed here. Contact the buyer named in the request if it needs to be corrected.") }}
+	</div>
+	{% elif doc.docstatus != 1 %}
+	<div class="folt-note is-closed">
+		{{ _("This request is not open for quotation.") }}
+	</div>
+	{% else %}
+	<div class="folt-note is-open">
+		{{ _("Enter your price for each line and press Submit Quotation. You can reopen this page and change it until FoLT closes the request.") }}
+	</div>
+	{% endif %}
+
+	{% if doc.items %}
+	<section class="folt-card">
+		<div class="folt-card-head">
+			<h2 class="folt-card-title">{{ _("Your prices") }}</h2>
+		</div>
+
+		{# `rfq-items` is the delegation root folt_rfq.js binds change handlers on. #}
+		<div class="folt-lines rfq-items">
+			{# Column headers. aria-hidden because every cell below carries its own label --
+			   a screen reader reading both would say "Qty" twice per row. #}
+			<div class="folt-line folt-line-head" aria-hidden="true">
+				<span>{{ _("Item") }}</span>
+				<span class="folt-num">{{ _("Qty") }}</span>
+				<span class="folt-num">{{ _("Rate") }} ({{ doc.currency_symbol }})</span>
+				<span class="folt-num">{{ _("Amount") }}</span>
+			</div>
+
+			{% for d in doc.items %}
+			<div class="folt-line">
+				<div class="folt-item">
+					<div class="folt-item-code">{{ d.item_code }}</div>
+					{% if d.description %}
+					<p class="folt-item-desc">{{ d.description }}</p>
+					{% endif %}
+					{% set supplier_part_no = frappe.db.get_value("Item Supplier", {"parent": d.item_code, "supplier": doc.supplier}, "supplier_part_no") %}
+					{% if supplier_part_no %}
+					<p class="folt-item-part">{{ _("Your part no: {0}").format(supplier_part_no) }}</p>
+					{% endif %}
+					<span class="folt-item-uom">{{ _("Unit: {0}").format(d.uom) }}</span>
+				</div>
+
+				<div class="folt-num">
+					<label class="folt-field-label" for="folt-qty-{{ d.idx }}">{{ _("Qty") }}</label>
+					{# inputmode=decimal brings up the numeric keypad on a phone without
+					   type=number, which would reject the grouped "12,500" the JS accepts. #}
+					<input type="text" inputmode="decimal" id="folt-qty-{{ d.idx }}"
+						class="folt-input rfq-qty"
+						value="{{ '%.2f'|format(d.folt_qty) }}"
+						data-idx="{{ d.idx }}"
+						aria-label="{{ _('Quantity for {0}').format(d.item_code) }}"
+						{{ "readonly" if not editable }}>
+				</div>
+
+				<div class="folt-num">
+					<label class="folt-field-label" for="folt-rate-{{ d.idx }}">{{ _("Rate") }} ({{ doc.currency_symbol }})</label>
+					<input type="text" inputmode="decimal" id="folt-rate-{{ d.idx }}"
+						class="folt-input rfq-rate"
+						value="{{ '%.2f'|format(d.folt_rate) }}"
+						data-idx="{{ d.idx }}"
+						aria-label="{{ _('Rate for {0}').format(d.item_code) }}"
+						{{ "readonly" if not editable }}>
+				</div>
+
+				<div class="folt-num folt-amount">
+					<span class="folt-amount-label">{{ _("Amount") }}</span>
+					<span>{{ doc.currency_symbol }} <span class="rfq-amount" data-idx="{{ d.idx }}">0.00</span></span>
+				</div>
+			</div>
+			{% endfor %}
+		</div>
+
+		<div class="folt-total">
+			<span class="folt-total-label">{{ _("Grand total") }}</span>
+			<span class="folt-total-value">
+				{{ doc.currency_symbol }} <span class="tax-grand-total">0.00</span>
+			</span>
+		</div>
+	</section>
+	{% endif %}
+
+	<section class="folt-card">
+		<div class="folt-card-body">
+			<label class="folt-card-title" for="folt-terms">{{ _("Notes for FoLT") }}</label>
+			<textarea id="folt-terms" class="folt-textarea terms-feedback"
+				{{ "readonly" if not editable }}>{{ folt_terms or "" }}</textarea>
+			<p class="folt-hint">
+				{{ _("Anything the buyer should know: lead time, what the price includes, why a line is priced the way it is.") }}
+			</p>
+		</div>
+	</section>
+
+	{% if doc.rfq_links %}
+	<section class="folt-card">
+		<div class="folt-card-head">
+			<h2 class="folt-card-title">{{ _("Your quotations") }}</h2>
+		</div>
+		<ul class="folt-quotes">
+			{% for d in doc.rfq_links %}
+			<li>
+				<a class="folt-quote" href="/supplier-quotations/{{ d.name | urlencode }}">
+					<span class="folt-quote-name">{{ d.name }}</span>
+					{# Green for a bid that still counts -- the committee scores drafts as well
+					   as submitted ones -- grey for one that does not. The word beside it
+					   already distinguishes draft from submitted. #}
+					<span class="folt-pill {% if d.status in ('Draft', 'Submitted', 'Ordered') %}is-live{% endif %}">{{ _(d.status) }}</span>
+					<span class="folt-quote-date">{{ d.transaction_date }}</span>
+				</a>
+			</li>
+			{% endfor %}
+		</ul>
+	</section>
+	{% endif %}
 </div>
 {% endblock %}

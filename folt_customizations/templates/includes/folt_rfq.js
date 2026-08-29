@@ -35,11 +35,24 @@ $(document).ready(function () {
 		});
 	}
 
+	// The server renders the inputs with a plain "%.2f", while every edit below rewrites them
+	// through format_number -- so an untouched field read "15000.00" and the same field read
+	// "15,000.00" the moment it was touched. Painting them once on load makes the page's
+	// starting state the same state it reaches after one keystroke, using the site's own
+	// number format rather than the template's.
+	function paint_inputs() {
+		Object.values(lines).forEach((line) => {
+			$(`.rfq-qty[data-idx='${line.idx}']`).val(format_number(line.qty, rfq.number_format, 2));
+			$(`.rfq-rate[data-idx='${line.idx}']`).val(format_number(line.rate, rfq.number_format, 2));
+		});
+	}
+
 	$("input").on("focus", function () {
 		$(this).select();
 	});
 	bind(".rfq-qty", "qty");
 	bind(".rfq-rate", "rate");
+	paint_inputs();
 	render_totals();
 
 	$(".folt-save-quotation").on("click", function () {

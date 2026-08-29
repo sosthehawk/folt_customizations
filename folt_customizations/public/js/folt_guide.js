@@ -98,13 +98,32 @@ folt.guide.paint = function (frm, guide) {
 };
 
 folt.guide.chain_html = function (guide) {
-	if (!guide.chain || !guide.chain.step) return "";
+	const chain =
+		guide.chain && guide.chain.step
+			? `<span class="folt-chain-step">${__("Step {0} of {1}", [
+					guide.chain.step,
+					guide.chain.of,
+				])}</span>
+				<span aria-hidden="true">&middot;</span>
+				<span>${__(guide.chain.step_title || "")}</span>`
+			: "";
 
-	return `<div class="folt-chain">
-		<span class="folt-chain-step">${__("Step {0} of {1}", [guide.chain.step, guide.chain.of])}</span>
-		<span>&middot;</span>
-		<span>${__(guide.chain.step_title || "")}</span>
-	</div>`;
+	// guide.can_act already says whether the reader is one of the people this document is
+	// waiting for. Until now only folt.chain.add_buttons consulted it, so the single fact a
+	// reader most wants on opening a document was never stated on its face -- they had to infer
+	// it from whether an action button happened to be there.
+	//
+	// Deliberately NOT synthesising a second "Step N of M" from guide.lane/guide.of when the SOP
+	// chain is absent: guide.chain.step counts steps in FoLT's six-document Finance SOP while
+	// guide.lane counts lanes within one workflow. Showing one under the other's label would
+	// invent a meaning neither has, and the tracker below already conveys lane position.
+	const mine = guide.can_act
+		? `<span class="folt-chain-mine">${__("It's with you")}</span>`
+		: "";
+
+	if (!chain && !mine) return "";
+
+	return `<div class="folt-chain">${chain}${mine}</div>`;
 };
 
 folt.guide.steps_html = function (guide) {
@@ -115,7 +134,15 @@ folt.guide.steps_html = function (guide) {
 
 			// A tick for a finished step, the number for everything else: the number is what
 			// makes "step 2 of 5" legible, and a step already done does not need counting.
-			const mark = step.status === "done" ? "&check;" : index + 1;
+			// The status word is carried in visually-hidden text because the mark conveys it
+			// with colour and a glyph alone -- a screen reader would otherwise hear a bare
+			// number, or a tick it cannot interpret.
+			const status = folt.guide.STEP_STATUS[step.status]
+				? __(folt.guide.STEP_STATUS[step.status])
+				: "";
+			const mark = `<span class="folt-step-mark">${
+				step.status === "done" ? "&check;" : index + 1
+			}${status ? `<span class="folt-visually-hidden"> ${status}</span>` : ""}</span>`;
 
 			// The role that moves it on from here. A terminal step has nobody, and saying
 			// "nobody" there would read as a problem rather than as the end.
@@ -130,7 +157,7 @@ folt.guide.steps_html = function (guide) {
 				: "";
 
 			return `<li class="${classes.join(" ")}">
-				<span class="folt-step-mark">${mark}</span>
+				${mark}
 				<span class="folt-step-label">${__(step.label)}</span>
 				${role}
 				${optional}
@@ -138,7 +165,26 @@ folt.guide.steps_html = function (guide) {
 		})
 		.join("");
 
-	return `<ol class="folt-steps">${steps}</ol>`;
+	// tabindex="0" because the rail is `overflow-x: auto` (folt_desk.css) and a scrollable
+	// container that nothing can focus is a WCAG 2.1.1 failure -- a keyboard user could not
+	// reach steps 5 and 6 of an Employee Advance at all. role="group" plus a label keep the
+	// added tab stop from being an anonymous one.
+	return `<ol class="folt-steps" tabindex="0" role="group" aria-label="${__(
+		"Approval steps"
+	)}">${steps}</ol>`;
+};
+
+// Rendered into each step mark for screen readers only. A map rather than inline ternaries so
+// that a status added to workflow_shape shows up here as an obviously-missing key.
+//
+// The source strings are plain, and __() is applied at RENDER time rather than here: this file
+// is app_include_js and its module body runs before frappe's translations are loaded, so
+// calling __() at parse time would freeze the untranslated English into the map for the life of
+// the page. Everything else in this file already calls __() inside a render function.
+folt.guide.STEP_STATUS = {
+	done: "Done",
+	current: "Current step",
+	ahead: "Not started",
 };
 
 folt.guide.turned_down_html = function (guide) {
@@ -148,7 +194,11 @@ folt.guide.turned_down_html = function (guide) {
 		? `<span>${frappe.utils.escape_html(guide.rejection_reason)}</span>`
 		: `<span>${__("No reason was recorded.")}</span>`;
 
-	return `<div class="folt-turned-down">
+	// role="status" because this banner appears only after the guide's async fetch resolves, so
+	// it is never present at page load and a screen reader would otherwise never mention that
+	// the document has been sent back. "status" rather than "alert": it is important, but it is
+	// the state of the document rather than an interruption.
+	return `<div class="folt-turned-down" role="status">
 		<span class="folt-turned-down-head">${__("Sent back: {0}", [__(guide.off_path.state)])}</span>
 		${reason}
 	</div>`;
@@ -254,15 +304,27 @@ folt.guide.documents_html = function (guide) {
 					? `<span class="folt-document-why">${frappe.utils.escape_html(row.description)}</span>`
 					: "";
 
+			// aria-label because five buttons all reading "Attach" are indistinguishable to
+			// anyone listing the controls on the page. The escape happens BEFORE __() does its
+			// interpolation, which is this file's discipline throughout -- __() does not escape
+			// its arguments, so escaping after it would be escaping the wrong string.
 			const action = row.attached
 				? ""
-				: `<button class="btn btn-xs btn-default folt-document-action" data-folt-attach="${frappe.utils.escape_html(
-						row.fieldname
-					)}">${__("Attach")}</button>`;
+				: `<button type="button" class="btn btn-xs btn-default folt-document-action"
+						data-folt-attach="${frappe.utils.escape_html(row.fieldname)}"
+						aria-label="${__("Attach {0}", [frappe.utils.escape_html(row.label)])}">${__(
+							"Attach"
+						)}</button>`;
 
+			// Three cells: label (with `why` under it), status, action. It was previously
+			// `flex; justify-content: space-between` with the pill and the button sharing one
+			// span that carried the same class as the button inside it -- so on a wide panel the
+			// label and the pill were pushed to opposite edges with a void between them, and the
+			// wider the panel the less related the two halves looked.
 			return `<li class="folt-document ${row.blocks_next ? "is-blocking" : ""}">
 				<span class="folt-document-label">${frappe.utils.escape_html(row.label)}${why}</span>
-				<span class="folt-document-action">${pill} ${action}</span>
+				<span class="folt-document-status">${pill}</span>
+				${action}
 			</li>`;
 		})
 		.join("");

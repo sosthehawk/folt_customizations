@@ -13,9 +13,27 @@ app_license = "MIT"
 # the public website brand, favicon and the loading splash.
 app_logo_url = "/assets/folt_customizations/images/folt-logo.svg"
 
-# Enlarge + center the login-page logo (scoped to .for-login, so the Desk navbar is
-# untouched). Served on website/login pages via the head include.
-web_include_css = "/assets/folt_customizations/css/folt_branding.css"
+# The website/portal half of the stylesheet set. Three files, and the order is load-bearing:
+#
+#   folt_theme.css   the SAME file the Desk loads (see app_include_css below). Every token it
+#                    sets -- --primary, --primary-color, --btn-primary, --heading-color,
+#                    --focus-default, --font-stack -- is declared in website.bundle.css too,
+#                    with exactly one definition each, and the website has NO dark theme
+#                    (templates/base.html emits no data-theme attribute), so its dark block is
+#                    inert here and its light block simply applies. Loading it on both surfaces
+#                    is what makes the supplier portal and the Desk the same product rather
+#                    than two things that happen to share a logo -- and it declares Lexend
+#                    once for both.
+#   folt_portal.css  the supplier-portal components (the RFQ pricing page) plus a short,
+#                    enumerated set of rules for frappe's portal chrome.
+#   folt_branding.css  the logo rules. LAST on purpose: its own comment says it is the last
+#                    stylesheet the website loads, which is why its navbar rule needs no
+#                    !important. Keep it there so that stays true.
+web_include_css = [
+    "/assets/folt_customizations/css/folt_theme.css",
+    "/assets/folt_customizations/css/folt_portal.css",
+    "/assets/folt_customizations/css/folt_branding.css",
+]
 
 # Same job for outgoing email: frappe inlines every `email_css` file into the message body
 # (premailer, via email_body.inline_style_in_html), which is the only way to reach the markup
@@ -95,7 +113,20 @@ app_include_js = [
 # loads and an equal-specificity rule wins on order -- there is no !important in the file.
 # Plain path again, so no build step. Everything in it is scoped to `.folt-` classes this app
 # generates, so it cannot reach a form, a list or the print preview. See folt_desk.css.
-app_include_css = "/assets/folt_customizations/css/folt_desk.css"
+#
+# TWO files, and the ORDER MATTERS -- though not for the reason it usually does.
+# folt_theme.css restyles frappe's own chrome (typeface, primary colour, heading colour, focus
+# ring); folt_desk.css never selects a frappe node. Those are contradictory contracts, so they
+# cannot live in one file: see the header of each. Listing the theme FIRST keeps the sentence
+# four lines above literally true -- folt_desk.css remains the last stylesheet the Desk loads,
+# which is the whole of why it needs no !important. The theme wins its own fights on
+# specificity, so it loses nothing by going first.
+# (A bare string was already being listified -- frappe.append_hook does
+# `if not isinstance(value, list): value = [value]` -- so this is not a behaviour change.)
+app_include_css = [
+    "/assets/folt_customizations/css/folt_theme.css",
+    "/assets/folt_customizations/css/folt_desk.css",
+]
 
 # splash_image is the animated mark, not the plain emblem: it is what shows during the
 # login wait, and it needs intrinsic width/height to render at all inside frappe's

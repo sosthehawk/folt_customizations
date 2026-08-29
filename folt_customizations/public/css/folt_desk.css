@@ -19,6 +19,24 @@
       redefines those under [data-theme="dark"] (scss/desk/dark.scss) -- so tokens get dark mode
       for free and a hex literal is a bug that only shows up for the people who use dark mode.
 
+      BUT NOT EVERY TOKEN IS DARK-SAFE, and this file learned that the hard way. The
+      SATURATED RAMP -- --green-500, --blue-500, --orange-500, --red-500, --gray-400 -- and
+      --neutral-white are each declared exactly ONCE in the compiled bundle and never
+      redefined under [data-theme="dark"]. Using them is not the hex-literal bug, but it is
+      its cousin: the colour is identical in both themes while everything around it inverts.
+      Concretely, white-on---green-500 measured 2.3:1 and white-on---blue-500 3.4:1 in BOTH
+      themes, and a --gray-400 timeline dot was 1.7:1 on white but 6.6:1 on the dark ground.
+
+      So: for anything where a fill and something drawn on top of it must both be legible,
+      use one of frappe's DESIGNED PAIRS -- --bg-{green,blue,orange,red,gray} with
+      --text-on-{green,blue,orange,red,gray}, or --alert-bg-* with --alert-text-*. Both
+      halves are redefined for dark, and they are defined to contrast with each other, so
+      legibility is guaranteed by construction rather than by measurement. That is exactly
+      what frappe's own `indicator-pill` does (common/indicator.scss:64).
+
+      The rule of thumb: a token you cannot name the dark-mode value of does not belong on
+      either side of a fill/text pair.
+
    3. No `!important`, anywhere. folt_branding.css earns its specificity fight because
       login.bundle.css loads after it; this file has no such problem -- folt_customizations is
       last in get_installed_apps(), so app_include_css is the last stylesheet the Desk loads and
@@ -37,32 +55,87 @@ body.folt-guided .folt-guide {
 
 /* --- where this document is in the SOP ------------------------------------------------- */
 
+/* Screen-reader-only text. Used for the status word inside a step mark, the noun after a
+   count badge, and the loading announcement -- places where the visual form carries meaning
+   that the accessible name would otherwise lose. clip-path rather than the old clip, and no
+   `display:none`, which would take it out of the accessibility tree entirely. */
+body.folt-guided .folt-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
 body.folt-guided .folt-chain {
   display: flex;
   align-items: baseline;
   gap: var(--padding-sm);
   flex-wrap: wrap;
+  padding-bottom: var(--padding-sm);
+  border-bottom: 1px solid var(--border-color);
   font-size: var(--text-sm);
   color: var(--text-muted);
 }
 
 body.folt-guided .folt-chain-step {
+  font-size: var(--text-base);
   font-weight: var(--weight-semibold);
   color: var(--heading-color);
+}
+
+/* "It's with you." The server has always computed guide.can_act -- only the button code
+   read it, so the one fact the reader most wants on opening a document was never on its
+   face. margin-left:auto parks it at the far end of the band. */
+body.folt-guided .folt-chain-mine {
+  margin-left: auto;
+  padding: 1px var(--padding-sm);
+  border-radius: var(--border-radius-full);
+  background: var(--bg-blue);
+  color: var(--text-on-blue);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
 }
 
 /* --- the step tracker ------------------------------------------------------------------ */
 
 body.folt-guided .folt-steps {
+  /* The mark's diameter, in one place. The connector below offsets itself by half of this,
+     which used to be a hard-coded 11px silently coupled to a hard-coded 22px -- so bumping
+     the mark for legibility broke the connector alignment with nothing to point at. */
+  --folt-mark: 26px;
+
   display: flex;
   align-items: flex-start;
   list-style: none;
   margin: 0;
-  padding: 0;
+  padding: var(--padding-md) var(--padding-sm);
+  /* Recessed rather than raised, and this is deliberate: form/dashboard.js calls
+     add_section with make_card:true, so the guide is ALREADY inside a frappe card. A
+     shadow here would be a card inside a card. --subtle-accent is the one token that
+     contrasts with --card-bg in BOTH directions (#f8f8f8 on white, #232323 on #171717),
+     which is what makes it the right way to build hierarchy inside a card. */
+  background: var(--subtle-accent);
+  border-radius: var(--border-radius-md);
   /* Wide chains (Employee Advance has six steps) scroll rather than wrapping into an
-     unreadable stack, and rather than making the page scroll sideways. */
+     unreadable stack, and rather than making the page scroll sideways. A phone swipe then
+     lands on a step rather than between two. */
   overflow-x: auto;
+  scroll-snap-type: x proximity;
   gap: 0;
+}
+
+/* An overflow-x container that nothing can focus is a WCAG 2.1.1 failure: a keyboard user
+   could not reach steps 5 and 6 of an Employee Advance at all. tabindex="0" (set in
+   folt_guide.js) makes it arrow-scrollable; this gives that new tab stop a visible ring,
+   which frappe's own `a,...,.btn{outline:0}` in desk/global.scss would otherwise deny it. */
+body.folt-guided .folt-steps:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-blue);
 }
 
 body.folt-guided .folt-step {
@@ -70,18 +143,20 @@ body.folt-guided .folt-step {
   flex-direction: column;
   align-items: center;
   flex: 1 1 0;
-  min-width: 96px;
+  min-width: 104px;
   position: relative;
   text-align: center;
   padding: 0 var(--padding-xs);
+  scroll-snap-align: start;
 }
 
 /* The connector between steps, drawn as a border on a pseudo-element rather than as a
-   separate node, so the markup stays a plain list of steps. */
+   separate node, so the markup stays a plain list of steps. Its offset is half the mark
+   rather than a number that happens to equal half the mark -- see --folt-mark above. */
 body.folt-guided .folt-step + .folt-step::before {
   content: "";
   position: absolute;
-  top: 11px;
+  top: calc(var(--folt-mark) / 2);
   left: 0;
   width: 100%;
   transform: translateX(-50%);
@@ -91,7 +166,7 @@ body.folt-guided .folt-step + .folt-step::before {
 
 body.folt-guided .folt-step.is-done + .folt-step.is-done::before,
 body.folt-guided .folt-step.is-done + .folt-step.is-current::before {
-  border-top-color: var(--green-500);
+  border-top-color: var(--text-on-green);
 }
 
 body.folt-guided .folt-step-mark {
@@ -100,8 +175,8 @@ body.folt-guided .folt-step-mark {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
+  width: var(--folt-mark);
+  height: var(--folt-mark);
   border-radius: var(--border-radius-full);
   border: 1px solid var(--border-color);
   background: var(--card-bg);
@@ -111,16 +186,29 @@ body.folt-guided .folt-step-mark {
   line-height: 1;
 }
 
+/* THE FILLS ARE PAIRS, NOT SATURATED RAMP VALUES -- see rule 2 in the header. The glyph
+   inside these marks is text (a tick, or a step number), so it owes 4.5:1, and
+   white-on---green-500 was 2.3:1 while white-on---blue-500 was 3.4:1 -- in both themes.
+   --bg-green / --text-on-green is 12.5:1 in light and ~7:1 in dark, by construction.
+
+   The meanings are unchanged: done is still green, current still blue, optional still
+   orange. What changes is that the current step now earns its dominance from the halo and
+   the bolder weight below rather than from being the most saturated thing on screen --
+   which is precisely what lets these fills be pale enough to pass. */
 body.folt-guided .folt-step.is-done .folt-step-mark {
-  background: var(--green-500);
-  border-color: var(--green-500);
-  color: var(--neutral-white);
+  background: var(--bg-green);
+  border-color: var(--text-on-green);
+  color: var(--text-on-green);
 }
 
 body.folt-guided .folt-step.is-current .folt-step-mark {
-  background: var(--blue-500);
-  border-color: var(--blue-500);
-  color: var(--neutral-white);
+  background: var(--bg-blue);
+  border-color: var(--text-on-blue);
+  color: var(--text-on-blue);
+  font-weight: var(--weight-bold);
+  /* The halo is the dominance. It reads at a glance without relying on saturation, and it
+     sits on --subtle-accent (the track) so it never touches the connector line. */
+  box-shadow: 0 0 0 3px var(--bg-blue);
 }
 
 body.folt-guided .folt-step-label {
@@ -152,9 +240,9 @@ body.folt-guided .folt-step-optional {
 }
 
 body.folt-guided .folt-step.is-at-optional .folt-step-mark {
-  background: var(--orange-500);
-  border-color: var(--orange-500);
-  color: var(--neutral-white);
+  background: var(--bg-orange);
+  border-color: var(--text-on-orange);
+  color: var(--text-on-orange);
 }
 
 /* --- turned down ----------------------------------------------------------------------- */
@@ -184,21 +272,27 @@ body.folt-guided .folt-panels {
   display: grid;
   /* Two columns where there is room, one where there is not. `auto-fit` with a minimum does
      this without a media query, so there is no breakpoint here to keep in step with frappe's. */
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   gap: var(--padding-md);
 }
 
 body.folt-guided .folt-panel {
   border: 1px solid var(--border-color);
-  border-radius: var(--border-radius-md);
-  background: var(--card-bg);
+  border-radius: var(--border-radius-lg);
+  /* Recessed, not elevated, for the same card-in-card reason as .folt-steps. */
+  background: var(--subtle-accent);
   padding: var(--padding-md);
 }
 
+/* An eyebrow rather than a heading. It labels the panel ("Approvals", "Evidence"), and at
+   --text-sm/semibold/--heading-color it was competing with the event headings inside the
+   panel, which are the content. Smaller, tracked out and muted reads as a label. */
 body.folt-guided .folt-panel-title {
-  font-size: var(--text-sm);
+  font-size: var(--text-xs);
   font-weight: var(--weight-semibold);
-  color: var(--heading-color);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
   margin-bottom: var(--padding-sm);
 }
 
@@ -213,6 +307,9 @@ body.folt-guided .folt-timeline {
 }
 
 body.folt-guided .folt-event {
+  /* Dot diameter in one place: the rail below centres itself on it. */
+  --folt-dot: 9px;
+
   position: relative;
   padding: 0 0 var(--padding-md) var(--padding-lg);
   font-size: var(--text-sm);
@@ -223,28 +320,35 @@ body.folt-guided .folt-event:last-child {
   padding-bottom: 0;
 }
 
+/* --gray-400 rather than --text-on-gray was THE one genuine light/dark asymmetry in this
+   file: 1.7:1 against white but 6.6:1 against the dark ground, so a plain "note" event was
+   effectively invisible in light mode and perfectly clear in dark. --text-on-gray is
+   7.4:1 in light and is redefined for dark, so both themes read. */
 body.folt-guided .folt-event::before {
   content: "";
   position: absolute;
   left: 0;
   top: 5px;
-  width: 8px;
-  height: 8px;
+  width: var(--folt-dot);
+  height: var(--folt-dot);
   border-radius: var(--border-radius-full);
-  background: var(--gray-400);
+  background: var(--text-on-gray);
+  /* Knocks the dot out of the rail it sits on, so the line does not appear to run through
+     it. Matches the panel fill, which is what is actually behind the dot. */
+  box-shadow: 0 0 0 2px var(--subtle-accent);
 }
 
 body.folt-guided .folt-event.is-forward::before,
 body.folt-guided .folt-event.is-finished::before {
-  background: var(--green-500);
+  background: var(--text-on-green);
 }
 
 body.folt-guided .folt-event.is-turned-down::before {
-  background: var(--red-500);
+  background: var(--alert-text-danger);
 }
 
 body.folt-guided .folt-event.is-derived::before {
-  background: var(--orange-500);
+  background: var(--text-on-orange);
 }
 
 /* The rail joining the events. Stops at the last one, so the timeline does not trail off
@@ -252,8 +356,8 @@ body.folt-guided .folt-event.is-derived::before {
 body.folt-guided .folt-event:not(:last-child)::after {
   content: "";
   position: absolute;
-  left: 3px;
-  top: 13px;
+  left: calc(var(--folt-dot) / 2 - 0.5px);
+  top: calc(5px + var(--folt-dot));
   bottom: 0;
   border-left: 1px solid var(--border-color);
 }
@@ -269,10 +373,14 @@ body.folt-guided .folt-event-meta {
 }
 
 /* The reason a document was sent back. Given real weight rather than muted: it is the one part
-   of the timeline somebody has to act on. */
+   of the timeline somebody has to act on -- so it gets a tinted box that says so, rather than
+   being a slightly darker sentence among lighter ones. */
 body.folt-guided .folt-event-reason {
-  margin-top: 2px;
-  color: var(--text-color);
+  margin-top: var(--padding-xs);
+  padding: var(--padding-xs) var(--padding-sm);
+  border-radius: var(--border-radius-sm);
+  background: var(--alert-bg-danger);
+  color: var(--alert-text-danger);
 }
 
 body.folt-guided .folt-pending {
@@ -283,8 +391,13 @@ body.folt-guided .folt-pending {
   color: var(--text-muted);
 }
 
-/* A role nobody holds means the document is stuck and chasing will not move it. */
+/* A role nobody holds means the document is stuck and chasing will not move it. That was
+   "worth saying loudly" and was said in red text; a tinted panel is what loud looks like. */
 body.folt-guided .folt-unassigned {
+  margin-top: var(--padding-xs);
+  padding: var(--padding-xs) var(--padding-sm);
+  border-radius: var(--border-radius-sm);
+  background: var(--alert-bg-danger);
   color: var(--alert-text-danger);
   font-weight: var(--weight-medium);
 }
@@ -300,16 +413,27 @@ body.folt-guided .folt-documents {
   gap: var(--padding-sm);
 }
 
+/* A grid, not `flex; justify-content: space-between`. With space-between on a wide panel
+   the label and the pill were shoved to opposite edges with a void between them, while the
+   `why` sentence wrapped underneath the label and the pill floated off on its own -- the
+   wider the panel, the less the two halves looked related. Three cells keep the status
+   next to the thing it is the status of, and let `why` sit under the label where it
+   belongs. `align-items: start` so a two-line label does not centre the pill against it. */
 body.folt-guided .folt-document {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--padding-sm);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: start;
+  gap: var(--padding-xs) var(--padding-sm);
   font-size: var(--text-sm);
 }
 
 body.folt-guided .folt-document-label {
+  min-width: 0;
   color: var(--text-color);
+}
+
+body.folt-guided .folt-document-status {
+  justify-self: end;
 }
 
 body.folt-guided .folt-document.is-blocking .folt-document-label {
@@ -325,9 +449,18 @@ body.folt-guided .folt-document-why {
 }
 
 /* A missing document is worth a pointer at where to put it, and the pointer is a button
-   because that is what it does. */
+   because that is what it does.
+
+   THE BORDER IS THE AFFORDANCE. frappe paints .btn-default with --btn-default-bg, which is
+   gray-100 in light and gray-800 in dark -- and those are the SAME values as the
+   --subtle-accent this panel is now filled with (#f3f3f3 vs #f8f8f8, then #232323 vs
+   #232323). So the moment the panel became recessed, the button lost all of its chrome and
+   read as plain text in both themes. --dark-border-color reads against --subtle-accent in
+   both, and this is our own class on a node this app generates, so rule 1 holds.
+   .btn sets `border: none`, which this out-specifies (0,2,0 vs 0,1,0) without !important. */
 body.folt-guided .folt-document-action {
   flex-shrink: 0;
+  border: 1px solid var(--dark-border-color);
 }
 
 /* --- actions --------------------------------------------------------------------------- */
@@ -353,7 +486,42 @@ body.folt-guided .folt-blocked-note {
 /* --- the My Tasks page ------------------------------------------------------------------
    A full surface this app owns end to end, unlike the guide, which sits inside a form frappe
    built. Still `.folt-` prefixed throughout: the page body is ours, but it is rendered inside
-   frappe's own `.page-main`, and a bare `ul` or `li` rule here would reach the rest of it. */
+   frappe's own `.page-main`, and a bare `ul` or `li` rule here would reach the rest of it.
+
+   TWO FACTS ABOUT FRAPPE'S TOKENS DRIVE EVERY VISUAL CHOICE BELOW, and neither is guessable:
+
+   1. --card-bg EQUALS --bg-color in BOTH themes (#ffffff / #171717). A card cannot be
+      distinguished from the page it sits on by fill. And in dark mode every shadow token
+      except --shadow-base is a black alpha, which is invisible on #171717. So the 1px
+      border is the primary separator and --card-shadow is an ADDITIVE, light-mode-only
+      cue. Do not "clean this up" by dropping the border in favour of the shadow.
+
+   2. --subtle-accent contrasts with --card-bg in BOTH DIRECTIONS -- darker in light
+      (#f8f8f8), lighter in dark (#232323). It is the only token that reliably builds
+      hierarchy inside a card, which is why the group header strips, the step-tracker track
+      and the panel fills all use it.
+
+   A corollary that is easy to get wrong: the active tab must NOT be a raised --card-bg pill
+   on a --subtle-accent track. In dark mode --card-bg is DARKER than the track, so the
+   elevation metaphor inverts and the active tab reads as a hole. The --bg-blue/--text-on-blue
+   pair reads as "this one" identically in both themes. */
+
+/* Local aliases, declared on our own nodes rather than on body.folt-guided so that every
+   selector's own compound still begins with .folt- (rule 1). Custom properties inherit, so
+   both subtrees get them.
+
+   --folt-accent-* is the page's single accent slot. It is a designed pair today; when a
+   surface wants the FoLT brand blue instead, this is the one line to change, and
+   folt_theme.css has already put brand blue behind var(--primary). Keeping the indirection
+   means this file never has to know whether folt_theme.css is installed. */
+body.folt-guided .folt-tasks,
+body.folt-guided .folt-guide {
+  --folt-accent-bg: var(--bg-blue);
+  --folt-accent-fg: var(--text-on-blue);
+  --folt-amount-col: 96px;
+  --folt-age-col: 56px;
+  --folt-row-min: 56px;
+}
 
 body.folt-guided .folt-tasks {
   display: flex;
@@ -361,25 +529,41 @@ body.folt-guided .folt-tasks {
   gap: var(--padding-md);
 }
 
+/* --- the bucket switcher ---------------------------------------------------------------
+   A segmented control on a recessed track, rather than four text buttons over a rule. */
+
 body.folt-guided .folt-tasks-nav {
   display: flex;
-  gap: var(--padding-xs);
-  flex-wrap: wrap;
-  border-bottom: 1px solid var(--border-color);
-  padding-bottom: var(--padding-sm);
+  gap: 2px;
+  padding: 3px;
+  /* Sized to its contents. Stretching a four-item switcher across a 1400px desk makes it
+     read as a toolbar rather than as a choice between four things. */
+  align-self: flex-start;
+  max-width: 100%;
+  background: var(--subtle-accent);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius-md);
+  /* On a phone it scrolls rather than wrapping to a second row of half-width tabs. */
+  overflow-x: auto;
+  scrollbar-width: none;
 }
 
 body.folt-guided .folt-tasks-tab {
   display: inline-flex;
   align-items: center;
   gap: var(--padding-xs);
-  padding: var(--padding-xs) var(--padding-sm);
-  border: 1px solid transparent;
-  border-radius: var(--border-radius-md);
+  /* 36px, comfortably over the 24px this used to be, and a real touch target. */
+  min-height: 36px;
+  padding: 0 var(--padding-md);
+  /* No shrinking into unreadable slivers when four buckets meet a narrow screen. */
+  flex: 0 0 auto;
+  border: none;
   background: transparent;
+  border-radius: var(--border-radius-sm);
   color: var(--text-muted);
   font-size: var(--text-sm);
   cursor: pointer;
+  white-space: nowrap;
 }
 
 body.folt-guided .folt-tasks-tab:hover {
@@ -387,10 +571,14 @@ body.folt-guided .folt-tasks-tab:hover {
   color: var(--text-color);
 }
 
+body.folt-guided .folt-tasks-tab:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-blue);
+}
+
 body.folt-guided .folt-tasks-tab.is-active {
-  background: var(--card-bg);
-  border-color: var(--border-color);
-  color: var(--heading-color);
+  background: var(--folt-accent-bg);
+  color: var(--folt-accent-fg);
   font-weight: var(--weight-semibold);
 }
 
@@ -398,34 +586,57 @@ body.folt-guided .folt-tasks-count {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 18px;
-  padding: 0 5px;
-  height: 18px;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
   border-radius: var(--border-radius-full);
-  background: var(--bg-color);
+  background: var(--subtle-fg);
+  /* The badge sits on --subtle-accent (the nav track, the group head strip), and --subtle-fg
+     against that is #f3f3f3 on #f8f8f8 in light -- the number was legible but the badge had
+     no visible shape at all. --dark-border-color is the one neutral that reads against
+     --subtle-accent in BOTH themes (gray-300 on #f8f8f8, gray-600 on #232323), so the border
+     is what makes it a badge rather than a floating number. */
+  border: 1px solid var(--dark-border-color);
   color: var(--text-muted);
-  font-size: var(--text-xs);
-  font-weight: var(--weight-medium);
+  font-size: var(--text-tiny);
+  font-weight: var(--weight-semibold);
+  font-variant-numeric: tabular-nums;
 }
 
+/* Swapping the two halves of a designed pair is guaranteed to contrast in both themes,
+   because that is what the pair is for. The badge this replaces was --neutral-white on
+   --blue-500: 3.4:1, identically wrong in light and dark. */
 body.folt-guided .folt-tasks-tab.is-active .folt-tasks-count {
-  background: var(--blue-500);
-  color: var(--neutral-white);
+  background: var(--folt-accent-fg);
+  border-color: var(--folt-accent-fg);
+  color: var(--folt-accent-bg);
 }
 
-body.folt-guided .folt-tasks-empty {
-  padding: var(--padding-lg);
-  text-align: center;
-  color: var(--text-light);
-  font-size: var(--text-sm);
+/* --- the queue -------------------------------------------------------------------------- */
+
+/* The gap lives here rather than as a margin-bottom on each group, so the last card has no
+   trailing space and nothing can collapse against the empty state. */
+body.folt-guided .folt-tasks-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--padding-md);
 }
 
 body.folt-guided .folt-tasks-group {
   border: 1px solid var(--border-color);
-  border-radius: var(--border-radius-md);
+  border-radius: var(--border-radius-lg);
   background: var(--card-bg);
+  /* --card-shadow rather than --shadow-md: this is the token frappe MEANS by "a card", so
+     the page stays in the Desk's register instead of shouting louder than the list views
+     next door. Invisible in dark mode, which is why the border above is not optional. */
+  box-shadow: var(--card-shadow);
   overflow: hidden;
-  margin-bottom: var(--padding-md);
+}
+
+/* A group whose state is off the workflow's happy path -- workflow_shape.locate returns
+   lane: None -- is a repair job, not a queue step. One class says so. */
+body.folt-guided .folt-tasks-group.is-off-path {
+  border-color: var(--alert-text-danger);
 }
 
 body.folt-guided .folt-tasks-group-head {
@@ -433,18 +644,71 @@ body.folt-guided .folt-tasks-group-head {
   align-items: center;
   gap: var(--padding-sm);
   padding: var(--padding-sm) var(--padding-md);
+  background: var(--subtle-accent);
   border-bottom: 1px solid var(--border-color);
-  font-size: var(--text-sm);
 }
 
+/* An <h2>, so a screen-reader user can jump between groups -- the page had no heading
+   structure at all below the page title. margin:0 kills the UA margin that brings. */
 body.folt-guided .folt-tasks-group-title {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  margin: 0;
+  font-size: var(--text-base);
   font-weight: var(--weight-semibold);
   color: var(--heading-color);
 }
 
-body.folt-guided .folt-tasks-group-step {
-  color: var(--text-light);
+/* Line 2: the workflow state and the step position. When you are holding five steps across
+   five chains, WHICH CHAIN is the scan key, so the doctype is line 1 at full weight and
+   this is the qualifier underneath. */
+body.folt-guided .folt-tasks-group-sub {
+  display: flex;
+  align-items: center;
+  gap: var(--padding-sm);
   font-size: var(--text-xs);
+  font-weight: var(--weight-regular);
+  color: var(--text-light);
+}
+
+/* Step-of-N as dots as well as words, echoing the guide's own tracker so the two surfaces
+   speak one language. Monochrome plus a single accent dot: at 5px, four colours is noise. */
+body.folt-guided .folt-tasks-progress {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+/* --dark-border-color, not --border-color: the dots sit on the --subtle-accent header strip,
+   and in dark mode --border-color IS #232323 -- the same colour as that strip -- so the
+   not-started dots vanished entirely and "step 1 of 5" showed a single floating blue dot.
+   --dark-border-color is gray-300 in light and gray-600 in dark, so it reads on both. */
+body.folt-guided .folt-tasks-progress-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: var(--border-radius-full);
+  background: var(--dark-border-color);
+}
+
+body.folt-guided .folt-tasks-progress-dot.is-done {
+  background: var(--text-light);
+}
+
+body.folt-guided .folt-tasks-progress-dot.is-current {
+  background: var(--folt-accent-fg);
+}
+
+/* Who it is sitting with. group.waiting_on has always been on the wire and was never
+   rendered; folt_tasks.js suppresses it in the `awaiting` bucket, where it would say "you". */
+body.folt-guided .folt-tasks-with {
+  flex-shrink: 0;
+  padding: 1px var(--padding-xs);
+  border-radius: var(--border-radius-full);
+  background: var(--subtle-fg);
+  color: var(--text-muted);
+  font-size: var(--text-tiny);
 }
 
 /* Pushes the count to the right without a spacer node. */
@@ -458,32 +722,57 @@ body.folt-guided .folt-tasks-rows {
   padding: 0;
 }
 
+/* An <a href>, not a div with a click handler -- see folt_tasks.js. That brings frappe's
+   global `a{outline:0}` and `a:hover{text-decoration:underline}` with it, so both are
+   answered here. Without the first, keyboard focus would be completely invisible. */
 body.folt-guided .folt-tasks-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: var(--padding-md);
+  column-gap: var(--padding-md);
+  row-gap: 2px;
+  min-height: var(--folt-row-min);
   padding: var(--padding-sm) var(--padding-md);
   border-top: 1px solid var(--border-color);
-  cursor: pointer;
+  color: inherit;
+  text-decoration: none;
 }
 
-body.folt-guided .folt-tasks-rows > .folt-tasks-row:first-child {
+body.folt-guided .folt-tasks-rows > li:first-child .folt-tasks-row {
   border-top: none;
 }
 
 body.folt-guided .folt-tasks-row:hover {
   background: var(--fg-hover-color);
+  color: inherit;
+  text-decoration: none;
 }
 
+body.folt-guided .folt-tasks-row:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-blue);
+  border-radius: var(--border-radius-tiny);
+  /* Lifts the ring above the next row's border, which would otherwise clip it. */
+  position: relative;
+  z-index: 1;
+}
+
+/* `flex: 1 1 14rem` is the whole responsive story: at desk widths the amount and age keep
+   their min-width alignment across every row, and once the row is narrower than about
+   14rem + 96 + 56 they wrap to a second line, still right-aligned. Intrinsic, so there is
+   no breakpoint here to keep in step with frappe's -- the same reasoning as the
+   auto-fit/minmax in .folt-panels. */
 body.folt-guided .folt-tasks-row-main {
-  display: flex;
-  flex-direction: column;
+  flex: 1 1 14rem;
   min-width: 0;
-  flex: 1 1 auto;
 }
 
+/* 14/medium against 12/light metadata. It was 13/regular -- the same weight as its own
+   metadata line -- and that single change is most of what makes a stack of rows scannable. */
 body.folt-guided .folt-tasks-row-title {
-  font-size: var(--text-sm);
+  display: block;
+  font-size: var(--text-base);
+  font-weight: var(--weight-medium);
   color: var(--text-color);
   /* A long activity title truncates rather than wrapping a queue row to three lines. */
   overflow: hidden;
@@ -492,28 +781,270 @@ body.folt-guided .folt-tasks-row-title {
 }
 
 body.folt-guided .folt-tasks-row-meta {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  min-width: 0;
   font-size: var(--text-xs);
   color: var(--text-light);
 }
 
+body.folt-guided .folt-tasks-row-id {
+  font-variant-numeric: tabular-nums;
+}
+
+/* The separator lives here rather than as a `who ? " &middot; " + ... : ""` ternary in the
+   JS, so the markup is a plain list of spans and adding a fourth fact costs nothing. */
+body.folt-guided .folt-tasks-row-meta > * + *::before {
+  content: "\00b7";
+  margin: 0 0.4em;
+  color: var(--border-color);
+}
+
 body.folt-guided .folt-tasks-amount {
-  flex-shrink: 0;
+  flex: 0 0 auto;
+  margin-left: auto;
+  min-width: var(--folt-amount-col);
+  text-align: right;
   font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
   color: var(--text-color);
   font-variant-numeric: tabular-nums;
 }
 
 body.folt-guided .folt-tasks-age {
-  flex-shrink: 0;
-  min-width: 44px;
+  flex: 0 0 auto;
+  min-width: var(--folt-age-col);
   text-align: right;
   font-size: var(--text-xs);
   color: var(--text-light);
   font-variant-numeric: tabular-nums;
 }
 
-/* A week in somebody's queue is the thing worth noticing on this page. */
+/* A week in somebody's queue is the thing worth noticing on this page. It becomes a PILL
+   rather than merely changing colour, because WCAG 1.4.1 says colour may not be the only
+   carrier of meaning -- the shape change is the non-colour cue. Both tokens are redefined
+   for dark (yellow-50/700 -> yellow-900/300).
+
+   THE BORDER IS WHAT MAKES THE SHAPE REAL, and it is not decoration. --alert-bg-warning is
+   #fffcef in light -- indistinguishable from white -- so the fill alone produced amber text
+   and no pill at all, which is to say the non-colour cue did not exist in the theme most
+   people use. (In dark it is #733f12 and reads as a pill unaided.) Bordering with the
+   foreground half of the same pair keeps the warning semantic exactly as it was and makes
+   the outline visible in both themes. */
 body.folt-guided .folt-tasks-age.is-stale {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: auto;
+  padding: 2px var(--padding-xs);
+  border-radius: var(--border-radius-full);
+  background: var(--alert-bg-warning);
+  border: 1px solid var(--alert-text-warning);
   color: var(--alert-text-warning);
-  font-weight: var(--weight-medium);
+  font-weight: var(--weight-semibold);
+}
+
+/* --- empty, loading, error --------------------------------------------------------------- */
+
+/* The dashed border is the "nothing here" signal, so the state needs no image asset -- which
+   matters because this app ships no icon set and a PNG here would be the only one. */
+body.folt-guided .folt-tasks-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--padding-sm);
+  padding: var(--padding-2xl) var(--padding-lg);
+  border: 1px dashed var(--border-color);
+  border-radius: var(--border-radius-lg);
+  background: var(--card-bg);
+  text-align: center;
+}
+
+/* A 44px disc with a tick drawn from two borders. Zero assets, zero glyphs, no font
+   dependency -- and it inherits the pair tokens, so it is legible in both themes. */
+body.folt-guided .folt-tasks-empty-mark {
+  position: relative;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--border-radius-full);
+  background: var(--bg-gray);
+  margin-bottom: var(--padding-xs);
+}
+
+body.folt-guided .folt-tasks-empty-mark::after {
+  content: "";
+  position: absolute;
+  left: 14px;
+  top: 13px;
+  width: 14px;
+  height: 7px;
+  border-left: 2px solid var(--text-on-gray);
+  border-bottom: 2px solid var(--text-on-gray);
+  transform: rotate(-45deg);
+}
+
+body.folt-guided .folt-tasks-empty-mark.is-green {
+  background: var(--bg-green);
+}
+
+body.folt-guided .folt-tasks-empty-mark.is-green::after {
+  border-left-color: var(--text-on-green);
+  border-bottom-color: var(--text-on-green);
+}
+
+body.folt-guided .folt-tasks-empty-mark.is-blue {
+  background: var(--bg-blue);
+}
+
+body.folt-guided .folt-tasks-empty-mark.is-blue::after {
+  border-left-color: var(--text-on-blue);
+  border-bottom-color: var(--text-on-blue);
+}
+
+/* "Nothing has happened yet" is not an achievement, so those buckets get a dash, not a tick. */
+body.folt-guided .folt-tasks-empty-mark.is-dash::after {
+  top: 21px;
+  left: 14px;
+  width: 16px;
+  height: 0;
+  border-left: none;
+  border-bottom: 2px solid var(--text-on-gray);
+  transform: none;
+}
+
+body.folt-guided .folt-tasks-empty-head {
+  margin: 0;
+  font-size: var(--text-xl);
+  font-weight: var(--weight-semibold);
+  color: var(--heading-color);
+}
+
+body.folt-guided .folt-tasks-empty-body {
+  margin: 0;
+  /* So the sentence does not span a 1400px desk. */
+  max-width: 36ch;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+@keyframes folt-skeleton-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+body.folt-guided .folt-skel {
+  background: var(--skeleton-bg);
+  border-radius: var(--border-radius-tiny);
+  animation: folt-skeleton-pulse 1.4s ease-in-out infinite;
+}
+
+/* The one media query in this file, and it is defensible: prefers-reduced-motion is a
+   FEATURE query with no width in it, so unlike a breakpoint it cannot drift out of step
+   with frappe's. */
+@media (prefers-reduced-motion: reduce) {
+  body.folt-guided .folt-skel {
+    animation: none;
+  }
+}
+
+/* The skeleton's geometry mirrors .folt-tasks-row exactly, so when the real rows land
+   nothing moves. That is the entire point of a skeleton over a spinner. */
+body.folt-guided .folt-skel-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: var(--padding-md);
+  row-gap: 2px;
+  min-height: var(--folt-row-min);
+  padding: var(--padding-sm) var(--padding-md);
+  border-top: 1px solid var(--border-color);
+}
+
+body.folt-guided .folt-skel-rows > .folt-skel-row:first-child {
+  border-top: none;
+}
+
+body.folt-guided .folt-skel-main {
+  flex: 1 1 14rem;
+  min-width: 0;
+}
+
+body.folt-guided .folt-skel-head {
+  height: 14px;
+  width: 140px;
+}
+
+body.folt-guided .folt-skel-title {
+  height: 14px;
+  width: 52%;
+}
+
+body.folt-guided .folt-skel-meta {
+  height: 10px;
+  width: 30%;
+  margin-top: 5px;
+}
+
+body.folt-guided .folt-skel-amount {
+  flex: 0 0 var(--folt-amount-col);
+  height: 12px;
+  margin-left: auto;
+}
+
+body.folt-guided .folt-skel-age {
+  flex: 0 0 var(--folt-age-col);
+  height: 10px;
+}
+
+/* Varying the widths here rather than with inline styles keeps skeleton_html a plain
+   String.repeat with no per-row state. */
+body.folt-guided .folt-skel-row:nth-child(2) .folt-skel-title {
+  width: 64%;
+}
+
+body.folt-guided .folt-skel-row:nth-child(3) .folt-skel-title {
+  width: 43%;
+}
+
+/* A SUBSEQUENT load dims what is already there instead of replacing it with a skeleton, so
+   switching buckets never makes the page jump. Only the first paint gets the skeleton. */
+body.folt-guided .folt-tasks-body.is-loading {
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  body.folt-guided .folt-tasks-body {
+    transition: opacity 120ms linear;
+  }
+}
+
+body.folt-guided .folt-tasks-error {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--padding-sm);
+  padding: var(--padding-md);
+  border: 1px solid var(--border-color);
+  border-left: 3px solid var(--alert-text-danger);
+  border-radius: var(--border-radius-md);
+  background: var(--alert-bg-danger);
+  color: var(--alert-text-danger);
+}
+
+body.folt-guided .folt-tasks-error-head {
+  margin: 0;
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
+}
+
+body.folt-guided .folt-tasks-error-body {
+  margin: 0;
+  font-size: var(--text-sm);
 }

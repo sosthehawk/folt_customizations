@@ -18,7 +18,7 @@
     { "fieldname": "activity_requisition", "fieldtype": "Link", "options": "Activity Requisition", "label": "Activity Requisition", "read_only": 1, "description": "The approved requisition this register was opened from. Set when the register is derived; blank on one raised by hand." },
     { "fieldname": "total_attendees", "fieldtype": "Int", "label": "Attendees", "read_only": 1, "in_list_view": 1 },
     { "fieldname": "total_eligible", "fieldtype": "Int", "label": "Eligible for reimbursement", "read_only": 1 },
-    { "fieldname": "attendance_sheet", "fieldtype": "Attach", "label": "Signed attendance sheet", "description": "Mandatory before verification: the scanned sheet signed at the activity." },
+    { "fieldname": "attendance_sheet", "fieldtype": "Attach", "label": "Signed attendance sheet", "allow_on_submit": 1, "description": "The scanned sheet signed at the activity. Expected with every register, but it does not hold up verification — attach it after the fact if it is still being collected." },
     { "fieldname": "section_break_participants", "fieldtype": "Section Break", "label": "Attendees" },
     { "fieldname": "participants", "fieldtype": "Table", "options": "Activity Participant Entry", "label": "Attendees" },
     { "fieldname": "section_break_status", "fieldtype": "Section Break" },

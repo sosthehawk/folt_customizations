@@ -294,12 +294,12 @@ def run():
 		f"{sheet['label']}: {(sheet['description'] or '')[:50]}",
 	)
 
-	# In Draft the sheet is genuinely not needed yet: nothing the document can do next requires
-	# it. Saying otherwise would make the checklist cry wolf on every new register.
+	# The sheet gates nothing at all -- DOCUMENTS gives it an empty `required_at` -- so it is
+	# listed as expected rather than as a block, from Draft and from every state after it.
 	check(
-		"but it does not block anything from Draft, because nothing next needs it",
-		not sheet["blocks_next"] and guide["blocked_by"] == [],
-		f"blocks: {sheet['blocks']}",
+		"and it is listed as expected rather than as a block",
+		sheet["advisory"] and not sheet["blocks_next"] and guide["blocked_by"] == [],
+		f"advisory={sheet['advisory']}, blocks: {sheet['blocks']}",
 	)
 
 	as_user(REQUESTER, lambda: apply_workflow(register, "Submit for Verification"))
@@ -307,24 +307,54 @@ def run():
 
 	guide = as_user(HEAD_OF_PROGRAMS, lambda: get_guide("Activity Participant List", register_name))
 	check(
-		"once it is up for verification, the same sheet is announced as blocking",
-		guide["blocked_by"] == ["Signed attendance sheet"],
+		"it is not announced as blocking once it is up for verification either",
+		guide["blocked_by"] == [],
 		f"blocked_by: {guide['blocked_by']}",
 	)
 	check(
-		"and the block names the state it is going to bite at",
+		"and it names no state it is going to bite at, because there is none",
 		next(
 			row["blocks"] for row in guide["documents"] if row["fieldname"] == "attendance_sheet"
-		) == ["Verified"],
+		) == [],
 	)
 
-	print("\n--- and the block it predicted is real ---")
+	print("\n--- and the absence of a block is real too ---")
 
-	# The claim the checklist is making, made to fail. DOCUMENTS says attendance_sheet is
-	# enforced at Verified by before_submit; this is that enforcement.
-	expect_throw(
-		"verifying without the sheet is refused, exactly as the checklist said it would be",
-		lambda: as_user(HEAD_OF_PROGRAMS, lambda: apply_workflow(register, "Verify")),
+	# A checklist that says a document blocks nothing has to be driven against the enforcement
+	# exactly as one that says it blocks something does. On a throwaway register, because the one
+	# above still has a turn-down and a re-submission to go through.
+	spare = approve_requisition(as_user(REQUESTER, make_requisition))
+	spare_name = as_user(REQUESTER, lambda: activity_chain.make_attendance_register(spare.name))
+
+	def fill_and_submit():
+		doc = frappe.get_doc("Activity Participant List", spare_name)
+		for row in ATTENDEES:
+			doc.append("participants", row)
+		doc.save()
+		apply_workflow(doc, "Submit for Verification")
+		return doc
+
+	spare_doc = as_user(REQUESTER, fill_and_submit)
+	as_user(HEAD_OF_PROGRAMS, lambda: apply_workflow(spare_doc, "Verify"))
+	check(
+		"a register with no signed sheet is verified anyway rather than refused",
+		frappe.db.get_value("Activity Participant List", spare_name, "docstatus") == 1
+		and not frappe.db.get_value("Activity Participant List", spare_name, "attendance_sheet"),
+		f"docstatus {frappe.db.get_value('Activity Participant List', spare_name, 'docstatus')}",
+	)
+
+	# The half that makes dropping the gate safe rather than merely permissive: the evidence can
+	# still arrive. `allow_on_submit` on the field is what permits it, and without that a register
+	# verified without the sheet could never record one at all.
+	def attach_after_the_fact():
+		doc = frappe.get_doc("Activity Participant List", spare_name)
+		doc.attendance_sheet = "/files/e2e-guide-attendance.pdf"
+		doc.save()
+
+	as_user(HEAD_OF_PROGRAMS, attach_after_the_fact)
+	check(
+		"and the sheet can still be attached to it afterwards",
+		bool(frappe.db.get_value("Activity Participant List", spare_name, "attendance_sheet")),
 	)
 
 	print("\n--- who has it, and whether that is me ---")
@@ -399,7 +429,7 @@ def run():
 
 	guide = as_user(HEAD_OF_PROGRAMS, lambda: get_guide("Activity Participant List", register_name))
 	check(
-		"with the sheet attached, nothing is blocking any more",
+		"with the sheet attached, the checklist marks it as in hand",
 		guide["blocked_by"] == []
 		and next(r for r in guide["documents"] if r["fieldname"] == "attendance_sheet")["attached"],
 	)

@@ -24,16 +24,22 @@ class ActivityParticipantList(Document):
 		self.set_totals()
 
 	def before_submit(self):
-		# The register is the evidence that the activity happened and who was there;
-		# verifying it without the signed sheet would make it an assertion instead.
-		if not self.attendance_sheet:
-			frappe.throw(
-				_("Attach the signed attendance sheet before this register is verified."),
-				title=_("Evidence required"),
-			)
-
 		if not self.participants:
 			frappe.throw(_("A register cannot be verified with no attendees."))
+
+		# The signed sheet is asked for, not demanded. It used to be a throw here, and what that
+		# cost was the ordinary case: the activity happened, the attendees are keyed in and
+		# correct, and the scanned sheet is still in somebody's phone or with the field officer.
+		# Blocking verification on it stopped the whole chain -- the reimbursement list derives
+		# from a *verified* register -- over a document that changes nothing about who attended.
+		# So it is a standing reminder on a register that carries no sheet, and the checklist on
+		# the form says the same thing before anyone presses the button (document_guide.DOCUMENTS).
+		if not self.attendance_sheet:
+			frappe.msgprint(
+				_("This register is being verified without the signed attendance sheet. Attach it when it arrives — the field stays editable after verification."),
+				title=_("No signed sheet on file"),
+				indicator="orange",
+			)
 
 	def normalise_rows(self):
 		for row in self.participants or []:
@@ -91,7 +97,25 @@ class ActivityParticipantList(Document):
 		self.total_eligible = sum(1 for row in rows if row.attended and row.eligible_for_reimbursement)
 
 	def on_update_after_submit(self):
-		self.revalidate_derived_lists()
+		# Only a change to WHO attended can orphan a payee. Now that the signed sheet may be
+		# attached after verification, an edit that touches nothing but the evidence is the
+		# ordinary case, and warning about derived lists there would train people to dismiss the
+		# warning that matters.
+		if self.attendees_changed():
+			self.revalidate_derived_lists()
+
+	def attendees_changed(self) -> bool:
+		before = self.get_doc_before_save()
+		if not before:
+			return True
+
+		def shape(doc):
+			return [
+				(row.participant, row.participant_name, row.mobile_number, row.attended, row.eligible_for_reimbursement)
+				for row in doc.participants or []
+			]
+
+		return shape(before) != shape(self)
 
 	def on_cancel(self):
 		self.revalidate_derived_lists(cancelled=True)

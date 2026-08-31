@@ -14,12 +14,16 @@ it was scattered across four places no user opens:
   workflow             the roles that can move it on, and the people holding them
   Comment rows         what has already happened, when, by whom, and why it was turned down
 
-THE ONE THING THAT IS NEW is `blocked_by`. FoLT gates two states on an attachment -- a register
-cannot be verified without the signed attendance sheet, a list cannot be marked paid without
-the acknowledged copy -- and both gates are `frappe.throw` at the moment somebody presses the
-button. The document knows from the moment it is opened that the attachment is missing and that
-it will be needed; DOCUMENTS below is what lets it say so first. That is the whole of the
-difference between a rule and a rule somebody can plan around.
+THE ONE THING THAT IS NEW is `blocked_by`. FoLT gates a state on an attachment -- a list cannot
+be marked paid without the acknowledged copy -- and that gate is a `frappe.throw` at the moment
+somebody presses the button. The document knows from the moment it is opened that the attachment
+is missing and that it will be needed; DOCUMENTS below is what lets it say so first. That is the
+whole of the difference between a rule and a rule somebody can plan around.
+
+DOCUMENTS also carries evidence that is expected but gates nothing -- the attendance register's
+signed sheet, a requisition's concept note. Those have an empty `required_at`, and the checklist
+asks for them without ever claiming they block anything, which is the only honest way to list a
+document whose absence stops nothing.
 
 WHAT THIS IS NOT. Nothing here decides anything. Every guard stays where it was: in
 workflow_access.enforce_state_custodian, in the transitions' own `allowed` roles, and in the
@@ -71,11 +75,13 @@ class RequiredDoc(frappe._dict):
 # doc_events["*"] surface in hooks.py already carries as much as it should.
 DOCUMENTS: dict[str, list[RequiredDoc]] = {
 	"Activity Participant List": [
-		RequiredDoc(
-			fieldname="attendance_sheet",
-			required_at=("Verified",),
-			enforced_by="before_submit",
-		),
+		# Expected with every register and gated on nothing. The sheet is evidence of an activity
+		# that has already happened and whose attendees are already keyed in, so withholding
+		# verification until the scan arrives stalled the chain -- the reimbursement list derives
+		# from a *verified* register -- without making the register any more true. The controller
+		# says so in a msgprint at submit; an empty `required_at` is how this table says "bring
+		# this" rather than "you cannot proceed without this".
+		RequiredDoc(fieldname="attendance_sheet", required_at=(), enforced_by=None),
 	],
 	"Participant Reimbursement List": [
 		RequiredDoc(

@@ -354,10 +354,44 @@ folt.guide.bind = function (frm, guide) {
 
 	$guide.find("[data-folt-attach]").on("click", function () {
 		const fieldname = $(this).attr("data-folt-attach");
-		// Take them to the field rather than opening an uploader over the top of the form: the
-		// field carries the doctype's own label and description, which is the context that says
-		// what to attach. scroll_to_field highlights it too.
-		if (frm.fields_dict[fieldname]) frm.scroll_to_field(fieldname);
+		const field = frm.fields_dict[fieldname];
+		if (!field) return;
+
+		// Go to the field first: it carries the doctype's own label and description, which is
+		// the context that says what to attach, and scroll_to_field highlights it. That used to
+		// be the whole handler -- and on a short form, where the field is already on screen, a
+		// button reading "Attach" scrolled nowhere, opened nothing and read as broken.
+		frm.scroll_to_field(fieldname);
+
+		// `disp_status` is what the control itself computed on its last refresh, so this asks
+		// exactly the question the field's own Attach button answers: may this be written here,
+		// now, by this reader. It already accounts for the workflow's `allow_edit` (frappe marks
+		// the whole form read-only off it), docstatus and permlevel, so there is no second copy
+		// of those rules here to fall out of step with the first.
+		if (field.disp_status === "Write") {
+			// The control's own uploader, not a new one: same accept/private options, and the
+			// value lands in the model through the control's own on_upload_complete, so an
+			// attach from the checklist is indistinguishable from one made at the field.
+			field.on_attach_click();
+			return;
+		}
+
+		// Read-only is usually not a mistake -- it is the workflow saying the document is on
+		// somebody else's step -- but silence at that point looks identical to a broken button.
+		const waiting = (guide.waiting_for && guide.waiting_for.roles) || [];
+		frappe.msgprint({
+			title: __("Not editable here"),
+			message: waiting.length
+				? __("{0} is with {1} at {2}, so it cannot be attached from here. Ask them to attach it, or have the document returned to you.", [
+						frappe.bold(field.df.label),
+						frappe.bold(waiting.map((r) => __(r)).join(__(" or "))),
+						frappe.bold(__(guide.state || "")),
+					])
+				: __("{0} cannot be attached while this document is read-only.", [
+						frappe.bold(field.df.label),
+					]),
+			indicator: "orange",
+		});
 	});
 
 	folt.guide.add_actions(frm, guide, $guide.find(".folt-actions"));

@@ -168,15 +168,42 @@ def run():
 		),
 	)
 
+	# F-04A-V1 used to be a throw: no signed sheet, no verification. Verification is what the
+	# rest of the chain waits on -- a reimbursement list may only be derived from a verified
+	# register -- so holding it there over a scan that changes nothing about who attended stopped
+	# the activity rather than the mistake. The sheet is now asked for at submit and stands on the
+	# form's checklist until it arrives, and the field is `allow_on_submit` so it still can.
+	# Raised on project_b so the dropdown checks below still see exactly one verified register on
+	# project_a.
+	no_sheet = frappe.get_doc(
+		{
+			"doctype": "Activity Participant List",
+			"activity": project_b,
+			"session_date": nowdate(),
+			"participants": [{"participant_name": "E2E No Sheet", "mobile_number": "0712000010", "location": "Lodwar", "category": "Community Participant"}],
+		}
+	).insert(ignore_permissions=True)
+	no_sheet.submit()
+	check(
+		"F-04A-V1  a register with no signed sheet is verified rather than refused",
+		no_sheet.docstatus == 1 and not no_sheet.attendance_sheet,
+		f"docstatus {no_sheet.docstatus}",
+	)
+
+	no_sheet.attendance_sheet = "/files/e2e-attendance.pdf"
+	no_sheet.save()
+	check(
+		"F-04A-V1  and the sheet can still be attached to it once it arrives",
+		frappe.db.get_value("Activity Participant List", no_sheet.name, "attendance_sheet")
+		== "/files/e2e-attendance.pdf",
+	)
+
+	# The gate that did NOT move. An empty register is not evidence waiting on a scanner, it is a
+	# register of nobody, and there is nothing to verify about it.
 	expect_throw(
-		"F-04A-V1  register cannot be verified without the signed sheet",
+		"F-04A-V1  but a register with no attendees still cannot be verified",
 		lambda: frappe.get_doc(
-			{
-				"doctype": "Activity Participant List",
-				"activity": project_a,
-				"session_date": nowdate(),
-				"participants": [{"participant_name": "E2E No Sheet", "mobile_number": "0712000010", "location": "Lodwar", "category": "Community Participant"}],
-			}
+			{"doctype": "Activity Participant List", "activity": project_b, "session_date": nowdate()}
 		).insert(ignore_permissions=True).submit(),
 	)
 

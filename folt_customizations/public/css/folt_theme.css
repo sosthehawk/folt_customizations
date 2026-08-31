@@ -240,12 +240,74 @@
   --font-stack: "Lexend", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
     "Helvetica Neue", Arial, sans-serif;
 
+  /* ── THE TYPE SCALE ─────────────────────────────────────────────────────────────────
+
+     Stock frappe runs the Desk at 13px (--text-sm, 55 font-size declarations in
+     desk.bundle) and 14px (--text-base, 45). That is small for a system people read all
+     day, so the whole ladder moves up roughly one step: dense chrome to 15px, body UI
+     text to 16px.
+
+     WHY THE TOKENS AND NOT `html { font-size }`. Scaling the root rem is the obvious
+     lever and it is the wrong one here. Two size ladders coexist in the Desk --
+     espresso/_typography.scss is px (these tokens), scss/desk/typography.scss is a
+     bootstrap rem ladder -- and desk.bundle carries 535 rem values of which only 61 are
+     font-size. The other 474 are padding, height, border-radius, box-shadow and
+     BORDER-WIDTH. Scaling the root would inflate hairlines and shadows along with the
+     text. These eleven tokens reach 175 font-size declarations in the Desk and 51 more
+     on the website, and touch nothing else.
+
+     WHY THIS BLOCK AND NOT BARE :root -- same reason as --font-stack above, verified the
+     same way. No --text-<SIZE> token appears in desk/dark.scss (only the four COLOUR
+     tokens --text-color/-muted/-light/-neutral and --text-dark do), so the ladder is
+     theme-independent. But website.bundle.css declares every size token TWICE on bare
+     :root and login.bundle.css once more -- all (0,1,0), all emitted after
+     web_include_css on their own pages. A bare :root here would tie and lose on order,
+     which is exactly the bug --font-stack shipped with. (0,2,0) outranks all four.
+
+     --text-md is frappe's own alias of --text-base (both 14px stock) and is kept equal
+     to it; --text-2xs and --text-xs are likewise both 12px stock and stay paired.
+     Nothing above --text-4xl is consumed by either bundle, so the display end is left as
+     frappe ships it rather than invented. */
+  --text-tiny: 12px;    /* 11px -- the uppercase, 0.09em-tracked "PUBLIC" sidebar label */
+  --text-2xs: 13px;     /* 12px */
+  --text-xs: 13px;      /* 12px */
+  --text-sm: 15px;      /* 13px -- list rows, buttons, most of the Desk chrome */
+  --text-md: 16px;      /* 14px -- frappe's alias of base, kept in step */
+  --text-base: 16px;    /* 14px -- body UI text and .form-control */
+  --text-lg: 18px;      /* 16px */
+  --text-xl: 20px;      /* 18px */
+  --text-2xl: 22px;     /* 20px */
+  --text-3xl: 26px;     /* 24px */
+  --text-4xl: 28px;     /* 26px */
+
+  /* ── AND THE BOXES THAT TEXT HAS TO FIT IN ──────────────────────────────────────────
+
+     Raising the ladder without raising these is what makes a "just bump the font size"
+     change read as broken rather than as larger: 16px text in a 28px control has 6px of
+     air above and below it and looks cramped, not legible.
+
+     All four are declared by frappe on bare :root or `:root, [data-theme="light"]` --
+     both (0,1,0) -- and none is redefined in dark.scss, so this block reaches them in
+     both themes. --list-checkbox-padding is a calc() off --list-row-height and re-centres
+     itself; do not restate it.
+
+     DELIBERATELY NOT TOUCHED. --navbar-height (48px already clears 16px text, and desk JS
+     measures it for sticky offsets) and --page-max-width (900px of 16px text is a shorter
+     line in CHARACTERS than 900px of 14px, which is the direction reading wants). */
+  --btn-height: 32px;       /* 28px */
+  --input-height: 32px;     /* 28px -- .form-control carries bootstrap's literal
+                               height:28px at byte 150990 and the height:var(--input-height)
+                               rule at 341573; equal specificity, so the token wins */
+  --list-row-height: 34px;  /* 30px */
+  --sidebar-width: 248px;   /* 220px -- "ERPNext Integrations" at 15px Lexend needs it */
+
   /* IF LEXEND RUNS WIDE, TUNE HERE AND NOWHERE ELSE.
      Lexend is wide-set by design (it was drawn for reading proficiency), and frappe bakes
      0.02em tracking on top at sm/base via a SCSS mixin -- compiled into literal values on
-     dozens of classes, so it is NOT reachable through any token. Compounded, 13px Lexend
-     can run wider than Inter against --btn-height/--input-height 28px,
-     --list-row-height 30px, and the 220px workspace sidebar.
+     dozens of classes, so it is NOT reachable through any token. Compounded, 15px Lexend
+     can run wider than Inter against --btn-height/--input-height 32px,
+     --list-row-height 34px, and the 248px workspace sidebar -- the raised values above,
+     which already buy back most of the headroom the stock 28/30/220 did not have.
 
      size-adjust scales outlines AND advance widths against the same font-size, so it
      narrows text without touching one frappe selector. It belongs on the @font-face rule;
@@ -256,6 +318,108 @@
      Do NOT chase the tracking instead: correcting 0.02em means overriding letter-spacing
      on dozens of frappe classes, forever, and re-auditing them every release. */
 }
+
+/* ═══ 2b. THE FOUR THINGS THE TOKENS CANNOT REACH ═════════════════════════════════════
+
+   THE INHERITED SIZE. Bootstrap sets `body { font-size: .875rem }` and nothing later in
+   desk.bundle overrides it, so every string WITHOUT an explicit font-size -- and there are
+   many -- inherits 14px from a rem literal no token can touch. (Do not be misled by
+   `body{font-size:var(--text-md)}` appearing in a grep of the bundle: that is a substring
+   of `.result-body{...}`, not a body rule. There is no such rule.)
+
+   In stock frappe that 14px is exactly --text-base, so inherited text and explicitly-sized
+   body text agree. Raising --text-base to 16px without this rule silently breaks that
+   equality and leaves the Desk with two different "normal" sizes. Restating it as the
+   token restores frappe's own invariant rather than inventing a size, and it is why the
+   value here must be changed WITH --text-base and never independently.
+
+   Equal specificity to bootstrap's own `body`, and this file loads after desk.bundle, so
+   order decides it. Reaches the website and login pages the same way. */
+
+body {
+  font-size: var(--text-base);
+}
+
+/* THE THREE FIXED HEIGHTS.
+
+   desk.bundle sets `height: 28px` as a literal in 17 rules, so the --input-height bump in
+   section 2 cannot reach them. Most of the 17 must NOT move: they pair it with
+   `width: 28px` and are squares -- .avatar-small, .avatar-medium, .btn.icon-btn, the
+   sidebar drop-icon -- which should stay the size they are while the text grows.
+
+   These three are the text boxes among them, and they are the only literals the raised
+   ladder actually overflows:
+
+     .item-anchor      the workspace sidebar row. 15px text in a 28px flex box with
+                       ellipsis truncation already on it.
+     .awesomplete      the navbar search input. Matched to --input-height so it does not
+                       become the one control that stayed short.
+     .dropdown-menu-item a
+                       15px text plus its own `padding: 6px 8px` is ~31px of content in a
+                       28px box -- this one clips today at 13px only by a hair.
+
+   Same specificity as frappe's own rule in each case; this file loads after desk.bundle,
+   so source order decides it and no !important is needed -- which is the whole contract
+   of this stylesheet.
+
+   Checked and left alone: `.form-sidebar .form-title-text` and `.fc-toolbar-title` also
+   carry line-height:28px, but 28px still clears 16px text with room to spare. The
+   remaining line-height:28px/30px rules are leaflet's map controls, which have no
+   FoLT-facing surface. */
+
+.body-sidebar .standard-sidebar-item .item-anchor,
+.search-bar .awesomplete input {
+  height: 32px;
+}
+
+.dropdown-menu-item a {
+  height: 34px;
+}
+
+/* ═══ 2c. THE HEADING LADDER, DESK ONLY ═══════════════════════════════════════════════
+
+   h1-h6 are a bootstrap/espresso REM ladder, so section 2 does not move them, and leaving
+   them is not neutral -- it inverts a relationship. Stock frappe's h5 is .875rem = 14px,
+   exactly --text-base, so an <h5> and body text match. With --text-base at 16px an <h5>
+   would render SMALLER than the paragraph under it, and `<h5 class="modal-title">` is the
+   title of every frappe dialog. The page title on a list or workspace is an <h3> and would
+   drop from 1.43x body to 1.25x -- the "Home" heading stops reading as a heading.
+
+   So each rung is restated at the token nearest its stock RATIO to the base:
+
+       stock px   /14     x16    token used here
+   h1    26      1.86    29.7    --text-4xl  28px
+   h2    18      1.29    20.6    --text-xl   20px
+   h3    20      1.43    22.9    --text-2xl  22px
+   h4    18      1.29    20.6    --text-xl   20px
+   h5    14      1.00    16.0    --text-base 16px   (restores the equality above)
+   h6    11      0.79    12.6    --text-2xs  13px
+
+   frappe's own ladder has h2 SMALLER than h3 (its bare `h2` at 1.125rem overrides
+   bootstrap's 1.5rem, while nothing overrides h3's 1.25rem). That inversion is preserved
+   on purpose: it is frappe's, it predates this file, and quietly reordering someone's
+   heading scale is a design change nobody asked for.
+
+   WHY body:not([data-path]) AND NOT A BARE h1-h6. This stylesheet is in web_include_css
+   too, and the WEBSITE ships a completely different, much larger ladder -- h1 2.5rem,
+   h2 2rem, h3 1.75rem. A bare `h3` here would load last and SHRINK the supplier portal's
+   h3 from 28px to 22px. templates/base.html always emits data-path on <body> and
+   www/desk.html emits a bare <body> that never gains one (the only data-path writers in
+   desk JS are toolbar search's <a> elements), so this selector is exactly "the Desk".
+
+   Specificity is (0,1,2) -- :not() contributes its argument's (0,1,0). That clears
+   bootstrap's `h1,.h1` and espresso's bare `h1` at (0,0,1), and stays UNDER
+   `.ql-snow .ql-editor h1` at (0,2,1), so the rich-text editors keep their own em ladder
+   and still scale with whatever they inherit. The one rule it ties and beats on order is
+   `body .onboarding-step-preview h2/h3`, which lands on the same ladder as everything
+   else -- which is the intent. */
+
+body:not([data-path]) h1 { font-size: var(--text-4xl); }
+body:not([data-path]) h2 { font-size: var(--text-xl); }
+body:not([data-path]) h3 { font-size: var(--text-2xl); }
+body:not([data-path]) h4 { font-size: var(--text-xl); }
+body:not([data-path]) h5 { font-size: var(--text-base); }
+body:not([data-path]) h6 { font-size: var(--text-2xs); }
 
 /* ═══ 3. LIGHT ════════════════════════════════════════════════════════════════════════ */
 

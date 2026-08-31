@@ -217,6 +217,89 @@ def run():
 		any("--font-stack" in body for _, body in blocks),
 	)
 
+	# THE TYPE SCALE, AND THE ONE INVARIANT THAT HOLDS IT TOGETHER.
+	# The --text-<size> ladder is theme-independent in exactly the way --font-stack is, and it
+	# is exposed to exactly the same trap: website.bundle.css declares every size token twice
+	# on a bare :root and login.bundle.css once more, all after web_include_css on their pages.
+	SIZE_TOKENS = [
+		"--text-tiny", "--text-2xs", "--text-xs", "--text-sm", "--text-md", "--text-base",
+		"--text-lg", "--text-xl", "--text-2xl", "--text-3xl", "--text-4xl",
+	]
+	on_bare_root = [t for t in SIZE_TOKENS if any(f"{t}:" in b for b in bare_root)]
+	check(
+		"no --text-<size> token is declared on a bare :root",
+		not on_bare_root,
+		f"would lose to website/login bundles on order: {on_bare_root}",
+	)
+
+	sizes = {}
+	for token in SIZE_TOKENS:
+		found = re.search(rf"{re.escape(token)}\s*:\s*(\d+)px", theme_rules)
+		if found:
+			sizes[token] = int(found.group(1))
+	check(
+		"every rung of the ladder is declared",
+		len(sizes) == len(SIZE_TOKENS),
+		f"missing: {sorted(set(SIZE_TOKENS) - set(sizes))}",
+	)
+
+	# frappe's own alias, and its own pairing. Breaking either desyncs text that is meant to
+	# match -- and does it silently, because both halves still look reasonable on their own.
+	check(
+		"--text-md still equals --text-base, as frappe declares them",
+		sizes.get("--text-md") == sizes.get("--text-base"),
+		f'md={sizes.get("--text-md")} base={sizes.get("--text-base")}',
+	)
+	check(
+		"--text-2xs still equals --text-xs, as frappe declares them",
+		sizes.get("--text-2xs") == sizes.get("--text-xs"),
+	)
+	check(
+		"the ladder is monotonic",
+		all(
+			sizes[a] <= sizes[b]
+			for a, b in zip(SIZE_TOKENS, SIZE_TOKENS[1:])
+			if a in sizes and b in sizes
+		),
+		f"{[sizes.get(t) for t in SIZE_TOKENS]}",
+	)
+
+	# THE INVARIANT. Bootstrap's `body{font-size:.875rem}` is a rem literal no token reaches,
+	# and in stock frappe it happens to equal --text-base, so inherited text and explicitly
+	# sized body text agree. Raising --text-base without restating body breaks that silently:
+	# the Desk ends up with two different "normal" sizes and nothing points at why.
+	body_rule = re.search(r"(?:^|\})\s*body\s*\{([^{}]*)\}", theme_rules, flags=re.M)
+	check(
+		"body's inherited size is restated as --text-base, not left at bootstrap's .875rem",
+		bool(body_rule) and "var(--text-base)" in body_rule.group(1),
+		"without this, every string with no explicit font-size stays 14px while "
+		"--text-base moves -- see section 2b",
+	)
+
+	# THE HEADING LADDER MUST STAY DESK-ONLY. This stylesheet is in web_include_css too, and
+	# the website ships a MUCH larger ladder (h1 2.5rem, h3 1.75rem). A bare `h3` here loads
+	# last on the portal and shrinks it. The scope is the whole safety property.
+	heading_selectors = [
+		sel for sel, _ in blocks
+		if re.search(r"(^|[,\s])h[1-6]\s*$", sel) or re.match(r"^h[1-6]\b", sel)
+	]
+	unscoped_headings = [
+		s for s in heading_selectors if not s.startswith("body:not([data-path])")
+	]
+	check(
+		"every h1-h6 rule is scoped to body:not([data-path]), the Desk",
+		not unscoped_headings,
+		f"would shrink the supplier portal's headings: {unscoped_headings}"
+		if unscoped_headings
+		else f"{len(heading_selectors)} heading rules, all Desk-scoped",
+	)
+	check(
+		"h5 is not smaller than body text",
+		bool(re.search(r"body:not\(\[data-path\]\) h5 \{ font-size: var\(--text-base\)", theme_rules)),
+		"stock h5 is .875rem == --text-base; if --text-base moves and h5 does not, every "
+		"frappe dialog title (<h5 class='modal-title'>) renders below its own body text",
+	)
+
 	# Rule 3: every brand value written down once. Section 1 declares the --folt-brand-*
 	# constants; the only other hex literals allowed are the two inset highlights quoted
 	# verbatim from bootstrap's own .btn-primary:focus rule.
@@ -405,12 +488,39 @@ def run():
 
 	print("\n--- the upgrade tripwire ---")
 
+	# The premise of the Desk-only heading scope: base.html always emits data-path on <body>
+	# and www/desk.html emits a bare <body>. If frappe ever adds data-path to the Desk, or
+	# drops it from the website, section 2c either stops applying or starts applying to the
+	# portal -- and both failures are invisible in this file.
+	base_html = _base_template_path()
+	desk_html = os.path.join(frappe.get_app_path("frappe"), "www", "desk.html")
+	check(
+		"the website's <body> still carries data-path",
+		bool(base_html) and re.search(r"<body[^>]*data-path=", open(base_html).read()),
+		"if this fails, section 2c's heading rules stop reaching the Desk OR start "
+		"reaching the portal -- re-derive the scope before trusting either",
+	)
+	check(
+		"the Desk's <body> still does not",
+		os.path.isfile(desk_html)
+		and not re.search(r"<body[^>]*data-path=", open(desk_html).read()),
+		desk_html,
+	)
+
 	# The whole reason --font-stack may live on bare :root.
 	dark_scss = os.path.join(
 		frappe.get_app_path("frappe"), "public", "scss", "desk", "dark.scss"
 	)
 	if os.path.isfile(dark_scss):
 		body = open(dark_scss).read()
+		check(
+			"frappe still does not redefine any --text-<size> token for dark mode",
+			not re.search(
+				r"--text-(tiny|2xs|xs|sm|md|base|lg|xl|\d+xl)\s*:", body
+			),
+			"the size ladder is declared once for both themes on the strength of this; "
+			"if it fails, split it across the light and dark blocks",
+		)
 		check(
 			"frappe still does not redefine --font-stack for dark mode",
 			"--font-stack" not in body,

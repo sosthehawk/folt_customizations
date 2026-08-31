@@ -257,18 +257,21 @@ folt.guide.waiting_html = function (guide) {
 
 	const named = roles.map((r) => __(r)).join(__(" or "));
 
+	const people = (waiting.approvers || [])
+		.map((a) => frappe.utils.escape_html(a.full_name))
+		.join(", ");
+
 	// A role nobody holds means the document is stuck, and no amount of chasing a person fixes
 	// it -- the fix is a Role assignment. Worth saying loudly rather than showing an empty list.
+	// The approvers list is still shown under it, because it is not necessarily empty: the server
+	// includes Administrator as a holder of every role while still reporting the role itself as
+	// unassigned, so the stuck document names the one account that can move it in the meantime.
 	if (waiting.unassigned) {
 		return `<div class="folt-pending folt-unassigned">${__(
 			"Waiting for {0} — nobody holds that role",
 			[named]
-		)}</div>`;
+		)}${people ? `<div class="folt-event-meta">${people}</div>` : ""}</div>`;
 	}
-
-	const people = (waiting.approvers || [])
-		.map((a) => frappe.utils.escape_html(a.full_name))
-		.join(", ");
 
 	return `<div class="folt-pending">${__("Waiting for {0}", [named])}${
 		people ? `<div class="folt-event-meta">${people}</div>` : ""

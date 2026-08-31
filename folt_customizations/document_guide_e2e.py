@@ -33,6 +33,7 @@ from frappe.utils import add_days, nowdate
 from folt_customizations import activity_chain, document_guide
 from folt_customizations.document_guide import DOCUMENTS, get_guide
 from folt_customizations.folt_customizations.page.folt_tasks.folt_tasks import my_tasks
+from folt_customizations.workflow import get_approvers_for_state
 from folt_customizations.workflow_access import hold_rejection_reason
 from folt_customizations.workspaces import set_landing_page
 
@@ -367,6 +368,33 @@ def run():
 		f"{[a['full_name'] for a in guide['waiting_for']['approvers']]}",
 	)
 	check("and the Head of Programs is told they can act", guide["can_act"])
+
+	approvers = guide["waiting_for"]["approvers"]
+	check(
+		"Administrator is named among them, and named last, because it holds every role",
+		[a["user"] for a in approvers].count("Administrator") == 1
+		and approvers[-1]["user"] == "Administrator",
+		f"{[a['user'] for a in approvers]}",
+	)
+
+	# The flag has to survive Administrator being added to the list, and this is the check that
+	# says so: Administrator holds every role on the site, so an `unassigned` decided after it was
+	# added would be False forever and the "nobody holds that role" warning could never fire.
+	# Driven through get_approvers_for_state directly -- a role nobody holds is the whole point,
+	# and none of FoLT's own states is in that condition on a working site.
+	orphan_role = "E2E Guide Role Nobody Holds"
+	if not frappe.db.exists("Role", orphan_role):
+		frappe.get_doc({"doctype": "Role", "role_name": orphan_role}).insert(ignore_permissions=True)
+
+	orphan = get_approvers_for_state(
+		frappe._dict(transitions=[frappe._dict(state="Nowhere", allowed=orphan_role)]), "Nowhere"
+	)
+	check(
+		"a role nobody holds is still reported unassigned, while naming the account that can act",
+		orphan["unassigned"] and [a["user"] for a in orphan["approvers"]] == ["Administrator"],
+		f"unassigned={orphan['unassigned']}, approvers={[a['user'] for a in orphan['approvers']]}",
+	)
+	frappe.delete_doc("Role", orphan_role, force=True, ignore_permissions=True)
 
 	requester_view = as_user(REQUESTER, lambda: get_guide("Activity Participant List", register_name))
 	check(

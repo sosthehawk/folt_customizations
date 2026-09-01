@@ -209,6 +209,14 @@ doc_events = {
         "on_update": "folt_customizations.workflow_access.record_rejection_reason",
         "on_update_after_submit": "folt_customizations.workflow_access.record_rejection_reason",
     },
+    # The Public / Hidden checkboxes on a Workspace are the interface a System Manager uses to
+    # take a module off the Desk or put it back, so they have to move the module's icon too --
+    # a separate document that does not read those flags, and the reason those edits used to
+    # look like they did nothing. The hook also records the decision where `bench migrate`
+    # cannot reset it. See workspaces.record_visibility_intent.
+    "Workspace": {
+        "on_update": "folt_customizations.workspaces.record_visibility_intent",
+    },
     "Supplier": {
         "validate": "folt_customizations.supplier.validate",
     },

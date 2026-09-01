@@ -38,15 +38,19 @@ import frappe
 # Changing this line changes what a NEW site starts with and nothing else: the seed fires only on
 # a missing store key, so no existing install is affected, including the one you are looking at.
 #
-# Projects out and Assets in (2026-09-01), decided in the Desk on the working site and brought
-# back here so a rebuilt site starts the same way. Assets had no records and no FoLT process
-# behind it; Projects is wanted. Note that publishing Projects only takes it out of *retirement*
-# -- its Desktop Icon goes back to the roles access.MODULE_ACCESS gives it, which is UNUSED,
-# i.e. System Manager. Making it visible to project staff is a separate decision, in that map.
+# Kept in step with the decisions made in the Desk on the working site, so a rebuilt or second
+# install starts the same way rather than starting from an older opinion. As of 2026-09-01:
+# Projects, Selling and Stock are wanted and out of this list; Assets, Subcontracting, Quality and
+# Manufacturing are not run here and stay in it.
+#
+# Publishing a module only takes it out of *retirement*. Its Desktop Icon goes back to the roles
+# access.MODULE_ACCESS gives it, and for all five ERPNext modules moved out of here so far that is
+# UNUSED -- System Manager. So they are visible to administrators, NOT to the staff who would use
+# them; widening that is a separate decision, in that map, and it is where to look first when
+# somebody reports that a module was "made visible" and they still cannot see it.
 SEED_HIDDEN_WORKSPACES = [
     "Manufacturing",
-    "Selling",
-    "Stock",
+    "Subcontracting",
     "Assets",
     "Quality",
     "ERPNext Settings",

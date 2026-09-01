@@ -34,12 +34,20 @@ import frappe
 # workspace in frappe.modules either way, because Home carries that module too.
 # THE SEED, not the standing list. This is the set a fresh install starts with; after that the
 # Desk is the source of truth and hidden_workspaces() reads the store below. A System Manager who
-# un-ticks Public on Assets, or ticks it on Projects, is making the decision -- not editing this.
+# un-ticks Public on a module, or ticks it back on, is making the decision -- not editing this.
+# Changing this line changes what a NEW site starts with and nothing else: the seed fires only on
+# a missing store key, so no existing install is affected, including the one you are looking at.
+#
+# Projects out and Assets in (2026-09-01), decided in the Desk on the working site and brought
+# back here so a rebuilt site starts the same way. Assets had no records and no FoLT process
+# behind it; Projects is wanted. Note that publishing Projects only takes it out of *retirement*
+# -- its Desktop Icon goes back to the roles access.MODULE_ACCESS gives it, which is UNUSED,
+# i.e. System Manager. Making it visible to project staff is a separate decision, in that map.
 SEED_HIDDEN_WORKSPACES = [
     "Manufacturing",
     "Selling",
     "Stock",
-    "Projects",
+    "Assets",
     "Quality",
     "ERPNext Settings",
 ]

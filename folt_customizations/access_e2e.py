@@ -227,6 +227,19 @@ def run():
     # Retirement, checked on a System Manager rather than on a staff role. UNUSED already kept
     # these icons from staff, so the staff checks above passed throughout the period when every
     # administrator could still see all five -- this is the check that would have caught it.
+    # A typo in the seed is silent: hide_workspaces() skips a name with no Workspace, so the
+    # module simply stays visible on every new site and nothing says why. Read-only, so it is safe
+    # to run anywhere -- unlike the seed path itself, which only fires on a site with no store yet
+    # and is therefore exercised by a fresh install rather than from here.
+    from folt_customizations.workspaces import SEED_HIDDEN_WORKSPACES
+
+    missing_seed = [name for name in SEED_HIDDEN_WORKSPACES if not frappe.db.exists("Workspace", name)]
+    check(
+        "every name in the hidden-workspace seed is a real Workspace",
+        not missing_seed,
+        f"no such workspace: {missing_seed}" if missing_seed else f"{len(SEED_HIDDEN_WORKSPACES)} seeded",
+    )
+
     manager = _a_system_manager()
     retired = retired_modules()
     if manager:

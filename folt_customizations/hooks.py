@@ -210,6 +210,16 @@ doc_events = {
     "Supplier": {
         "validate": "folt_customizations.supplier.validate",
     },
+    # `All Departments`, the root of the Department tree, cannot be saved at all in stock
+    # erpnext: `company` is mandatory and the root's is NULL by design, and erpnext's own
+    # validate then makes the root its own parent, which the nested set rejects. That matters
+    # because an approver on the root is inherited by every department -- get_approvers walks
+    # up the tree -- so it is the row an HR administrator most needs to edit. See
+    # department.py, which also restates the company requirement that the accompanying
+    # Property Setter drops for every node that is not the root.
+    "Department": {
+        "validate": "folt_customizations.department.validate",
+    },
     # erpnext only ever adds a supplier's login to Supplier.portal_users when an RFQ is emailed
     # to that exact address, and that table is the *only* thing the portal reads to decide which
     # supplier a visitor is. Linking a contact to a supplier here is what makes the portal work

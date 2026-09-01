@@ -11,7 +11,10 @@ None of the three reached a FoLT user in the Desk, for three separate reasons:
     `notify_employee` then take an early return after a `frappe.msgprint`, so instead of a
     notification the person saving the form got a nag popup telling them to go and configure
     something. The two templates hrms ships were on the site the whole time, unreferenced.
-    `apply_leave_notification_templates` below points the settings at them.
+    `apply_leave_notification_templates` below points the settings at them -- which is now
+    only the fallback path, because leave_email.py owns the body of all three emails and so
+    no longer depends on a template being named at all. It still matters for the site whose
+    administrator has chosen a template of their own, which that module lets win.
 
   - THE BELL NEVER RANG. FoLT's bell notifications hang off `Workflow Action.after_insert`
     (notifications.notify_pending_approvers), which covers all nine FoLT workflows at once
@@ -26,7 +29,9 @@ None of the three reached a FoLT user in the Desk, for three separate reasons:
 
 Email and bell divide the work the same way notifications.py already divides it for the
 committee: the bell needs no mail server and always lands, the email carries the detail to
-somebody who is not looking at the Desk. They do not double up. Notification type "Alert" is
+somebody who is not looking at the Desk. They do not double up. What that email looks like --
+the FoLT masthead, and a body that says which of the three things has happened -- is
+leave_email.py; this module is the bell and the settings. Notification type "Alert" is
 listed in frappe's `notification_skip_email_types` hook, so a Notification Log of that type
 never mails itself -- the only email is hrms's own, from the templates wired up below.
 

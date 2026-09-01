@@ -38,6 +38,7 @@ so even the emails that reach the outgoing account go nowhere. Run with
     bench --site <site> execute folt_customizations.leave_notifications_e2e.run
 """
 
+import email
 import time
 
 import frappe
@@ -47,13 +48,23 @@ PASS, FAIL = [], []
 
 APPLICANT = "e2e-leave-applicant@example.com"
 APPROVER = "e2e-leave-approver@example.com"
-LEAVE_TYPE = "Annual Leave"
 EMPLOYEE_NAME = "E2E Leave Applicant"
+
+# The leave type is whatever the site actually has, in preference order, rather than a name
+# hardcoded here. `Annual Leave` was, and it does not exist on a site set up from erpnext's own
+# defaults -- which made every run of this file die on a LinkValidationError before it reached a
+# single check. A type that is `is_lwp` is skipped: unpaid leave is not allocated, so
+# make_allocation below could not give the applicant any days to spend.
+LEAVE_TYPE_PREFERENCE = ("Annual Leave", "Privilege Leave", "Casual Leave")
+
+HOLIDAY_LIST = "E2E Leave Holidays"
 
 
 def check(label, condition, detail=""):
+    """`detail` describes the failure, so it is only printed on one. Shown beside a PASS it
+    reads as a contradiction -- "PASS  the email carries the FoLT logo -- no masthead image"."""
     (PASS if condition else FAIL).append(label)
-    print(f"  {'PASS' if condition else 'FAIL'}  {label}{'  — ' + detail if detail else ''}")
+    print(f"  {'PASS' if condition else 'FAIL'}  {label}{'  — ' + detail if detail and not condition else ''}")
 
 
 # --- setup / teardown ------------------------------------------------------------------------
@@ -78,7 +89,17 @@ def teardown():
         # Ledger entries are written by the allocation's submit and outlive its cancellation.
         for name in frappe.get_all("Leave Ledger Entry", filters={"employee": employee}, pluck="name"):
             frappe.delete_doc("Leave Ledger Entry", name, force=True, ignore_permissions=True)
+        for name in frappe.get_all(
+            "Holiday List Assignment", filters={"assigned_to": employee}, pluck="name"
+        ):
+            doc = frappe.get_doc("Holiday List Assignment", name)
+            if doc.docstatus == 1:
+                doc.cancel()
+            doc.delete(force=True, ignore_permissions=True)
         frappe.delete_doc("Employee", employee, force=True, ignore_permissions=True)
+
+    if frappe.db.exists("Holiday List", HOLIDAY_LIST):
+        frappe.delete_doc("Holiday List", HOLIDAY_LIST, force=True, ignore_permissions=True)
 
     for user in (APPLICANT, APPROVER):
         for name in frappe.get_all("Notification Log", filters={"for_user": user}, pluck="name"):
@@ -104,6 +125,50 @@ def make_user(email, first_name, roles):
     ).insert(ignore_permissions=True)
 
 
+def make_holiday_list(period_start, period_end):
+    """The leave ledger will not be written without one.
+
+    `create_leave_ledger_entry` calls `get_holiday_list_for_employee(raise_exception=True)` on
+    submit, so an employee with no holiday list and a company with no default cannot have leave
+    approved at all -- the submit throws before any notification is sent. Owned by this file,
+    like the employee and the allocation, so the test says nothing about how the site's own
+    holiday lists happen to be set up today.
+    """
+    if frappe.db.exists("Holiday List", HOLIDAY_LIST):
+        return HOLIDAY_LIST
+    doc = frappe.get_doc(
+        {
+            "doctype": "Holiday List",
+            "holiday_list_name": HOLIDAY_LIST,
+            "from_date": period_start,
+            "to_date": period_end,
+        }
+    )
+    doc.insert(ignore_permissions=True)
+    return doc.name
+
+
+def assign_holiday_list(employee, holiday_list, from_date):
+    """Point the employee at the holiday list through a submitted Holiday List Assignment.
+
+    In this version of hrms `get_holiday_list_for_employee` no longer reads a field on the
+    Employee at all -- it queries submitted `Holiday List Assignment` rows for the employee and
+    then for their company. An unsubmitted assignment is invisible to it (`docstatus == 1` is in
+    the query), so this has to submit.
+    """
+    doc = frappe.get_doc(
+        {
+            "doctype": "Holiday List Assignment",
+            "applicable_for": "Employee",
+            "assigned_to": employee,
+            "holiday_list": holiday_list,
+            "from_date": from_date,
+        }
+    )
+    doc.insert(ignore_permissions=True)
+    doc.submit()
+
+
 def make_employee(company):
     doc = frappe.get_doc(
         {
@@ -126,12 +191,21 @@ def make_employee(company):
     return doc.name
 
 
-def make_allocation(employee, period_start, period_end):
+def resolve_leave_type():
+    """The first preferred leave type this site has, else any paid one. See LEAVE_TYPE_PREFERENCE."""
+    paid = set(frappe.get_all("Leave Type", filters={"is_lwp": 0}, pluck="name"))
+    for name in LEAVE_TYPE_PREFERENCE:
+        if name in paid:
+            return name
+    return sorted(paid)[0] if paid else None
+
+
+def make_allocation(employee, leave_type, period_start, period_end):
     doc = frappe.get_doc(
         {
             "doctype": "Leave Allocation",
             "employee": employee,
-            "leave_type": LEAVE_TYPE,
+            "leave_type": leave_type,
             "from_date": period_start,
             "to_date": period_end,
             "new_leaves_allocated": 5,
@@ -163,6 +237,58 @@ def await_logs(name, expected, timeout=30):
 def emails_since(count_before):
     frappe.db.commit()
     return frappe.db.count("Email Queue") - count_before
+
+
+def latest_email_html():
+    """The HTML of the most recently queued leave email, as it will go on the wire.
+
+    Read out of Email Queue rather than intercepted at `frappe.sendmail`, because the parts this
+    file cares about -- the masthead, the container, the absolute logo URL -- are added *after*
+    sendmail, by get_formatted_html and scrub_urls. Checking the body we passed in would prove
+    nothing about the email anybody receives.
+    """
+    rows = frappe.get_all(
+        "Email Queue",
+        filters={"reference_doctype": "Leave Application"},
+        fields=["message"],
+        order_by="creation desc",
+        limit=1,
+    )
+    if not rows:
+        return ""
+
+    # Email Queue holds the whole MIME message, and its HTML part is quoted-printable encoded --
+    # so a raw substring search over that column finds nothing, because the encoding inserts
+    # `=\n` soft breaks in the middle of exactly the long style attributes worth asserting on.
+    message = email.message_from_string(rows[0].message)
+    for part in message.walk():
+        if part.get_content_type() == "text/html":
+            charset = part.get_content_charset() or "utf-8"
+            return part.get_payload(decode=True).decode(charset, "replace")
+    return rows[0].message
+
+
+def check_folt_email(step, html, expect):
+    """Every leave email is a FoLT email: framed, badged with the logo, and specific.
+
+    Before leave_email.py all three were sent with neither `with_container` nor `header`, which
+    is what frappe's own template gates the masthead on -- so there was no logo to look for, and
+    all three bodies were the same `<h1>Leave Application Notification</h1>`. Each assertion here
+    is one of the things that was missing.
+    """
+    from folt_customizations.branding import EMAIL_ACCENT, LOGO_EMAIL
+
+    logo = LOGO_EMAIL.rsplit("/", 1)[-1]
+    check(f"{step}: the email carries the FoLT logo", logo in html, "no masthead image")
+    check(f"{step}: it is in the framed container", "email-container" in html)
+    check(f"{step}: the FoLT accent is on the button", EMAIL_ACCENT.lstrip("#").lower() in html.lower())
+    check(
+        f"{step}: it is not hrms's stock body",
+        "Leave Application Notification" not in html,
+        "the unstyled h1 template is still being rendered",
+    )
+    for phrase in expect:
+        check(f"{step}: it says {phrase!r}", phrase.lower() in html.lower())
 
 
 def drain_messages():
@@ -208,17 +334,30 @@ def run():
             f"folt_customizations.leave_notifications.{fn}" in hooked,
         )
 
+    leave_type = resolve_leave_type()
+    check("the site has a paid leave type to test with", bool(leave_type), f"got {leave_type!r}")
+    if not leave_type:
+        print("\nRESULT: cannot run without a paid Leave Type")
+        return {"passed": len(PASS), "failed": len(FAIL), "failures": FAIL}
+
+    print(f"  using leave type {leave_type!r}")
+
     company = frappe.get_all("Company", pluck="name")[0]
-    make_user(APPLICANT, "E2E Applicant", ["Employee"])
-    make_user(APPROVER, "E2E Approver", ["HR User", "Leave Approver"])
-    employee = make_employee(company)
 
     period = frappe.get_all(
         "Leave Period", filters={"is_active": 1}, fields=["from_date", "to_date"], limit=1
     )
-    period_start = period[0].from_date if period else getdate("2026-01-01")
-    period_end = period[0].to_date if period else getdate("2026-12-31")
-    make_allocation(employee, period_start, period_end)
+    # The fallback window has to contain today as well as the leave: the holiday list is read for
+    # the posting date too, not only for the days being taken.
+    today = getdate()
+    period_start = period[0].from_date if period else getdate(f"{today.year}-01-01")
+    period_end = period[0].to_date if period else getdate(f"{today.year}-12-31")
+
+    make_user(APPLICANT, "E2E Applicant", ["Employee"])
+    make_user(APPROVER, "E2E Approver", ["HR User", "Leave Approver"])
+    employee = make_employee(company)
+    assign_holiday_list(employee, make_holiday_list(period_start, period_end), period_start)
+    make_allocation(employee, leave_type, period_start, period_end)
 
     # Inside the allocation, clear of both ends, and short enough not to exhaust five days.
     from_date = add_days(period_end, -10)
@@ -236,7 +375,7 @@ def run():
         {
             "doctype": "Leave Application",
             "employee": employee,
-            "leave_type": LEAVE_TYPE,
+            "leave_type": leave_type,
             "from_date": from_date,
             "to_date": to_date,
             "leave_approver": APPROVER,
@@ -247,7 +386,12 @@ def run():
 
     nags = [m for m in drain_messages() if "Please set default template" in m]
     check("no 'Please set default template' popup on raise", not nags, "; ".join(nags)[:160])
-    check("hrms emailed the approver", emails_since(before) >= 1)
+    check("the approver was emailed", emails_since(before) >= 1)
+    check_folt_email(
+        "raised",
+        latest_email_html(),
+        ["waiting on your decision", "Review this request", EMPLOYEE_NAME],
+    )
 
     logs = await_logs(application.name, 1)
     check(
@@ -270,7 +414,12 @@ def run():
 
     nags = [m for m in drain_messages() if "Please set default template" in m]
     check("no 'Please set default template' popup on approval", not nags, "; ".join(nags)[:160])
-    check("hrms emailed the applicant", emails_since(before) >= 1)
+    check("the applicant was emailed", emails_since(before) >= 1)
+    check_folt_email(
+        "approved",
+        latest_email_html(),
+        ["Your leave has been approved", "Open the application"],
+    )
 
     logs = await_logs(application.name, 2)
     applicant_logs = [row for row in logs if row.for_user == APPLICANT]
@@ -295,7 +444,12 @@ def run():
 
     nags = [m for m in drain_messages() if "Please set default template" in m]
     check("no 'Please set default template' popup on cancellation", not nags, "; ".join(nags)[:160])
-    check("hrms emailed the applicant", emails_since(before) >= 1)
+    check("the applicant was emailed", emails_since(before) >= 1)
+    check_folt_email(
+        "cancelled",
+        latest_email_html(),
+        ["cancelled", "back on your balance"],
+    )
 
     logs = await_logs(application.name, 3)
     cancelled = [

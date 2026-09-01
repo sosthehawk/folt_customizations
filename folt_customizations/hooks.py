@@ -304,6 +304,12 @@ override_doctype_class = {
     # subclass replaces just that notification; the password change itself is still upstream's.
     # See user_security.py.
     "User": "folt_customizations.user_security.FoLTUser",
+    # hrms sends all three leave emails through `frappe.sendmail` with neither `with_container`
+    # nor `header`, which is the pair of arguments frappe's own template gates the masthead on --
+    # so nothing FoLT sent about leave carried the FoLT logo, and the body was the same anonymous
+    # h1-plus-table whether the reader was being asked to decide or being told the answer. The
+    # subclass replaces just the three notification methods. See leave_email.py.
+    "Leave Application": "folt_customizations.leave_email.FoLTLeaveApplication",
 }
 
 # Client-side half of the same rule: leads the form with the category and restricts the

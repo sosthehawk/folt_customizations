@@ -19,9 +19,9 @@ import frappe
 
 from folt_customizations.access import (
     MODULE_ACCESS,
-    RETIRED_MODULES,
     SYSTEM,
     UNRESTRICTED,
+    retired_modules,
     visible_modules,
 )
 
@@ -228,13 +228,14 @@ def run():
     # these icons from staff, so the staff checks above passed throughout the period when every
     # administrator could still see all five -- this is the check that would have caught it.
     manager = _a_system_manager()
+    retired = retired_modules()
     if manager:
         seen_by_manager = set(visible_modules(manager)["icons"])
-        still_offered = sorted(RETIRED_MODULES & seen_by_manager)
+        still_offered = sorted(retired & seen_by_manager)
         check(
             "System Manager: no retired module icon",
             not still_offered,
-            f"offered: {still_offered}" if still_offered else f"{len(RETIRED_MODULES)} retired",
+            f"offered: {still_offered}" if still_offered else f"{len(retired)} retired",
         )
     else:
         print("  note: no System Manager besides Administrator -- retirement check skipped")
@@ -259,6 +260,168 @@ def run():
     if FAIL:
         print("  FAILED: " + "; ".join(FAIL))
     return {"passed": len(PASS), "failed": len(FAIL), "failures": FAIL}
+
+
+def run_visibility_roundtrip(workspace="Quality"):
+    """Take a module off the Desk from the Desk, and put it back. The regression this closes.
+
+    Un-ticking Public used to move one flag on one row: the workspace left the sidebar page list
+    and the module's icon, which does not read that flag, stayed exactly where it was. Ticking it
+    back on was worse -- the flag went to 1 and the next migrate put it back to 0, because the
+    hidden set was a list in the repo that no Desk edit could reach.
+
+    Driven through a real `doc.save()` rather than through record_visibility_intent directly,
+    because the hook wiring is half of what is being tested: an inline edit in the Workspace list
+    view is a save, and if doc_events is not carrying it then nothing else here matters.
+
+    Starts and ends on the workspace's original state, and asserts the *intermediate* state in
+    both directions, so a failure cannot leave the site half-toggled.
+
+        bench --site <site> execute folt_customizations.access_e2e.run_visibility_roundtrip
+    """
+    from folt_customizations.workspaces import hidden_workspaces
+
+    print(f"\nDesk visibility round trip on {workspace}\n")
+    icon = frappe.db.exists("Desktop Icon", {"label": workspace})
+    check(f"{workspace} has a Workspace and a Desktop Icon", bool(frappe.db.exists("Workspace", workspace) and icon))
+    if not icon:
+        return {"passed": len(PASS), "failed": len(FAIL), "failures": FAIL}
+
+    before = frappe.db.get_value("Workspace", workspace, ["public", "is_hidden"], as_dict=True)
+    manager = _a_system_manager()
+
+    try:
+        _set_public(workspace, 1)
+        check(f"{workspace}: publishing clears both flags", _flags(workspace) == (1, 0), str(_flags(workspace)))
+        check(f"{workspace}: publishing drops it from the hidden set", workspace not in hidden_workspaces())
+        check(f"{workspace}: its icon is un-hidden", frappe.db.get_value("Desktop Icon", icon, "hidden") == 0)
+        check(
+            f"{workspace}: its icon is back on the mapping's roles",
+            _icon_roles(icon) != {"Administrator"},
+            f"roles: {sorted(_icon_roles(icon))}",
+        )
+        if manager:
+            check(
+                f"{workspace}: a System Manager is offered the icon again",
+                workspace in set(visible_modules(manager)["icons"]),
+            )
+
+        _set_public(workspace, 0)
+        check(f"{workspace}: hiding sets both flags", _flags(workspace) == (0, 1), str(_flags(workspace)))
+        check(f"{workspace}: hiding adds it to the hidden set", workspace in hidden_workspaces())
+        check(f"{workspace}: its icon is hidden", frappe.db.get_value("Desktop Icon", icon, "hidden") == 1)
+        check(f"{workspace}: its icon is gated to Administrator", _icon_roles(icon) == {"Administrator"})
+        if manager:
+            check(
+                f"{workspace}: a System Manager is no longer offered the icon",
+                workspace not in set(visible_modules(manager)["icons"]),
+            )
+        else:
+            print("  note: no System Manager besides Administrator -- boot-payload halves skipped")
+    finally:
+        _set_public(workspace, before.public)
+        frappe.db.set_value("Workspace", workspace, dict(before), update_modified=False)
+
+    check(f"{workspace}: restored to its original flags", _flags(workspace) == (before.public, before.is_hidden))
+    print(f"\n  {len(PASS)} passed, {len(FAIL)} failed")
+    if FAIL:
+        print("  FAILED: " + "; ".join(FAIL))
+    return {"passed": len(PASS), "failed": len(FAIL), "failures": FAIL}
+
+
+def run_migrate_durability():
+    """A Desk decision has to survive `bench migrate`. This is the half that used to be a list.
+
+    `bench migrate` re-imports every standard workspace from its shipping app, which resets
+    public=1 -- that is why workspaces.hide_workspaces() exists and why the hidden set could not
+    simply live in tabWorkspace. Before the store, an administrator's tick was undone by the next
+    deploy in one direction (they hid something, migrate published it) and by the after_migrate
+    hook in the other (they published something, the hook re-hid it from a list in the repo).
+
+    Simulates the re-import rather than running a migrate: the re-import's effect on this is
+    exactly `public=1, is_hidden=0` written straight to the row, and then the after_migrate hooks
+    run in their hooks.py order. Cheap enough to run on every change, which a real migrate is not.
+
+        bench --site <site> execute folt_customizations.access_e2e.run_migrate_durability
+    """
+    from folt_customizations.access import apply_module_access
+    from folt_customizations.workspaces import hidden_workspaces, hide_workspaces
+
+    print("\nMigrate durability -- upstream re-import, then the after_migrate hooks\n")
+    hidden = hidden_workspaces()
+    published = [
+        name
+        for name in frappe.get_all("Workspace", filters={"public": 1}, pluck="name")
+        if name not in hidden and frappe.db.exists("Desktop Icon", {"label": name})
+    ]
+    check("there is something hidden and something published to test with", bool(hidden and published))
+    if not (hidden and published):
+        return {"passed": len(PASS), "failed": len(FAIL), "failures": FAIL}
+
+    stays_hidden = sorted(hidden)[0]
+    stays_visible = sorted(published)[0]
+    before = {
+        name: frappe.db.get_value("Workspace", name, ["public", "is_hidden"], as_dict=True)
+        for name in (stays_hidden, stays_visible)
+    }
+
+    try:
+        # What the re-import does to both of them, indiscriminately.
+        for name in (stays_hidden, stays_visible):
+            frappe.db.set_value(
+                "Workspace", name, {"public": 1, "is_hidden": 0}, update_modified=False
+            )
+        frappe.db.commit()
+
+        hide_workspaces()
+        apply_module_access()
+        frappe.db.commit()
+
+        check(
+            f"{stays_hidden}: re-hidden after the re-import published it",
+            _flags(stays_hidden) == (0, 1),
+            str(_flags(stays_hidden)),
+        )
+        icon = frappe.db.exists("Desktop Icon", {"label": stays_hidden})
+        if icon:
+            check(f"{stays_hidden}: its icon is retired again", _icon_roles(icon) == {"Administrator"})
+        check(
+            f"{stays_visible}: left published, not dragged back into the hidden set",
+            _flags(stays_visible) == (1, 0) and stays_visible not in hidden_workspaces(),
+            str(_flags(stays_visible)),
+        )
+    finally:
+        for name, flags in before.items():
+            frappe.db.set_value("Workspace", name, dict(flags), update_modified=False)
+        apply_module_access()
+        frappe.db.commit()
+
+    check(
+        "both workspaces restored to their original flags",
+        all(_flags(name) == (f.public, f.is_hidden) for name, f in before.items()),
+    )
+    print(f"\n  {len(PASS)} passed, {len(FAIL)} failed")
+    if FAIL:
+        print("  FAILED: " + "; ".join(FAIL))
+    return {"passed": len(PASS), "failed": len(FAIL), "failures": FAIL}
+
+
+def _set_public(workspace, public):
+    """Tick or un-tick Public the way the Desk does it -- a save, so doc_events runs."""
+    doc = frappe.get_doc("Workspace", workspace)
+    doc.public = public
+    doc.save()
+    frappe.db.commit()
+
+
+def _flags(workspace):
+    return tuple(frappe.db.get_value("Workspace", workspace, ["public", "is_hidden"]))
+
+
+def _icon_roles(icon):
+    return set(
+        frappe.get_all("Has Role", filters={"parenttype": "Desktop Icon", "parent": icon}, pluck="role")
+    )
 
 
 def _a_system_manager():

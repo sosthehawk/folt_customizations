@@ -1,3 +1,5 @@
+from json import dumps, loads
+
 import frappe
 
 # Standard ERPNext workspaces FoLT does not use, removed from the Desk sidebar.
@@ -30,7 +32,10 @@ import frappe
 # "ERPNext" wording a FoLT user could actually see. Verified orphaned before hiding -- no
 # Workspace Sidebar Item, Workspace Shortcut or child page links to it -- and "Setup" keeps a
 # workspace in frappe.modules either way, because Home carries that module too.
-HIDDEN_WORKSPACES = [
+# THE SEED, not the standing list. This is the set a fresh install starts with; after that the
+# Desk is the source of truth and hidden_workspaces() reads the store below. A System Manager who
+# un-ticks Public on Assets, or ticks it on Projects, is making the decision -- not editing this.
+SEED_HIDDEN_WORKSPACES = [
     "Manufacturing",
     "Selling",
     "Stock",
@@ -39,17 +44,57 @@ HIDDEN_WORKSPACES = [
     "ERPNext Settings",
 ]
 
+# Kept under the old name so nothing that imports it breaks; it is the seed either way.
+HIDDEN_WORKSPACES = SEED_HIDDEN_WORKSPACES
+
+# Where the standing decision lives. It cannot live in tabWorkspace, which is the whole reason
+# this module exists: `bench migrate` re-imports every standard workspace from its shipping app
+# and resets public=1, which is what hide_workspaces() undoes on the way out of a migrate. So the
+# flags in the Desk are the *interface* and this is the *record* -- record_visibility_intent()
+# writes it when somebody toggles a flag, and hide_workspaces() replays it after migrate has had
+# its way with the table.
+#
+# frappe.db.set_global rather than a new Single doctype: it is one list of names, it is data
+# rather than schema, and tabDefaultValue is not touched by migrate. A doctype would need a
+# fixture, and a fixture of this would put the decision back in the repo -- the opposite of the
+# point.
+_STORE_KEY = "folt_hidden_workspaces"
+
+
+def hidden_workspaces():
+    """The modules currently retired from the Desk, as a set of Workspace names.
+
+    Seeded from SEED_HIDDEN_WORKSPACES the first time it is asked for, so a fresh install gets
+    FoLT's defaults and every install after that gets whatever its administrators have decided.
+    An empty store is a legitimate answer (somebody re-published all six), which is why the seed
+    fires on a *missing* key rather than on a falsy value.
+    """
+    stored = frappe.db.get_global(_STORE_KEY)
+    if stored is None:
+        _store(SEED_HIDDEN_WORKSPACES)
+        return set(SEED_HIDDEN_WORKSPACES)
+    return {name for name in loads(stored)} if stored else set()
+
+
+def _store(names):
+    frappe.db.set_global(_STORE_KEY, dumps(sorted(set(names))))
+
 
 def hide_workspaces():
-    """Remove the unused standard workspaces from the Desk sidebar.
+    """Re-apply the standing hidden set to the Desk sidebar.
 
-    Sets public=0 and is_hidden=1 on each. Idempotent and safe to run on every migrate:
-    only workspaces that exist and are not already in the target state are touched, so it
-    is a no-op once applied. Re-runs after a migrate that re-syncs the upstream workspace
-    (which would reset public=1), keeping the change durable.
+    Sets public=0 and is_hidden=1 on each hidden workspace. Idempotent and safe to run on every
+    migrate: only workspaces that exist and are not already in the target state are touched, so
+    it is a no-op once applied. Re-runs after a migrate that re-syncs the upstream workspace
+    (which would reset public=1), keeping the decision durable.
+
+    One-directional on purpose. It hides what the store says to hide and never publishes anything
+    -- a workspace dropped from the store needs no help, because the migrate that reset it to
+    public=1 has already published it, and outside a migrate the Desk edit that dropped it from
+    the store did. Nothing here should be able to make a workspace public that nobody asked to be.
     """
     changed = False
-    for name in HIDDEN_WORKSPACES:
+    for name in hidden_workspaces():
         if not frappe.db.exists("Workspace", name):
             continue
         current = frappe.db.get_value(
@@ -63,6 +108,77 @@ def hide_workspaces():
         changed = True
     if changed:
         frappe.clear_cache()
+
+
+def record_visibility_intent(doc, method=None):
+    """Workspace.on_update: make the Public / Hidden checkboxes mean what they look like.
+
+    Before this, un-ticking Public in the Desk moved one flag on one row and nothing else. It
+    dropped the workspace out of the sidebar page list, but the module's **icon** is a separate
+    document that never reads that flag (see access.retired_modules), so the module stayed on
+    screen and the edit read as having done nothing at all. Ticking Public back on was worse: the
+    flag went to 1 and the next migrate put it back to 0, because the hidden set was a list in
+    the repo that no Desk edit could reach.
+
+    Both directions now run through here, and **the checkbox that changed is the decision**:
+
+      Public changed      public=1 means show it, public=0 means take it away.
+      only Hidden changed is_hidden=1 means take it away, is_hidden=0 means show it.
+
+    Reading the two flags together instead -- hidden if `not public or is_hidden` -- is the
+    obvious rule and it is wrong, in the one direction that matters. hide_workspaces() maintains
+    the pair public=0 / is_hidden=1, so a module coming back out of retirement is always ticking
+    Public while is_hidden is still 1: under the combined rule that reads as "still hidden", the
+    normalisation below puts public straight back to 0, and the tick snaps back in the Desk. That
+    is the same class of bug as the one this function exists to fix, so it is asserted in both
+    directions by access_e2e.run_visibility_roundtrip.
+
+    Whichever way the decision goes, the pair is then normalised -- public=0 / is_hidden=1 to hide,
+    public=1 / is_hidden=0 to show -- so one tick does the whole job and the two flags cannot drift
+    into the state where a module is gone for staff and still on screen for the administrator who
+    hid it. (That is what is_hidden means on its own: frappe hides such a workspace from everyone
+    *except* Workspace Managers.) Showing it also drops it from the store, so the next migrate
+    leaves it published.
+
+    Then access.apply_module_access() re-gates the module icon, which is what makes the change
+    visible instead of theoretical.
+
+    Private workspaces (`for_user`) are skipped: they are somebody's own page, they are already
+    invisible to everyone else, and no module icon belongs to them.
+
+    Written with db.set_value, so normalising the pair does not re-enter this hook -- and does
+    not show up in the open form until it is reloaded.
+    """
+    if doc.for_user:
+        return
+
+    # Every other kind of save -- content blocks dragged about, a shortcut added, a rename --
+    # leaves visibility alone and should not cost a permission sweep.
+    if not (doc.has_value_changed("public") or doc.has_value_changed("is_hidden")):
+        return
+
+    # The flag that moved is the one being asked about. `public` wins when both moved: it is the
+    # stronger of the two, since is_hidden still lets a Workspace Manager see the workspace.
+    if doc.has_value_changed("public"):
+        hidden = not doc.public
+    else:
+        hidden = bool(doc.is_hidden)
+    target = {"public": 0, "is_hidden": 1} if hidden else {"public": 1, "is_hidden": 0}
+    if (doc.public, doc.is_hidden) != (target["public"], target["is_hidden"]):
+        frappe.db.set_value("Workspace", doc.name, target, update_modified=False)
+        doc.public, doc.is_hidden = target["public"], target["is_hidden"]
+
+    standing = hidden_workspaces()
+    wanted = standing | {doc.name} if hidden else standing - {doc.name}
+    if wanted != standing:
+        _store(wanted)
+
+    # Imported here rather than at module scope: access imports this module for the hidden set,
+    # and at module scope that is a cycle.
+    from folt_customizations.access import apply_module_access
+
+    apply_module_access()
+    frappe.clear_cache()
 
 
 # Where a FoLT staff login lands. The route itself is the one on `add_to_apps_screen` in hooks.py

@@ -1,5 +1,7 @@
 import frappe
 
+from folt_customizations.workspaces import HIDDEN_WORKSPACES
+
 # Which module icons and workspaces each role may see.
 #
 # Two surfaces decide what a user finds in the Desk, and they are enforced independently:
@@ -18,9 +20,12 @@ import frappe
 # tells a Procurement Committee member that a Payroll module exists and invites them to poke at
 # it. This closes the gap between "cannot read the documents" and "cannot see the module".
 #
-# `Desktop Icon.hidden` is deliberately not used: get_desktop_icons does not filter on it (the
-# CRM, Home and FoLT ERP icons all ship with hidden=1 and were being served to every user
-# anyway), so `roles` is the only lever that holds server-side.
+# `Desktop Icon.hidden` is deliberately not used as the *access* lever: get_desktop_icons does
+# not filter on it (the CRM, Home and FoLT ERP icons all ship with hidden=1 and were being
+# served to every user anyway), and the awesomebar offers hidden icons too
+# (search_utils.js:get_desktop_icons reads frappe.boot.desktop_icons unfiltered). `roles` is the
+# only lever that holds server-side. RETIRED below sets `hidden` as well, but only as the
+# cosmetic half -- see the comment there.
 #
 # Kept in code rather than as Desk edits or fixtures for the same reason as workspaces.py: a
 # fixture would overwrite the whole upstream Workspace, and `bench migrate` re-syncs both
@@ -169,6 +174,35 @@ MODULE_ACCESS = {
     "Website": SYSTEM,
 }
 
+# Modules retired from the Desk altogether: workspaces.HIDDEN_WORKSPACES, the list that already
+# sets public=0 / is_hidden=1 on their Workspace. Hiding the *Workspace* was not enough, because
+# a Desktop Icon never reads its workspace's `public` flag. An icon is shown when the matching
+# **Workspace Sidebar** still holds one item the user may read
+# (get_desktop_icons -> bootinfo.workspace_sidebar_item -> get_sidebar_items), and those sidebars
+# are built from doctypes, reports and dashboards, not from the workspace page. Un-publishing the
+# Manufacturing workspace therefore removed exactly one sidebar row -- its "Home" link -- and left
+# BOM, Work Order, Job Card and thirty-three others behind the icon, which kept rendering.
+#
+# UNUSED (= System Manager) did not close it either, and could not: every FoLT administrator holds
+# System Manager, so the people most likely to notice the clutter were the only ones still served
+# it, which is why un-checking Public in the Desk looked like it had no effect at all.
+#
+# `Administrator` is a real Role that no *user document* carries -- get_roles() hands the
+# Administrator login every role on the site (frappe/permissions.py:544), so it gates an icon to
+# that one login and to nobody else. Nothing is deleted, for the same reason UNUSED deletes
+# nothing: moving a module back into service is one line in workspaces.HIDDEN_WORKSPACES.
+#
+# Only the Desktop Icon is re-gated. The Workspace keeps its MODULE_ACCESS roles below, since
+# workspaces.hide_workspaces() has already dropped it from every sidebar, managers included.
+RETIRED = ("Administrator",)
+
+# Matched on the icon's `label`, like every other row in MODULE_ACCESS -- which is what keeps
+# "ERPNext Settings" in HIDDEN_WORKSPACES from taking the settings tile down with it. That icon
+# is *named* "ERPNext Settings" but was relabelled "FoLT Settings" by branding.py and re-pointed
+# at the sidebar we ship under that name, so a label lookup for "ERPNext Settings" matches no
+# Desktop Icon and this list retires the five genuinely unused modules only.
+RETIRED_MODULES = frozenset(HIDDEN_WORKSPACES)
+
 # "My Workspaces" is left alone on purpose: get_sidebar_items short-circuits it for every user,
 # so restricting it would only be theatre.
 UNRESTRICTED = {"My Workspaces", "Welcome Workspace"}
@@ -186,17 +220,47 @@ def apply_module_access():
     for label, roles in MODULE_ACCESS.items():
         if label in UNRESTRICTED:
             continue
-        allowed = _existing_roles({*roles, *SYSTEM})
-        if not allowed:
-            # Every role in the mapping is missing from this site -- writing an empty table
-            # would read as "everyone", the opposite of what is meant here.
-            continue
         for doctype in TARGET_DOCTYPES:
+            allowed = _existing_roles(_roles_for(doctype, label, roles))
+            if not allowed:
+                # Every role in the mapping is missing from this site -- writing an empty table
+                # would read as "everyone", the opposite of what is meant here.
+                continue
             for name in _targets(doctype, label):
                 changed |= _set_roles(doctype, name, allowed)
+                changed |= _hide_icon(doctype, label, name)
     if changed:
         frappe.clear_cache()
     return changed
+
+
+def _roles_for(doctype, label, roles):
+    """The role set for one row: RETIRED for a retired module's icon, the mapping otherwise.
+
+    The retired set is NOT widened with System Manager -- that widening is what kept these
+    icons on screen for every FoLT administrator. It applies to the Desktop Icon only; the
+    Workspace of the same name is already hidden from everyone by workspaces.hide_workspaces().
+    """
+    if doctype == "Desktop Icon" and label in RETIRED_MODULES:
+        return set(RETIRED)
+    return {*roles, *SYSTEM}
+
+
+def _hide_icon(doctype, label, name):
+    """Set `hidden` on a retired Desktop Icon. The cosmetic half of the retirement.
+
+    `roles` above is what actually withholds the icon: it drops out of the boot payload for
+    everyone but the Administrator login. This flag is for that login's own view -- the Desk
+    skips a hidden icon when it builds the folder map (sidebar_header.js:build_folder_map), so
+    the rail stays clean for an administrator who can still reach the module by URL. It is a
+    second lever with weaker semantics, never a replacement for the first.
+    """
+    if doctype != "Desktop Icon" or label not in RETIRED_MODULES:
+        return False
+    if frappe.db.get_value("Desktop Icon", name, "hidden"):
+        return False
+    frappe.db.set_value("Desktop Icon", name, "hidden", 1, update_modified=False)
+    return True
 
 
 def _existing_roles(roles):

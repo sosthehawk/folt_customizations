@@ -17,7 +17,13 @@ renders rather than re-deriving the permission rules and agreeing with itself.
 
 import frappe
 
-from folt_customizations.access import MODULE_ACCESS, SYSTEM, UNRESTRICTED, visible_modules
+from folt_customizations.access import (
+    MODULE_ACCESS,
+    RETIRED_MODULES,
+    SYSTEM,
+    UNRESTRICTED,
+    visible_modules,
+)
 
 # The one-role-per-user test logins (see seed_test_users.py), and the modules each of them has
 # to be able to reach. Deliberately spelled out rather than derived from MODULE_ACCESS: this is
@@ -218,6 +224,21 @@ def run():
 
         unmapped_seen[role] = _unmapped(icons)
 
+    # Retirement, checked on a System Manager rather than on a staff role. UNUSED already kept
+    # these icons from staff, so the staff checks above passed throughout the period when every
+    # administrator could still see all five -- this is the check that would have caught it.
+    manager = _a_system_manager()
+    if manager:
+        seen_by_manager = set(visible_modules(manager)["icons"])
+        still_offered = sorted(RETIRED_MODULES & seen_by_manager)
+        check(
+            "System Manager: no retired module icon",
+            not still_offered,
+            f"offered: {still_offered}" if still_offered else f"{len(RETIRED_MODULES)} retired",
+        )
+    else:
+        print("  note: no System Manager besides Administrator -- retirement check skipped")
+
     # The mapping must never lock an administrator out of the modules that grant access.
     admin = visible_modules("Administrator")
     admin_missing = [
@@ -238,6 +259,23 @@ def run():
     if FAIL:
         print("  FAILED: " + "; ".join(FAIL))
     return {"passed": len(PASS), "failed": len(FAIL), "failures": FAIL}
+
+
+def _a_system_manager():
+    """An enabled System Manager who is not the Administrator, or None.
+
+    The Administrator is no use for this check: get_roles() hands that login every role on the
+    site, including the `Administrator` role the retired icons are gated to, so it sees them by
+    design. Not named in the output -- these are real staff accounts.
+    """
+    for user in frappe.get_all(
+        "Has Role",
+        filters={"parenttype": "User", "role": "System Manager"},
+        pluck="parent",
+    ):
+        if user != "Administrator" and frappe.db.get_value("User", user, "enabled"):
+            return user
+    return None
 
 
 def _unmapped(labels):

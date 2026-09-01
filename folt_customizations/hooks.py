@@ -169,6 +169,7 @@ after_install = [
     "folt_customizations.access.apply_module_access",
     "folt_customizations.print_formats.apply_print_formats",
     "folt_customizations.supplier_portal.link_portal_users",
+    "folt_customizations.leave_notifications.apply_leave_notification_templates",
 ]
 after_migrate = [
     "folt_customizations.branding.apply_branding",
@@ -179,6 +180,7 @@ after_migrate = [
     "folt_customizations.access.apply_module_access",
     "folt_customizations.print_formats.apply_print_formats",
     "folt_customizations.supplier_portal.link_portal_users",
+    "folt_customizations.leave_notifications.apply_leave_notification_templates",
 ]
 
 # A supplier pre-qualified for several FoLT categories carries the extras in the
@@ -209,6 +211,27 @@ doc_events = {
     },
     "Supplier": {
         "validate": "folt_customizations.supplier.validate",
+    },
+    # `All Departments`, the root of the Department tree, cannot be saved at all in stock
+    # erpnext: `company` is mandatory and the root's is NULL by design, and erpnext's own
+    # validate then makes the root its own parent, which the nested set rejects. That matters
+    # because an approver on the root is inherited by every department -- get_approvers walks
+    # up the tree -- so it is the row an HR administrator most needs to edit. See
+    # department.py, which also restates the company requirement that the accompanying
+    # Property Setter drops for every node that is not the root.
+    "Department": {
+        "validate": "folt_customizations.department.validate",
+    },
+    # Leave Application is the one approval at FoLT that is not a Workflow -- it uses hrms's own
+    # `status` + `leave_approver` -- so notify_pending_approvers, which hangs off Workflow
+    # Action, never sees it. These three name the doctype explicitly to cover the same ground:
+    # the approver is told an application is waiting, and the applicant is told when it is
+    # decided and if it is later cancelled. See leave_notifications.py, which also wires up the
+    # Email Templates that left hrms's own leave emails silently unsent.
+    "Leave Application": {
+        "after_insert": "folt_customizations.leave_notifications.notify_approver_of_new_application",
+        "on_update": "folt_customizations.leave_notifications.notify_applicant_of_decision",
+        "on_cancel": "folt_customizations.leave_notifications.notify_applicant_of_cancellation",
     },
     # erpnext only ever adds a supplier's login to Supplier.portal_users when an RFQ is emailed
     # to that exact address, and that table is the *only* thing the portal reads to decide which

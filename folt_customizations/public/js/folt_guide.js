@@ -530,6 +530,37 @@ folt.chain.report = function (handoff, result) {
 			);
 		}
 	}
+	// The procurement chain's three, in the order the routes take them. Each says what the
+	// hand-off found and what is left for the person it just handed the document to -- the
+	// committee that has to be named, the case that has to be written, the delivery date nothing
+	// upstream knows. See procurement_chain.py.
+	if (result.bids !== undefined) {
+		lines.push(
+			__("{0} bid(s) received against {1}.", [result.bids, result.rfq]),
+			__(
+				"Add the committee members: each of them gets a row to score every bid, and nobody can fill in anybody else's."
+			)
+		);
+	}
+	if (result.to_write !== undefined) {
+		lines.push(
+			__("Filled in from the bid: {0}, {1} and the lines quoted for.", [
+				result.supplier,
+				format_currency(result.value, result.currency),
+			]),
+			__("Still to write: {0}.", [result.to_write.join(", ")])
+		);
+	}
+	if (result.total !== undefined) {
+		lines.push(
+			__("{0} to {1}, from quotation {2}.", [
+				format_currency(result.total, result.currency),
+				result.supplier,
+				result.quotation,
+			]),
+			__("Check Required By before sending it for approval.")
+		);
+	}
 	if (result.spent !== undefined) {
 		lines.push(
 			__("{0} accounted for against a float of {1}. Balance {2}.", [

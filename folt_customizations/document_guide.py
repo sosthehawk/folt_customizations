@@ -36,7 +36,7 @@ import frappe
 from frappe import _
 from frappe.model.workflow import get_workflow, get_workflow_name
 
-from folt_customizations import workflow_shape
+from folt_customizations import procurement_chain, workflow_shape
 from folt_customizations.activity_chain import CHAIN_LENGTH, CHAIN_STEPS, get_chain_status
 from folt_customizations.workflow import get_approvers_for_state
 from folt_customizations.workflow_access import REJECTION_REASON_FIELD, is_turn_down
@@ -128,6 +128,13 @@ def get_guide(doctype: str, name: str) -> dict:
 	# activity_chain_e2e, so it is not a function to refactor for two queries.
 	chain = get_chain_status(doctype, name) if doctype in CHAIN_STEPS else {}
 
+	# FoLT has a second chain -- procurement, from a submitted bid through the committee or a
+	# waiver to the order -- and its hand-offs arrive the same way, so the same buttons render
+	# for them with no new plumbing in the Desk. No doctype belongs to both chains, so the two
+	# lists cannot disagree about a document; the one document on the procurement chain that is
+	# NOT here is the Supplier Quotation, which has no workflow and therefore no guide at all.
+	handoffs = (chain.get("handoffs") or []) + procurement_chain.handoffs_for(doc)
+
 	return {
 		"doctype": doctype,
 		"name": name,
@@ -145,7 +152,7 @@ def get_guide(doctype: str, name: str) -> dict:
 		}
 		if chain.get("step")
 		else None,
-		"handoffs": chain.get("handoffs") or [],
+		"handoffs": handoffs,
 		"waiting_for": {
 			"roles": waiting_roles,
 			"approvers": pending.get("approvers") or [],

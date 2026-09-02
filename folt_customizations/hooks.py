@@ -328,7 +328,15 @@ override_doctype_class = {
 
 # Client-side half of the same rule: leads the form with the category and restricts the
 # Supplier dropdown to that category's pre-qualified register.
-doctype_js = {"Purchase Order": "public/js/purchase_order.js"}
+#
+# Supplier Quotation is the one document on FoLT's procurement chain with no workflow, so
+# folt_guide.js -- which draws every other document's next step off its workflow -- never sees
+# it. Its script offers the two routes out of a submitted bid instead, and takes erpnext's
+# straight-to-Purchase-Order button away. See public/js/supplier_quotation.js.
+doctype_js = {
+    "Purchase Order": "public/js/purchase_order.js",
+    "Supplier Quotation": "public/js/supplier_quotation.js",
+}
 
 # `host_name` is the base of every link AND every image URL the site emails to a person, so it
 # has to be the browser's address; wkhtmltopdf, running inside the container, needs one the

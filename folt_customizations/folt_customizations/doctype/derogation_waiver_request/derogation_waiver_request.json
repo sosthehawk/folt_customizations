@@ -15,6 +15,7 @@
     { "fieldname": "project", "fieldtype": "Link", "options": "Project", "label": "Project" },
     { "fieldname": "cost_center", "fieldtype": "Link", "options": "Cost Center", "label": "Cost Center" },
     { "fieldname": "supplier", "fieldtype": "Link", "options": "Supplier", "label": "Proposed Supplier" },
+    { "fieldname": "supplier_quotation", "fieldtype": "Link", "options": "Supplier Quotation", "label": "Supplier Quotation", "description": "The sole-source bid this waiver is being requested on, where there is one. Filled in when the waiver is raised from a submitted quotation; the order is then derived from that quotation's own lines and prices.", "no_copy": 1 },
     { "fieldname": "period_of_derogation", "fieldtype": "Data", "label": "Period of Derogation" },
     { "fieldname": "section_break_items", "fieldtype": "Section Break", "label": "Scope" },
     { "fieldname": "items_service", "fieldtype": "Small Text", "label": "Items / Service to be Purchased", "reqd": 1 },

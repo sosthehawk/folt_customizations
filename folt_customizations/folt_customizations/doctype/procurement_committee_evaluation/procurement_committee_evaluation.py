@@ -26,6 +26,7 @@ class ProcurementCommitteeEvaluation(Document):
 		self.sync_quotation_scores()
 		# After the rebuild, so it judges the grid that is actually about to be stored.
 		self.enforce_self_scoring()
+		self.enforce_award()
 		if self.workflow_state == PENDING_APPROVAL_STATE:
 			self.enforce_quorum()
 
@@ -162,6 +163,49 @@ class ProcurementCommitteeEvaluation(Document):
 			frappe._("The committee cannot be changed by a member of it. Ask the buyer who raised this evaluation, or a System Manager, to add or remove members."),
 			title=frappe._("Committee is fixed"),
 		)
+
+	def enforce_award(self):
+		"""The recommendation has to name a bid from this competition, and name one at all.
+
+		Two rules, one method, because they are two halves of what "Intent to Award" means:
+
+		*The winning bid is one of the bids.* `recommended_supplier_quotation` is a plain link to
+		Supplier Quotation, so before this it would take any quotation in the system -- including
+		one from a different RFQ that no member of this committee ever scored. The supplier is
+		derived from it rather than asked for again, which is also how the two stop disagreeing:
+		a recommendation naming supplier A and A's competitor's quotation is not a typo anybody
+		would spot on the printed Intent to Award.
+
+		*There is a winning bid before the award is sought.* The Head of Finance's step is
+		approving an award; an evaluation reaching it with the recommendation blank asks them to
+		approve nothing, and procurement_chain.make_award_order then has no bid to raise the
+		order from. Enforced only on entry to that state, so the committee can score and save
+		for as long as it takes to decide.
+		"""
+		if self.recommended_supplier_quotation:
+			bids = {row.supplier_quotation: row.supplier for row in self.quotation_scores or []}
+			if not bids:
+				bids = {
+					row["supplier_quotation"]: row["supplier"]
+					for row in rfq_quotations(self.request_for_quotation)
+				}
+
+			if self.recommended_supplier_quotation not in bids:
+				frappe.throw(
+					frappe._("{0} is not one of the bids received against {1}, so it cannot be awarded on this evaluation.").format(
+						frappe.bold(self.recommended_supplier_quotation),
+						frappe.bold(self.request_for_quotation or frappe._("this RFQ")),
+					),
+					title=frappe._("Not a bid in this competition"),
+				)
+
+			self.recommended_supplier = bids[self.recommended_supplier_quotation]
+
+		elif self.workflow_state == PENDING_APPROVAL_STATE:
+			frappe.throw(
+				frappe._("Name the winning bid before seeking award approval -- the Head of Finance is being asked to approve an award, and the order is raised from the bid it names."),
+				title=frappe._("No award to approve"),
+			)
 
 	def enforce_quorum(self):
 		"""Block the move to Intent-to-Award until a quorum of members has signed."""

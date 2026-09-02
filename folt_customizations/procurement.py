@@ -7,10 +7,22 @@ import frappe
 
 EVALUATION_DOCTYPE = "Procurement Committee Evaluation"
 
+# The other route to an order: single sourcing, licensed by an approved waiver rather than by a
+# competition. Named alongside the evaluation because the two are alternatives -- procurement_chain
+# offers both out of a submitted bid, and purchase_order accepts an order backed by either.
+WAIVER_DOCTYPE = "Derogation Waiver Request"
+
 # The evaluation workflow state in which the committee does its scoring. Named here rather
 # than in the doctype controller because notifications.py has to recognise it too, and the
 # controller already imports this module -- naming it there would make that import circular.
 COMMITTEE_REVIEW_STATE = "Committee Reviewing"
+
+# The state both routes end at, and the only one an order may be issued on. One name for both
+# workflows because it is one fact. purchase_order.require_award_authority reads it from here
+# rather than from procurement_chain, which imports activity_chain and its doctype controllers:
+# every Purchase Order save runs that check, and it has no business loading the float chain to
+# do it.
+AUTHORISED = "Approved"
 
 
 @frappe.whitelist()

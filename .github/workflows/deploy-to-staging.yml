@@ -1,0 +1,239 @@
+# Push app code to main -> staging rebuilds and redeploys with it.
+#
+# THE IMAGE IS NOT BUILT IN THIS REPO. `erpnext-docker` owns the build: its
+# .github/workflows/build.yml clones the apps named in apps.json, publishes eight images to
+# GHCR and then asks Dokploy to redeploy. apps.json pins folt_customizations to `main`, so
+# every app change reaches an environment by being on this repo's main when that build runs --
+# and until now nothing connected the two. A push here published source and changed no
+# environment, and the person who pushed had to remember to go and push erpnext-docker as well.
+# This is that step, done by the machine instead: main lands, staging rebuilds from it.
+#
+# STAGING ONLY, DELIBERATELY. build.yml maps its ref onto an environment -- refs/heads/main is
+# ENV_TAG=production, anything else is staging -- so this dispatches against `staging` and
+# nothing else. Promoting a build to production stays what it is: a human merging staging into
+# main in erpnext-docker, after looking at what staging is actually running. Nothing in this
+# repo should ever be able to move production, which is why the ref below is a literal.
+#
+# TO PUSH WITHOUT REBUILDING STAGING, put `[skip ci]` in the commit message -- GitHub skips
+# every workflow for that push. Same effect as the paths-ignore list below, for a change the
+# list cannot predict.
+#
+# WHAT IT NEEDS: one repository secret, `ERPNEXT_DOCKER_TOKEN` -- a fine-grained PAT scoped to
+# sosthehawk/erpnext-docker alone with Actions: read and write (a classic PAT with `repo` also
+# works, but grants far more than this needs). erpnext-docker is private, so the built-in
+# GITHUB_TOKEN cannot see it; that is the only reason a PAT is involved. Without the secret this
+# workflow fails with instructions rather than silently doing nothing.
+
+name: Deploy to staging
+
+on:
+  push:
+    branches: [main]
+    # A README or a licence change cannot change what the image runs, and a staging rebuild is
+    # twenty minutes of somebody's attention. Everything that ships inside the app -- python,
+    # js, css, json fixtures, the doctypes -- is outside this list and does trigger one.
+    paths-ignore:
+      - "**.md"
+      - LICENSE
+      - .gitignore
+      - .editorconfig
+  # For a re-run when a build failed for a reason that had nothing to do with the app (GHCR
+  # rejecting a blob, a runner dying), without an empty commit on main to provoke it.
+  workflow_dispatch: {}
+
+# Nothing in THIS repo is read or written -- the whole job is one cross-repository API call
+# carrying its own token. Least privilege for a public repo's workflow is therefore nothing.
+permissions: {}
+
+# Two pushes in quick succession would otherwise dispatch two builds that both race to move the
+# same `staging` tag, and the loser of that race decides what staging runs. Queued rather than
+# cancelled: the waiting job is what serialises them, so the second build starts from a settled
+# registry and its images are the ones that stay.
+concurrency:
+  group: staging-build
+  cancel-in-progress: false
+
+jobs:
+  staging:
+    # A fork's own main must not try to use a secret it does not have, or every fork sees a red
+    # X for a workflow that was never theirs to run.
+    if: github.repository == 'sosthehawk/folt_customizations'
+    runs-on: ubuntu-latest
+    # The image build is a full bench init from three cloned apps; it runs 20-40 minutes. This
+    # is that plus room for a queued run ahead of it, and it is a backstop, not a schedule --
+    # the waiting steps below have their own bounded loops with clearer messages.
+    timeout-minutes: 90
+    env:
+      TARGET: sosthehawk/erpnext-docker
+      WORKFLOW: build.yml
+      # The environment this repo is allowed to touch. Not an input: see the header.
+      BRANCH: staging
+      GH_TOKEN: ${{ secrets.ERPNEXT_DOCKER_TOKEN }}
+    steps:
+      - name: Check the token is configured
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::error::ERPNEXT_DOCKER_TOKEN is not set on this repository."
+            echo "Add a fine-grained PAT scoped to ${TARGET} with Actions: read and write, as"
+            echo "the repository secret ERPNEXT_DOCKER_TOKEN (Settings -> Secrets and variables"
+            echo "-> Actions). erpnext-docker is private, so GITHUB_TOKEN cannot reach it."
+            exit 1
+          fi
+
+      # One call that proves the token before anything is dispatched: it has to see a private
+      # repo's Actions to do this job at all, and a 401/404 here is a plain "fix the secret"
+      # rather than a dispatch that appears to succeed and triggers nothing.
+      - name: Check the token can see the build workflow
+        run: |
+          set -euo pipefail
+          CODE=$(curl -sS -o /tmp/workflow.json -w '%{http_code}' \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${TARGET}/actions/workflows/${WORKFLOW}")
+          if [ "${CODE}" != "200" ]; then
+            echo "::error::GitHub answered HTTP ${CODE} for ${TARGET}/${WORKFLOW}."
+            echo "401/403: the token is expired or lacks Actions write on ${TARGET}."
+            echo "404: the token cannot see the repository at all (fine-grained PATs must name"
+            echo "it explicitly), or ${WORKFLOW} has been renamed."
+            exit 1
+          fi
+          jq -r '"Dispatching \(.name) (\(.path))"' /tmp/workflow.json
+
+      # Wait for a build already in flight rather than adding a second one beside it. The
+      # concurrency group above only serialises jobs in THIS repo; a build somebody started by
+      # pushing erpnext-docker itself is invisible to it, and two concurrent builds both move
+      # the `staging` tag.
+      - name: Wait for any staging build already running
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 60); do
+            BUSY=$(curl -sS \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/${TARGET}/actions/workflows/${WORKFLOW}/runs?branch=${BRANCH}&per_page=20" \
+              | jq '[.workflow_runs[] | select(.status != "completed")] | length')
+            if [ "${BUSY}" -eq 0 ]; then
+              echo "No staging build in flight."
+              exit 0
+            fi
+            echo "${BUSY} staging build(s) still running; waiting (attempt ${attempt}/60)."
+            sleep 30
+          done
+          echo "::error::A staging build has been running for 30 minutes and has not finished."
+          echo "Look at https://github.com/${TARGET}/actions/workflows/${WORKFLOW} and re-run"
+          echo "this workflow once it is clear."
+          exit 1
+
+      - name: Ask erpnext-docker to build and deploy staging
+        id: dispatch
+        run: |
+          set -euo pipefail
+          # Recorded BEFORE the dispatch, and backdated a minute: the run is identified by being
+          # newer than this, and a runner's clock can sit slightly ahead of GitHub's.
+          echo "since=$(date -u -d '-60 seconds' +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
+          CODE=$(curl -sS -o /tmp/dispatch.json -w '%{http_code}' -X POST \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${TARGET}/actions/workflows/${WORKFLOW}/dispatches" \
+            -d "{\"ref\":\"${BRANCH}\"}")
+          # A dispatch answers 204 with an empty body. Anything else is worth printing whole.
+          if [ "${CODE}" != "204" ]; then
+            echo "::error::Dispatch refused (HTTP ${CODE})."
+            cat /tmp/dispatch.json || true
+            exit 1
+          fi
+          echo "Dispatched ${WORKFLOW} on ${BRANCH} of ${TARGET} for ${GITHUB_SHA}."
+
+      # The dispatch API returns no run id, so the run has to be found. Newest workflow_dispatch
+      # run on staging created after the timestamp above -- and it can take a few seconds to
+      # appear at all, hence the loop rather than a single read.
+      - name: Find the staging run
+        id: run
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 20); do
+            RUN=$(curl -sS \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/${TARGET}/actions/workflows/${WORKFLOW}/runs?event=workflow_dispatch&branch=${BRANCH}&per_page=20" \
+              | jq -r --arg since "${{ steps.dispatch.outputs.since }}" \
+                '[.workflow_runs[] | select(.created_at >= $since)] | sort_by(.created_at) | last // empty | "\(.id) \(.html_url)"')
+            if [ -n "${RUN}" ]; then
+              echo "id=${RUN%% *}" >> "$GITHUB_OUTPUT"
+              echo "url=${RUN#* }" >> "$GITHUB_OUTPUT"
+              echo "Staging build: ${RUN#* }"
+              exit 0
+            fi
+            sleep 6
+          done
+          echo "::error::The dispatch was accepted but no run appeared within two minutes."
+          echo "Check https://github.com/${TARGET}/actions/workflows/${WORKFLOW} directly."
+          exit 1
+
+      # Reported here, before the wait, so the link is in the summary even if the build fails or
+      # this job is cancelled.
+      - name: Report where the build is
+        run: |
+          {
+            echo "### Staging build for \`${GITHUB_SHA::12}\`"
+            echo
+            echo "[${{ steps.run.outputs.url }}](${{ steps.run.outputs.url }})"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Wait for the staging build
+        id: wait
+        run: |
+          set -euo pipefail
+          LAST=""
+          for attempt in $(seq 1 160); do
+            STATE=$(curl -sS \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/${TARGET}/actions/runs/${{ steps.run.outputs.id }}" \
+              | jq -r '"\(.status) \(.conclusion // "-")"')
+            if [ "${STATE}" != "${LAST}" ]; then
+              echo "$(date -u +%H:%M:%S)  ${STATE}"
+              LAST="${STATE}"
+            fi
+            case "${STATE}" in
+              "completed success")
+                echo "conclusion=success" >> "$GITHUB_OUTPUT"
+                exit 0
+                ;;
+              completed*)
+                echo "::error::Staging build ${STATE#completed }: ${{ steps.run.outputs.url }}"
+                echo "conclusion=${STATE#completed }" >> "$GITHUB_OUTPUT"
+                exit 1
+                ;;
+            esac
+            sleep 30
+          done
+          echo "::error::Staging build has not finished after 80 minutes: ${{ steps.run.outputs.url }}"
+          exit 1
+
+      # A green build is not the same as a good one -- build.yml has published green-but-broken
+      # images before, and it never runs `bench migrate`, so staging is also the only rehearsal
+      # of the migration this change needs. The three things worth reading are named here so
+      # they are in front of whoever promotes this, rather than in somebody's memory.
+      - name: Say what still needs a human
+        if: steps.wait.outputs.conclusion == 'success'
+        run: |
+          {
+            echo
+            echo "Images are published and Dokploy has been asked to redeploy staging."
+            echo
+            echo "Before promoting this to production (merge \`staging\` -> \`main\` in"
+            echo "erpnext-docker, by hand), check in the build log:"
+            echo
+            echo "- the block confirming frappe, erpnext and hrms all report major version 16;"
+            echo "- the \`docker push\` digests: 8 image names x the \`staging\` and SHA tags,"
+            echo "  with \`latest\` **absent** on a staging build;"
+            echo "- the Dokploy step printing \`{\"message\":\"Compose deployed successfully\"}\`"
+            echo "  rather than a 301 \`Branch Not Match\`;"
+            echo
+            echo "then exercise the change on staging itself."
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -45,7 +45,14 @@
 
    Everything is nested under `body.folt-guided`, which folt_guide.js sets on boot. That is the
    kill switch: commenting out one line of JS reverts every visual change in this file without
-   redeploying a stylesheet. */
+   redeploying a stylesheet.
+
+   ONE EXCEPTION, and it is the last section of the file: the two controls folt_notifications.js
+   adds to the notification dropdown are Desk chrome rather than document chrome, so they are not
+   nested under `body.folt-guided`. Nesting them there would hang the bell's appearance on the
+   guided layer's kill switch -- switch the guide off and the bell would keep two now-unstyled
+   controls. They have a kill switch of their own: drop folt_notifications.js from app_include_js
+   and the DOM those rules select stops being generated. Rules 1 to 3 hold for them unchanged. */
 
 body.folt-guided .folt-guide {
   display: flex;
@@ -1047,4 +1054,68 @@ body.folt-guided .folt-tasks-error-head {
 body.folt-guided .folt-tasks-error-body {
   margin: 0;
   font-size: var(--text-sm);
+}
+
+/* --- clearing the bell -------------------------------------------------------------------
+   The bin in the notification dropdown's header that clears every read notification, and the ×
+   that stands in for the unread dot on a row that has been read. Both are nodes
+   folt_notifications.js creates, which is why they are styled here and not in folt_theme.css --
+   nothing below selects anything frappe rendered. Not nested under `body.folt-guided`; see the
+   exception in the file header. */
+
+/* A <button>, so the four header controls need their three shared declarations restated rather
+   than inherited from frappe's spans (notification.scss: .mark-all-read, .notification-settings).
+   No hover background: the sibling controls have none, and a lone one would read as the only
+   button up there. */
+.folt-clear-read {
+  display: inline-flex;
+  align-items: center;
+  margin-top: 2px;
+  margin-right: 4px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.folt-clear-read:hover,
+.folt-clear-read:focus-visible {
+  color: var(--text-color);
+}
+
+/* Frappe's own close × in this header sets the same width, because these are lucide icons and
+   the set is drawn for a 2px stroke -- at frappe's 1.5px default they look faded next to the
+   filled timeless icons beside them. */
+.folt-clear-read .icon,
+.folt-clear-notification .icon {
+  stroke-width: 2px;
+}
+
+/* The slot frappe leaves on every row. It gives that slot a size only on the unread ones
+   (notification.scss nests the rule under `&.unread`), so on a read row it is an empty 0x0 box
+   in exactly the right place and this is filling it rather than moving anything.
+
+   20px around a 16px icon: still the smallest target on the row, but two and a half times the
+   8px unread dot it replaces. Always visible, not on row hover -- a hover-only affordance does
+   not exist on a touchscreen, and the queue this bell feeds is read on tablets. */
+.folt-clear-notification {
+  flex-shrink: 0;
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--border-radius-md);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+/* --fg-color rather than --fg-hover-color: the row is already wearing that (.recent-item:hover),
+   since the pointer cannot reach this without being over the row. Both are redefined for dark
+   (dark.scss), so the pair inverts together. */
+.folt-clear-notification:hover {
+  background: var(--fg-color);
+  color: var(--text-color);
 }

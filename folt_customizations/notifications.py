@@ -215,3 +215,56 @@ def _active_users(users) -> set[str]:
     if not users:
         return set()
     return set(frappe.get_all("User", filters={"name": ["in", list(users)], "enabled": 1}, pluck="name"))
+
+
+# --- taking a notification off the bell ------------------------------------------------------
+# Everything above puts things ON the bell. Frappe has nothing that takes one off:
+# `get_notification_logs` returns the reader's newest twenty Notification Logs regardless of
+# `read`, the dropdown offers only `mark_as_read` / `mark_all_as_read`, and the sole thing that
+# ever deletes a row is `NotificationLog.clear_old_logs`, at 180 days.
+#
+# On a site that notifies nine approval workflows that is not a tidiness problem. Twenty slots
+# is a fortnight of read alerts, after which the document somebody is actually waiting on is off
+# the bottom of the dropdown -- so the bell stops being a list of what needs doing, which is the
+# whole reason notify_pending_approvers writes to it. This is the missing half.
+
+
+@frappe.whitelist()
+def clear_read_notifications(name: str | None = None) -> int:
+    """Delete the caller's read bell notifications -- one row if `name` is given, all of them if
+    not -- and return how many went, which is what the Desk reports back to the reader.
+
+    THE FILTER IS THE PERMISSION CHECK, and it is applied to the delete itself rather than
+    checked beforehand: `for_user` is always the session user, so a name belonging to somebody
+    else's bell matches nothing instead of being refused, and there is no path from this endpoint
+    to another user's row. That is exactly how frappe's own `mark_all_as_read` is written.
+
+    `read = 1` is part of the same filter, and not only for the obvious reason. An unread
+    notification is a task nobody has looked at yet; it is also counted, and the Desk keeps that
+    count by arithmetic (NotificationsView.update_count_badge starts from
+    `frappe.boot.notification_unread_count` and adds and subtracts) rather than by asking. So
+    deleting an unread row would leave the bell claiming work that no longer exists until the
+    next reload. folt_notifications.js offers the control on read rows only, for the same reason.
+
+    DELETE RATHER THAN A `dismissed` FLAG. A flag would have to be honoured by
+    `get_notification_logs`, which is frappe's own whitelisted and http_cached method, so FoLT
+    would have to ship a replacement for it and keep it in step forever. And nothing depends on
+    these rows: the record of who was asked to approve what, and when, is the Workflow Action and
+    the document's own timeline (workflow_access.record_rejection_reason), which is why frappe is
+    content to delete them wholesale at 180 days. A notification is a nudge, not the audit trail.
+
+    Notification Log grants role `All` nothing but `read`, so there is no Desk delete to fall
+    back on and no permission to widen -- which is why this runs as a whitelisted method with an
+    explicit filter rather than as `frappe.delete_doc`.
+    """
+    filters = {"for_user": frappe.session.user, "read": 1}
+    if name:
+        filters["name"] = str(name)
+
+    # Counted before the delete because `frappe.db.delete` runs a bare DELETE and its return
+    # value is the driver's, not a row count the caller can rely on.
+    count = frappe.db.count("Notification Log", filters)
+    if count:
+        frappe.db.delete("Notification Log", filters)
+
+    return count

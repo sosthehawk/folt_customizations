@@ -101,9 +101,15 @@ extend_bootinfo = [
 
 # Plain path rather than a `.bundle.js` one, for the same reason email_css is: anything without
 # ".bundle." is passed through untouched, so this needs no build step.
+# folt_notifications.js is the one of the three that patches frappe's own Desk rather than
+# adding to a form, and it relies on this app being last in get_installed_apps(): frappe's
+# app_include_js entries (libs/desk/list/form/...) are collected first, so desk.bundle.js has
+# defined frappe.ui.Notifications by the time this file runs and can wrap it at load, before the
+# sidebar builds the bell. See notifications.clear_read_notifications for what it is for.
 app_include_js = [
     "/assets/folt_customizations/js/folt_workflow.js",
     "/assets/folt_customizations/js/folt_guide.js",
+    "/assets/folt_customizations/js/folt_notifications.js",
 ]
 
 # web_include_css above reaches the *website* only -- which is why folt_branding.css has never had

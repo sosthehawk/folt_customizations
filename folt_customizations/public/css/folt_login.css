@@ -1,0 +1,1163 @@
+/* The sign-in page: FoLT's light glass screen.
+   THE WEBSITE'S LOGIN AND SET-PASSWORD PAGES ONLY. Its companion is public/js/folt_login.js,
+   which builds the brand panel this file paints and puts `folt-signin` on <body>.
+
+   WHAT IT DOES. frappe v16 renders /login as a 371px card centred in the website's
+   `.container`, and /update-password as the same card. This file turns both into FoLT's
+   sign-in screen: a luminous near-white page, and two frosted glass panels on it -- the
+   brand promise on the left, the form on the right. Nothing about how logging in WORKS is
+   touched -- the form, its ids, its submit handler, 2FA, the e-mail-link option, any social
+   login a site enables and the forgot/sign-up routes are all still frappe's.
+
+   ── THE FIVE RULES ────────────────────────────────────────────────────────────────────
+
+   1. EVERY SELECTOR IN THIS FILE STARTS WITH `body.folt-signin`, AND THAT IS THE WHOLE
+      SPECIFICITY ARGUMENT. login.bundle.css is emitted from login.html's `head_include`
+      block, which base.html renders AFTER the `web_include_css` loop -- so unlike every
+      other stylesheet this app ships, this one loads BEFORE the frappe rules it is
+      overriding and cannot win on source order. It wins on specificity instead, and it
+      does so uniformly rather than rule by rule: frappe's login rules are all shaped
+      `.for-<section> .page-card .page-card-body <thing>` (four classes, at most one
+      element). Mirroring that chain minus the `.for-<section>` class and prefixing
+      `body.folt-signin` gives the same class count plus one extra ELEMENT, and
+      specificity compares classes first, then elements -- (0,4,2) beats (0,4,1). Every
+      rule below is quoted against the compiled selector it outranks.
+
+      The bonus: dropping `.for-<section>` means one rule covers all six sections frappe
+      ships (`for-login`, `for-email-login`, `for-forgot`, `for-signup`,
+      `for-login-with-email-link`, `for-reset-password`) instead of a six-fold selector
+      list, and the six-fold list is exactly what login.bundle.scss's nesting compiles to.
+
+   2. NO !important. See rule 1 -- there is nothing here that specificity cannot reach.
+
+   3. THE SCOPE IS JS-GATED ON PURPOSE. `folt-signin` is added by folt_login.js, which
+      bails out unless it finds the markup it expects. So if the script fails to load, or
+      its guards do not match a future frappe template, NOT ONE RULE HERE APPLIES and the
+      user gets frappe's own login page in FoLT's typeface and colour (folt_theme.css) --
+      a plainer page, never a broken one.
+
+   4. THE CONTRAST BUDGET RUNS THE OTHER WAY ROUND ON A LIGHT PAGE, and it is still one
+      number. Dark text on light glass fails where the GROUND GETS DARK, so the budget is
+      the DARKEST ground on the page: the deepest stop of the page gradient
+      (--folt-brand-tint-strong), plus the strongest ambient wash over it, seen through the
+      panel's own white glass. Every ink below is computed against that one composite --
+      and because the glass is WHITE, it can only lighten what is behind it, so no part of
+      a panel is ever darker than that. login_e2e.py recomputes all of it from this file
+      and folt_theme.css rather than trusting this paragraph.
+
+   5. ONE COLOUR IS WRITTEN DOWN HERE, AND ONLY IN SECTION 0. The aquatic teal the design
+      calls for is not a FoLT brand colour -- folt_theme.css owns the brand (blue, navy,
+      the two washes) and nothing else in the product uses a teal. So it is declared once,
+      as --folt-signin-aqua on the page's own scope, with the reason it exists; every other
+      colour in this file is either that token, a --folt-brand-* token, a frappe token, or
+      white. No literal appears below section 0.
+
+   NO DARK BLOCK: templates/base.html emits `<html lang dir>` and never a data-theme
+   attribute, so the website has no dark theme. */
+
+/* ═══ 0. THE PAGE'S OWN TOKENS — the only place a value is written down ═══════════════
+
+   Four derived inks and one new colour, all on the page scope rather than :root, because
+   they are this surface's vocabulary and nothing else should inherit them.
+
+   WHY THE INKS ARE MIXES OF THE BRAND NAVY rather than frappe's neutral greys: the design
+   asks for "deep slate", i.e. a grey with a blue cast, and mixing the navy towards white
+   gives exactly that while keeping the brand as the single source. The percentages are
+   contrast decisions, not taste -- each is the lightest mix that still clears its bar
+   against the worst ground (see rule 4), and login_e2e.py fails if one drifts:
+
+     --ink        68% navy  ~5.5:1  body copy, labels, the subtitle
+     --ink-quiet  55% navy  ~3.5:1  PLACEHOLDERS ONLY. Below 4.5, so it may not carry
+                                    anything a person has to read -- the label above each
+                                    field is what names it.
+
+   The headline and the input text use --folt-brand-navy whole (~15:1). */
+
+body.folt-signin {
+  /* The one literal in this file, and it is a deeper teal than the design's cyan for a
+     reason: this token has to work in BOTH directions. White sits on it (the Sign in
+     button) AND it sits on the glass (the gradient headline), so it needs 4.5:1 against
+     white and against the palest panel at once. #1c7060 is 5.6:1 on white and 5.2:1 on the
+     glass; the design's brighter cyan was 4.04:1 under a white label -- a button whose own
+     text fails at one end of its sweep. It pairs with the brand blue as a gradient and
+     appears nowhere else in the product. */
+  --folt-signin-aqua: #1c7060;
+
+  --folt-signin-ink: color-mix(in srgb, var(--folt-brand-navy) 68%, #fff);
+  --folt-signin-ink-quiet: color-mix(in srgb, var(--folt-brand-navy) 55%, #fff);
+
+  /* The glass: white, and therefore always LIGHTENING what is behind it -- which is what
+     makes rule 4's single worst case hold everywhere inside a panel. */
+  --folt-signin-glass: rgba(255, 255, 255, 0.55);
+  --folt-signin-glass-edge: rgba(255, 255, 255, 0.75);
+}
+
+/* ═══ 1. THE PAGE FRAME, THE LIGHT AND THE LIQUID ═════════════════════════════════════
+
+   The website's page chrome, on a page that has none of it: breadcrumbs, header and page
+   footer render as empty boxes on /login (web.html emits them unconditionally), and
+   `main.container` caps the width at bootstrap's breakpoint ladder -- which is what stops
+   the panels from reaching the edges of the window.
+
+   Fighting, in order:
+     `body{background-color:var(--bg-color)}`                        (0,0,1)
+     `body .page-content-wrapper{min-height:calc(100vh - 220px);padding-top:60px}` (0,1,1)
+     `.container` and its five max-width media rules                 (0,1,0)
+
+   The ground is three layers, and all three are brand tokens or white: a 1px grid at 2.4%
+   of the brand blue for the "crystalline" rhythm the design asks for, a soft wash of blue
+   in the top left, and the base gradient white -> --folt-brand-tint -> tint-strong. The
+   grid is drawn with repeating gradients rather than an asset so there is nothing to
+   fetch, and it is the palest thing on the page on purpose: it should be felt at a glance
+   and invisible at a stare. */
+
+body.folt-signin {
+  background-color: var(--folt-brand-tint);
+  background-image: repeating-linear-gradient(
+      to right,
+      color-mix(in srgb, var(--folt-brand-primary) 8%, transparent) 0 1px,
+      transparent 1px 64px
+    ),
+    repeating-linear-gradient(
+      to bottom,
+      color-mix(in srgb, var(--folt-brand-primary) 8%, transparent) 0 1px,
+      transparent 1px 64px
+    ),
+    radial-gradient(
+      120% 90% at 12% 8%,
+      color-mix(in srgb, var(--folt-brand-primary) 12%, transparent) 0%,
+      transparent 62%
+    ),
+    linear-gradient(
+      160deg,
+      #fff 0%,
+      var(--folt-brand-tint) 46%,
+      var(--folt-brand-tint-strong) 100%
+    );
+  background-attachment: fixed;
+}
+
+body.folt-signin .page-content-wrapper {
+  padding-top: 0;
+  min-height: 0;
+}
+
+body.folt-signin main.container {
+  max-width: none;
+  width: 100%;
+  padding: 0;
+}
+
+body.folt-signin .page-breadcrumbs,
+body.folt-signin .page-header-wrapper,
+body.folt-signin .page-footer {
+  display: none;
+}
+
+/* THE TWO PANELS SIT ON THE PAGE, so the grid is padded rather than full-bleed: 28px of
+   the luminous ground shows all the way round, and 24px between the panels. `.page_content`
+   holds exactly two children once folt_login.js has run -- the brand panel it inserted, and
+   the <div> wrapping frappe's six sections, which it tags `folt-signin-pane`.
+
+   minmax(0, …) on both tracks because a grid track's automatic minimum is min-content:
+   without it the panel's headline sets a floor the track cannot go below, and the form
+   column gets squeezed instead of the text wrapping.
+
+   `position: relative` + `overflow: hidden` are for the ambient washes below: they are
+   absolutely positioned, so they are OUT OF FLOW and never become grid items -- which is
+   the trap in hanging a pseudo-element off a grid container. */
+
+body.folt-signin .page_content {
+  position: relative;
+  overflow: hidden;
+  display: grid;
+  grid-template-columns: minmax(0, 1.02fr) minmax(0, 1fr);
+  gap: 24px;
+  padding: 28px;
+  box-sizing: border-box;
+  min-height: 100vh;
+  min-height: 100svh;
+}
+
+/* THE LIQUID. Two slow washes drifting behind the glass, plus one inside the left panel.
+   Each is a tint of a colour the page already contains -- the brand blue and the page's own
+   aqua accent -- at single-digit alpha, so they add depth to the frost without darkening
+   the ground past the budget in rule 4. They animate `transform` and nothing else, so the
+   compositor runs them off the main thread; 26-38 second cycles with `alternate` means no
+   loop point is ever visible and nothing on the page moves fast enough to pull the eye off
+   the form. pointer-events: none -- they sit under a form people have to click.
+
+   A backdrop-filter has nothing to show unless something with structure passes under it,
+   which is the whole reason the second one is positioned to drift BEHIND the form panel
+   rather than beside it. All three are switched off for prefers-reduced-motion: section 3b. */
+
+body.folt-signin .page_content::before,
+body.folt-signin .page_content::after,
+body.folt-signin .folt-signin-brand::after {
+  content: "";
+  position: absolute;
+  pointer-events: none;
+  border-radius: 50%;
+  z-index: 0;
+}
+
+body.folt-signin .page_content::before {
+  width: 46vw;
+  height: 46vw;
+  top: -14vw;
+  left: 22vw;
+  background-image: radial-gradient(
+    circle at 50% 50%,
+    color-mix(in srgb, var(--folt-brand-primary) 16%, transparent) 0%,
+    transparent 66%
+  );
+  animation: folt-signin-drift-a 26s ease-in-out infinite alternate;
+}
+
+body.folt-signin .page_content::after {
+  width: 56vw;
+  height: 56vw;
+  right: -16vw;
+  bottom: -24vw;
+  background-image: radial-gradient(
+    circle at 50% 50%,
+    color-mix(in srgb, var(--folt-signin-aqua) 14%, transparent) 0%,
+    transparent 68%
+  );
+  animation: folt-signin-drift-b 38s ease-in-out infinite alternate;
+}
+
+body.folt-signin .folt-signin-brand::after {
+  width: 30vw;
+  height: 30vw;
+  right: -8vw;
+  bottom: 6%;
+  background-image: radial-gradient(
+    circle at 50% 50%,
+    color-mix(in srgb, var(--folt-signin-aqua) 12%, transparent) 0%,
+    transparent 64%
+  );
+  animation: folt-signin-drift-c 32s ease-in-out infinite alternate;
+}
+
+@keyframes folt-signin-drift-a {
+  from {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  to {
+    transform: translate3d(5vw, 7vh, 0) scale(1.12);
+  }
+}
+
+@keyframes folt-signin-drift-b {
+  from {
+    transform: translate3d(0, 0, 0) scale(1.06);
+  }
+  to {
+    transform: translate3d(-6vw, -5vh, 0) scale(0.94);
+  }
+}
+
+@keyframes folt-signin-drift-c {
+  from {
+    transform: translate3d(0, 0, 0) scale(0.96);
+  }
+  to {
+    transform: translate3d(3vw, -6vh, 0) scale(1.1);
+  }
+}
+
+/* ═══ 2. THE GLASS ════════════════════════════════════════════════════════════════════
+
+   Both panels are the same material, so it is described once. The parts:
+
+     the tint     --folt-signin-glass, white, 55%. White because it must LIGHTEN (rule 4).
+     the frost    backdrop-filter, and the -webkit- prefix is not optional -- Safari has
+                  never shipped the unprefixed property. A browser with neither still gets
+                  the tint, the rim and the shadow: a solid pale panel, a different look but
+                  not a broken one.
+     the rim      a 1px border at 75% white, which is the edge catching the light.
+     the specular a diagonal white sheen as a background LAYER, so it paints under the
+                  panel's content and needs no z-index games with frappe's nodes.
+     the lift     two shadows: a wide soft one for elevation and a 1px inset white top edge.
+
+   24px corners, matching the design. The three interactive shapes inside (fields, buttons)
+   take 12px and the badges are pills -- one radius per scale, which is what keeps a glass
+   layout from reading as a pile of unrelated rounded things. */
+
+body.folt-signin .folt-signin-brand,
+body.folt-signin .folt-signin-pane {
+  position: relative;
+  z-index: 1;
+  border: 1px solid var(--folt-signin-glass-edge);
+  border-radius: 24px;
+  background-color: var(--folt-signin-glass);
+  background-image: linear-gradient(
+    140deg,
+    rgba(255, 255, 255, 0.5) 0%,
+    rgba(255, 255, 255, 0.12) 38%,
+    rgba(255, 255, 255, 0) 68%
+  );
+  -webkit-backdrop-filter: blur(26px) saturate(150%);
+  backdrop-filter: blur(26px) saturate(150%);
+  box-shadow: 0 24px 60px color-mix(in srgb, var(--folt-brand-navy) 10%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, 0.7);
+}
+
+/* ═══ 2b. THE BRAND PANEL — the only nodes here this app owns ══════════════════════════
+
+   Every selector in this section is a `.folt-signin-*` class generated by folt_login.js,
+   so nothing in it can collide with a frappe rule. It is written in the same specificity
+   shape as the rest of the file anyway (rule 1), so that no future frappe website rule on
+   a bare element -- `h1`, `p`, `img`, `a` -- can reach into it. */
+
+body.folt-signin .folt-signin-brand {
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  padding: 44px 48px 36px;
+  color: var(--folt-signin-ink);
+}
+
+body.folt-signin .folt-signin-top {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  animation: folt-signin-rise 0.6s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+}
+
+/* THE LOGO PLATE, and why the logo is on a white plate at all on a page that is already
+   near-white: folt-logo.svg is the full lockup -- a blue mark, an orange sun and a #001a33
+   wordmark -- and it needs a flat, opaque ground to stay crisp over frosted glass and a
+   drifting wash. The plate also keeps this file honest about WHICH logo it shows:
+   folt_login.js moves the <img> frappe already renders, whose src is
+   Website Settings.app_logo, so changing the site's logo still changes this page.
+
+   Fighting `.page-card-head img.app-logo{max-height:32px;width:auto}` (0,2,1) -- the img
+   keeps that class after the move, and 32px is a navbar size, not a hero one. */
+
+body.folt-signin .folt-signin-plate {
+  display: inline-flex;
+  align-items: center;
+  padding: 12px 18px;
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  border-radius: 18px;
+  background-color: #fff;
+  box-shadow: 0 12px 30px color-mix(in srgb, var(--folt-brand-navy) 12%, transparent);
+  transition: transform 0.25s ease, box-shadow 0.25s ease;
+}
+
+/* 46px: folt-logo.svg is a 1084x413 lockup whose "FRIENDS of LAKE TURKANA" sits on two
+   lines, so the readable height is a third of the asset's. Below ~40px the second line
+   stops being legible on a 1x display -- which is the whole point of putting the logo
+   here. */
+
+body.folt-signin .folt-signin-plate img.app-logo {
+  display: block;
+  height: 46px;
+  width: auto;
+  max-height: none;
+  max-width: 100%;
+}
+
+/* The two pills. Same material as the panels at a smaller scale, and both are ROUND rather
+   than 12px -- a badge is a label, not a control, and the shape is what says so. */
+
+body.folt-signin .folt-signin-status,
+body.folt-signin .folt-signin-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  border-radius: 999px;
+  background-color: rgba(255, 255, 255, 0.6);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 6px 16px color-mix(in srgb, var(--folt-brand-navy) 8%, transparent);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--folt-signin-ink);
+}
+
+/* The status dot is the page's aqua rather than a green "all systems go": FoLT's sign-in
+   page has no health check behind it, and a green dot on a login screen is a status claim
+   nothing here can honour. This one is a brand mark, not a signal. */
+
+body.folt-signin .folt-signin-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: var(--folt-signin-aqua);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--folt-signin-aqua) 18%, transparent);
+}
+
+body.folt-signin .folt-signin-tag {
+  margin-bottom: 22px;
+}
+
+body.folt-signin .folt-signin-tag-check {
+  color: var(--folt-signin-aqua);
+  font-weight: 700;
+}
+
+/* `margin: auto 0` on the middle of three flex children splits the panel's free space above
+   and below it, which centres the promise block in the space left over by the top row and
+   the footer. */
+
+body.folt-signin .folt-signin-brand-inner {
+  position: relative;
+  margin: auto 0;
+  max-width: 30rem;
+  animation: folt-signin-rise 0.6s cubic-bezier(0.16, 1, 0.3, 1) 0.06s backwards;
+}
+
+body.folt-signin .folt-signin-headline {
+  margin: 0;
+  font-size: clamp(30px, 2.7vw, 42px);
+  font-weight: 700;
+  line-height: 1.12;
+  letter-spacing: -0.02em;
+  color: var(--folt-brand-navy);
+}
+
+/* THE GRADIENT LINE, and its fallback. `background-clip: text` needs the -webkit- prefix
+   and a transparent text fill, and a browser that supports neither renders whatever `color`
+   says -- which is why `color` is set FIRST, to the brand blue. The failure mode is a solid
+   blue second line rather than an invisible one.
+   Both stops clear 4.5:1 on the panel (blue 5.7:1, aqua 5.3:1), so the ramp is legible
+   across its whole width and not just at the dark end. */
+
+body.folt-signin .folt-signin-headline span {
+  display: block;
+  color: var(--folt-brand-primary);
+  background-image: linear-gradient(
+    100deg,
+    var(--folt-brand-primary) 0%,
+    var(--folt-signin-aqua) 100%
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+/* 40ch, not the usual 60-75: this is a four-line promise beside a form, not a paragraph to
+   read, and the measure is what keeps its rag tidy inside the panel. */
+
+body.folt-signin .folt-signin-lede {
+  margin: 20px 0 0;
+  max-width: 40ch;
+  font-size: 16px;
+  line-height: 1.65;
+  color: var(--folt-signin-ink);
+}
+
+body.folt-signin .folt-signin-rule {
+  width: 100px;
+  height: 3px;
+  margin: 34px 0 0;
+  border: none;
+  border-radius: 999px;
+  background-image: linear-gradient(
+    90deg,
+    var(--folt-brand-primary) 0%,
+    var(--folt-signin-aqua) 100%
+  );
+}
+
+body.folt-signin .folt-signin-foot {
+  position: relative;
+  margin: 36px 0 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--folt-signin-ink);
+  animation: folt-signin-rise 0.6s cubic-bezier(0.16, 1, 0.3, 1) 0.18s backwards;
+}
+
+body.folt-signin .folt-signin-foot a {
+  color: var(--folt-brand-primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  transition: text-underline-offset 0.18s ease, color 0.18s ease;
+}
+
+body.folt-signin .folt-signin-foot a:hover,
+body.folt-signin .folt-signin-foot a:focus {
+  color: var(--folt-signin-aqua);
+  text-underline-offset: 4px;
+}
+
+/* ═══ 3. THE FORM PANEL — frappe's nodes, restyled ════════════════════════════════════
+
+   The right panel is the glass; the card inside it is only a layout box. Only one of the
+   six sections is visible at a time: login.js toggles them with jQuery, which writes an
+   inline `display`, so NOTHING in this file may set `display` on a `section` -- the panel
+   centres whichever one is showing and the hidden siblings contribute nothing to a flex
+   layout. */
+
+body.folt-signin .folt-signin-pane {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 40px;
+}
+
+/* Fighting `.for-login .page-card,…{padding:24px;background-color:var(--bg-color);
+   max-width:371px;width:100%;margin:0 auto;border-radius:var(--border-radius-lg);
+   display:flex;flex-direction:column;gap:var(--margin-lg)}` (0,3,0) and its xs-breakpoint
+   twin, which sets `min-height:100svh;padding:60px 32px 32px` -- overridden here rather
+   than inside a media query, because a media query adds no specificity and this rule
+   already outranks both. */
+
+body.folt-signin .page-card {
+  max-width: 432px;
+  min-height: 0;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background-color: transparent;
+  gap: 26px;
+}
+
+/* The heading block. The logo has moved to the brand panel; leaving a second copy above
+   "Welcome back" is the one thing that would make the two panels look unrelated.
+   `.page-card-head img.app-logo` is (0,2,1), so this is (0,3,2) and wins wherever the
+   image still is -- which is what makes the rule safe for the five sections whose logo
+   folt_login.js does NOT move. */
+
+body.folt-signin .page-card-head img.app-logo {
+  display: none;
+}
+
+body.folt-signin .folt-signin-plate img.app-logo {
+  display: block;
+}
+
+body.folt-signin .page-card-head {
+  animation: folt-signin-rise 0.6s cubic-bezier(0.16, 1, 0.3, 1) 0.08s backwards;
+}
+
+/* Fighting `.page-card-head h4{font-size:var(--text-2xl);font-weight:var(--weight-bold);
+   letter-spacing:.01em;line-height:115%;color:var(--heading-color)}` (0,1,1). The colour
+   is already FoLT navy through --heading-color (folt_theme section 3); only the size and
+   the tracking change -- 32px with the tracking pulled in is a greeting, 22px with it
+   pushed out is a form label. */
+
+body.folt-signin .page-card-head h4 {
+  font-size: 32px;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+}
+
+body.folt-signin .page-card-head .page-card-subtitle {
+  font-size: 15px;
+  color: var(--folt-signin-ink);
+}
+
+/* LABELS, UPPERCASE AND TRACKED OUT, which is the design's one typographic move on this
+   side of the page. 12px is small, so it carries weight 600 and the full 4.5:1 ink rather
+   than a quiet grey -- a field label is not decoration.
+
+   The red marker sits on the labels whose input declares `required`; folt_login.js adds the
+   class, so the asterisk comes from the markup rather than from a list of field ids that
+   would go stale. frappe's --ink-red-3 is 4.7:1 on this glass and needs no adjusting.
+
+   Fighting `.for-login .page-card .page-card-body .form-label{font-size:var(--text-base);
+   font-weight:var(--weight-regular);color:var(--ink-gray-5);…}` (0,4,0). */
+
+body.folt-signin .page-card .page-card-body {
+  gap: 18px;
+  animation: folt-signin-rise 0.6s cubic-bezier(0.16, 1, 0.3, 1) 0.12s backwards;
+}
+
+body.folt-signin .page-card .page-card-body .form-label {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--folt-signin-ink);
+}
+
+body.folt-signin .page-card .page-card-body .form-label.folt-signin-required::after {
+  content: " *";
+  color: var(--ink-red-3);
+}
+
+/* THE FIELDS. Frosted like everything else but a shade denser than the panel, so a field
+   reads as a well cut into it rather than a hole. The text is the brand navy whole (15:1)
+   and the placeholder is the one thing on the page allowed under 4.5:1 -- it is not
+   essential text, the label above carries the field's name.
+
+   Fighting, all at (0,4,1) against these rules' (0,4,2):
+     `…page-card-body input[type=text],[type=email],[type=password]{border:1px solid
+      var(--outline-gray-2);height:28px;padding:6px 8px;border-radius:var(--border-radius-sm);
+      background-color:var(--surface-white);color:var(--text-color)}`
+     `…page-card-body .email-field input,.password-field input{padding-left:38px}`
+     `…page-card-body .password-field input{padding-right:38px}`
+   The last two are why padding is restated in full rather than left to a shorthand: each
+   of frappe's rules would otherwise keep its own side of it. */
+
+body.folt-signin .page-card .page-card-body input[type="text"],
+body.folt-signin .page-card .page-card-body input[type="email"],
+body.folt-signin .page-card .page-card-body input[type="password"] {
+  height: 48px;
+  padding: 12px 16px 12px 46px;
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  border-radius: 12px;
+  background-color: rgba(255, 255, 255, 0.72);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    0 2px 6px color-mix(in srgb, var(--folt-brand-navy) 5%, transparent);
+  color: var(--folt-brand-navy);
+  caret-color: var(--folt-brand-primary);
+  font-size: 15px;
+  transition: border-color 0.16s ease, background-color 0.16s ease, box-shadow 0.16s ease;
+}
+
+body.folt-signin .page-card .page-card-body .password-field input {
+  padding-right: 46px;
+}
+
+body.folt-signin .page-card .page-card-body input::placeholder {
+  color: var(--folt-signin-ink-quiet);
+  opacity: 1;
+}
+
+body.folt-signin .page-card .page-card-body input[type="text"]:hover,
+body.folt-signin .page-card .page-card-body input[type="email"]:hover,
+body.folt-signin .page-card .page-card-body input[type="password"]:hover {
+  background-color: rgba(255, 255, 255, 0.86);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    0 4px 12px color-mix(in srgb, var(--folt-brand-navy) 8%, transparent);
+}
+
+/* The focus ring is the brand blue at 22% around a solid blue border -- SC 1.4.11 wants
+   3:1 against what is adjacent, and the blue is 5.7:1 on this glass. --focus-default is
+   deliberately not used: folt_theme sets it to a hard 2px brand ring for the Desk's white
+   controls, and on a 12px frosted field a soft halo is the same signal at the right
+   weight. Drawn as a box-shadow rather than an outline so it follows the 12px corner. */
+
+body.folt-signin .page-card .page-card-body input[type="text"]:focus,
+body.folt-signin .page-card .page-card-body input[type="email"]:focus,
+body.folt-signin .page-card .page-card-body input[type="password"]:focus {
+  border-color: var(--folt-brand-primary);
+  background-color: #fff;
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--folt-brand-primary) 22%, transparent);
+  outline: none;
+}
+
+/* Chrome's autofill forces its own ground and text colour into a field and ignores
+   `background-color`. Only two things reach it -- an inset box-shadow big enough to cover
+   the field, and -webkit-text-fill-color -- so a saved password renders in the field's own
+   colours instead of the UA's pale blue. */
+
+body.folt-signin .page-card .page-card-body input:-webkit-autofill,
+body.folt-signin .page-card .page-card-body input:-webkit-autofill:hover,
+body.folt-signin .page-card .page-card-body input:-webkit-autofill:focus {
+  -webkit-text-fill-color: var(--folt-brand-navy);
+  -webkit-box-shadow: inset 0 0 0 100px #fff;
+  caret-color: var(--folt-brand-primary);
+}
+
+/* The two icons in each field, moved out to match the padding above and switched from
+   frappe's --ink-gray-4 (#999999, 2.3:1 on this glass) to the quiet ink.
+   frappe's `…page-card-body .field-icon{left:8px;fill:var(--ink-gray-4)}` and
+   `.password-field .toggle-password{right:9px}` are both (0,4,0). */
+
+body.folt-signin .page-card .page-card-body .field-icon {
+  left: 17px;
+  fill: var(--folt-signin-ink-quiet);
+  transition: fill 0.16s ease;
+}
+
+body.folt-signin .page-card .page-card-body .password-field .toggle-password {
+  right: 17px;
+  fill: var(--folt-signin-ink-quiet);
+  transition: fill 0.16s ease, transform 0.16s ease;
+}
+
+/* "Forgot password?", right-aligned under the field by frappe's own rule.
+   `…page-card-body .forgot-password-message>*{color:var(--ink-gray-5)}` is (0,4,1). */
+
+body.folt-signin .page-card .page-card-body .forgot-password-message > * {
+  font-size: 14px;
+  color: var(--folt-signin-ink);
+  text-underline-offset: 2px;
+  transition: color 0.16s ease, text-underline-offset 0.16s ease;
+}
+
+body.folt-signin .page-card .page-card-body .forgot-password-message > a:hover,
+body.folt-signin .page-card .page-card-body .forgot-password-message > a:focus {
+  color: var(--folt-brand-primary);
+}
+
+/* THE SIGN-IN BUTTON: the brand blue running into the page's aqua, which is the one place
+   on the page where a gradient is doing something other than atmosphere -- it is what makes
+   the primary action the brightest object in the panel. White on the blue end is 5.73:1 and
+   on the aqua end 5.26:1, so the label clears AA across the whole sweep rather than only in
+   the middle (this is why the aqua is #1f7a68 and not the brighter cyan of the design).
+
+   `.btn-login` is deliberately NOT given `btn-primary`, even though that would inherit the
+   Desk's brand colour for free: login.js's set_status() writes its progress and error
+   strings into `section:visible .btn-primary`, so adding the class would replace the
+   button's label with "Invalid credentials, try again." on a failed attempt -- while the
+   error banner above the fields says the same thing. Stock v16 avoids that by shipping the
+   login button as `btn-default`, and this file keeps that property and takes the colour.
+
+   `.btn-signup` is the same button on /update-password (frappe disables it until the two
+   passwords match, hence the :not(:disabled) pair, which is frappe's own shape at (0,5,0)).
+
+   Fighting `.for-login .page-card .page-card-actions .btn-login,.btn-ldap-login{…
+   background:var(--gray-900);padding:6px 8px;border-radius:var(--border-radius-sm)}`
+   (0,4,0) and its :hover/:focus/:active and :disabled variants (0,5,0). */
+
+body.folt-signin .page-card .page-card-actions {
+  gap: 14px;
+  animation: folt-signin-rise 0.6s cubic-bezier(0.16, 1, 0.3, 1) 0.16s backwards;
+}
+
+body.folt-signin .page-card .page-card-actions .btn-login,
+body.folt-signin .page-card .page-card-actions .btn-ldap-login,
+body.folt-signin .page-card .page-card-actions .btn-signup:not(:disabled) {
+  height: 50px;
+  padding: 12px 16px;
+  border: none;
+  border-radius: 12px;
+  background-color: var(--folt-brand-primary);
+  background-image: linear-gradient(
+    100deg,
+    var(--folt-brand-primary) 0%,
+    var(--folt-signin-aqua) 100%
+  );
+  color: #fff;
+  font-size: 16px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  box-shadow: 0 12px 26px color-mix(in srgb, var(--folt-brand-primary) 34%, transparent);
+  transition: box-shadow 0.16s ease, transform 0.16s ease, filter 0.16s ease;
+}
+
+/* `filter: brightness` rather than a second gradient: a gradient is not animatable, so the
+   hover state of a gradient button either swaps abruptly or has to be faked with a second
+   layer. Brightening the whole fill keeps the sweep intact and transitions cleanly.
+
+   THE GRADIENT IS RESTATED HERE, AND IT HAS TO BE. frappe's hover rule is
+   `.for-login .page-card .page-card-actions .btn-login:hover{background:var(--gray-800)}` --
+   the SHORTHAND, which resets `background-image` to none. It sits at (0,5,0), so it beats
+   this file's BASE rule at (0,4,1): with only `filter` and `box-shadow` declared here, the
+   button lost its gradient and turned frappe's near-black grey the moment the cursor
+   touched it (measured, not guessed -- getComputedStyle said rgb(56,56,56)). Any future
+   background property on this button needs restating in this rule for the same reason. */
+
+body.folt-signin .page-card .page-card-actions .btn-login:hover,
+body.folt-signin .page-card .page-card-actions .btn-login:focus,
+body.folt-signin .page-card .page-card-actions .btn-login:active,
+body.folt-signin .page-card .page-card-actions .btn-ldap-login:hover,
+body.folt-signin .page-card .page-card-actions .btn-ldap-login:focus,
+body.folt-signin .page-card .page-card-actions .btn-ldap-login:active,
+body.folt-signin .page-card .page-card-actions .btn-signup:not(:disabled):hover,
+body.folt-signin .page-card .page-card-actions .btn-signup:not(:disabled):focus,
+body.folt-signin .page-card .page-card-actions .btn-signup:not(:disabled):active {
+  background-color: var(--folt-brand-primary);
+  background-image: linear-gradient(
+    100deg,
+    var(--folt-brand-primary) 0%,
+    var(--folt-signin-aqua) 100%
+  );
+  color: #fff;
+  filter: brightness(1.08);
+  box-shadow: 0 18px 36px color-mix(in srgb, var(--folt-brand-primary) 42%, transparent);
+}
+
+/* Disabled is glass rather than a greyed-out gradient: "not yet" should look like part of
+   the panel, not like a button somebody switched off. */
+
+body.folt-signin .page-card .page-card-actions .btn-login:disabled,
+body.folt-signin .page-card .page-card-actions .btn-signup:disabled {
+  height: 50px;
+  padding: 12px 16px;
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  border-radius: 12px;
+  background-color: rgba(255, 255, 255, 0.5);
+  background-image: none;
+  color: var(--folt-signin-ink-quiet);
+  font-size: 16px;
+  font-weight: 500;
+  box-shadow: none;
+}
+
+/* The secondary routes out of the panel: "Login with Email Link" here, "Login with
+   password" on that section, and -- on a site that has configured Social Login Keys -- the
+   Google / Microsoft 365 / Frappe Cloud buttons frappe renders inside `.social-logins`.
+   Those buttons are NOT added here: a sign-in method that is not configured on the server
+   is a button that fails, so this file styles them for when they exist and invents none.
+   Same geometry as the primary so the group reads as one, white glass so it cannot compete.
+   `…page-card-actions .btn-login-option{…background:var(--gray-100);padding:6px 8px}`
+   is (0,4,0), its :hover (0,5,0). */
+
+body.folt-signin .page-card .page-card-actions .btn-login-option {
+  height: 50px;
+  padding: 12px 16px;
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  border-radius: 12px;
+  background-color: rgba(255, 255, 255, 0.72);
+  color: var(--folt-brand-navy);
+  font-size: 15px;
+  font-weight: 500;
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--folt-brand-navy) 8%, transparent);
+  transition: background-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
+}
+
+body.folt-signin .page-card .page-card-actions .btn-login-option:hover,
+body.folt-signin .page-card .page-card-actions .btn-login-option:focus {
+  border: 1px solid #fff;
+  background-color: #fff;
+  color: var(--folt-brand-navy);
+  box-shadow: 0 10px 24px color-mix(in srgb, var(--folt-brand-navy) 12%, transparent);
+}
+
+/* The keyboard hint under the buttons. Both nodes are ours, but `kbd` is a bootstrap
+   element selector (near-black ground, white text) at (0,0,1), so it has to be restated --
+   as a small glass chip. */
+
+body.folt-signin .folt-signin-hint {
+  margin: 2px 0 0;
+  text-align: center;
+  font-size: 13px;
+  color: var(--folt-signin-ink);
+}
+
+body.folt-signin .folt-signin-hint kbd {
+  padding: 3px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  border-radius: 8px;
+  background-color: rgba(255, 255, 255, 0.8);
+  color: var(--folt-brand-navy);
+  box-shadow: 0 2px 4px color-mix(in srgb, var(--folt-brand-navy) 8%, transparent);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+/* The banners and the field errors keep frappe's semantic reds: a light red chip with dark
+   red text, which is exactly right on a light panel, and a login failure is the one moment
+   on this page where a colour is carrying information. Only the box changes.
+   `display` is not restated -- login.js is what shows them. */
+
+body.folt-signin .page-card .page-card-body .login-error-banner,
+body.folt-signin .page-card .page-card-body .login-success-banner {
+  padding: 10px 12px;
+  border-radius: 12px;
+}
+
+body.folt-signin .page-card .page-card-body .field-error {
+  font-size: 13px;
+}
+
+/* THE 2FA STEP, which is not in any template: on a site with two-factor enabled, login.js
+   EMPTIES `.login-content` and appends `#twofactor_div` -- a card head, a bare
+   `input.form-control` and a `.btn-primary.btn-block`. Neither node is inside
+   `.page-card-body`, so nothing above reaches them and they would render as a 32px white
+   field and a flat blue button in the middle of a glass panel. */
+
+body.folt-signin #twofactor_div input.form-control {
+  height: 48px;
+  padding: 12px 16px;
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  border-radius: 12px;
+  background-color: rgba(255, 255, 255, 0.72);
+  color: var(--folt-brand-navy);
+  font-size: 15px;
+}
+
+body.folt-signin #twofactor_div input.form-control:focus {
+  border-color: var(--folt-brand-primary);
+  background-color: #fff;
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--folt-brand-primary) 22%, transparent);
+}
+
+body.folt-signin #twofactor_div .btn-primary {
+  height: 50px;
+  border-radius: 12px;
+  background-image: linear-gradient(
+    100deg,
+    var(--folt-brand-primary) 0%,
+    var(--folt-signin-aqua) 100%
+  );
+  color: #fff;
+  font-size: 16px;
+  font-weight: 500;
+}
+
+/* Frappe's own "Back to sign in" / "Don't have an account?" line, at --ink-gray-6 by
+   default. `.for-login .sign-up-message` is (0,2,0). */
+
+body.folt-signin .sign-up-message {
+  color: var(--folt-signin-ink);
+}
+
+body.folt-signin .sign-up-message a {
+  color: var(--folt-brand-primary);
+}
+
+/* ═══ 3c. THE SET-PASSWORD PAGE'S OWN NODES ═══════════════════════════════════════════
+
+   /update-password shares the panel, so everything above already reaches it. Its own five
+   nodes are all coloured by frappe for a white card, and on this light glass they are fine
+   as they stand -- --ink-gray-5 body copy is 5.2:1 here, the strength labels are the dark
+   ends of frappe's ramps, and the bar's track is a light grey. The two exceptions are the
+   hint's grey, which is quieter than every other string on the page for no reason, and the
+   two boxes' corners.
+   `.for-reset-password .password-hint` is (0,2,0); with the body prefix this is (0,2,1). */
+
+body.folt-signin .password-hint,
+body.folt-signin .password-strength-message {
+  color: var(--folt-signin-ink);
+}
+
+body.folt-signin .password-hint svg {
+  fill: var(--folt-signin-ink-quiet);
+}
+
+body.folt-signin .password-strength-bar-track {
+  border-radius: 999px;
+}
+
+/* ═══ 3b. MOTION — what moves, when, and the three traps in doing it ══════════════════
+
+   Two kinds of motion, and nothing else on the page moves:
+
+     AMBIENT  the three washes in section 1. 26-38s cycles, `alternate`, transform only,
+              behind the glass, pointer-events: none. Slow enough to read as depth rather
+              than as animation, and with no loop point to notice.
+     RESPONSE the entrance rise (600ms, one shot, staggered 0-180ms down the page) and the
+              hover states below. Each is feedback for something that just happened -- a
+              page opening, a cursor arriving.
+
+   No spinner, no pulse, no parallax, no auto-advancing anything. A sign-in screen is a
+   doorway.
+
+   TRAP 1 -- `transform` IS A SINGLE PROPERTY, AND FRAPPE IS ALREADY USING IT. The field
+   icons and the eye are centred with `transform: translateY(-50%)` (login.bundle.css). A
+   hover rule that sets `transform: scale(...)` REPLACES that and drops the icon to the
+   bottom of the field. So the centring is restated in every rule that touches it -- here
+   and in the reduced-motion block, where `transform: none` would do the same damage.
+
+   TRAP 2 -- animation-fill-mode: `backwards`, NEVER `forwards` or `both`. A filled-forwards
+   animation keeps applying its last keyframe FOR EVER, and animated values beat normal
+   declarations in the cascade -- so `to { transform: none }` would win against every
+   `:hover { transform: translateY(-2px) }` in this file and silently kill the hover lift on
+   the plate. `backwards` fills only the delay, which is all the stagger needs; after the
+   run the element keeps its own styles again.
+
+   TRAP 3 -- THE ENTRANCE MUST NOT LAND ON `.page-card` ITSELF. frappe animates that exact
+   element on a failed login (`.invalid-login` -> a wiggle), and an `animation` on it here
+   at (0,2,1) would outrank frappe's (0,2,0) and swallow the shake. The rise is applied to
+   the card's three CHILDREN instead, which also gives the stagger something to stagger.
+
+   All of it is switched off under prefers-reduced-motion at the end of this section
+   (SC 2.3.3): the ambient washes stop, the entrance does not run, the hover transforms
+   become nothing. The colour changes stay, so hover still gives feedback with no
+   movement. */
+
+@keyframes folt-signin-rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+body.folt-signin .folt-signin-plate:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 20px 42px color-mix(in srgb, var(--folt-brand-navy) 18%, transparent);
+}
+
+/* The lift on the buttons, and the press that undoes it. `:active` sits AFTER the hover
+   rule and matches at the same specificity, so a button settles back onto the page under
+   the cursor rather than staying up while it is held down. */
+
+body.folt-signin .page-card .page-card-actions .btn-login:hover,
+body.folt-signin .page-card .page-card-actions .btn-login:focus,
+body.folt-signin .page-card .page-card-actions .btn-ldap-login:hover,
+body.folt-signin .page-card .page-card-actions .btn-ldap-login:focus,
+body.folt-signin .page-card .page-card-actions .btn-signup:not(:disabled):hover,
+body.folt-signin .page-card .page-card-actions .btn-signup:not(:disabled):focus,
+body.folt-signin .page-card .page-card-actions .btn-login-option:hover,
+body.folt-signin .page-card .page-card-actions .btn-login-option:focus {
+  transform: translateY(-2px);
+}
+
+body.folt-signin .page-card .page-card-actions .btn-login:active,
+body.folt-signin .page-card .page-card-actions .btn-ldap-login:active,
+body.folt-signin .page-card .page-card-actions .btn-signup:not(:disabled):active,
+body.folt-signin .page-card .page-card-actions .btn-login-option:active {
+  transform: translateY(0);
+}
+
+/* The field answers the pointer before it is clicked into: the icon darkens on hover and
+   on focus-within, which is the only cue that the whole 48px box is the target rather than
+   just the text. (0,6,1) against frappe's `.field-icon` at (0,4,0). */
+
+body.folt-signin .page-card .page-card-body .email-field:hover .field-icon,
+body.folt-signin .page-card .page-card-body .email-field:focus-within .field-icon,
+body.folt-signin .page-card .page-card-body .password-field:hover .field-icon,
+body.folt-signin .page-card .page-card-body .password-field:focus-within .field-icon {
+  fill: var(--folt-brand-primary);
+}
+
+/* The eye. translateY(-50%) is restated because scale() alone would replace it -- trap 1. */
+
+body.folt-signin .page-card .page-card-body .password-field .toggle-password:hover {
+  fill: var(--folt-brand-primary);
+  transform: translateY(-50%) scale(1.14);
+}
+
+body.folt-signin .page-card .page-card-body .password-field .toggle-password:active {
+  transform: translateY(-50%) scale(1);
+}
+
+/* "Forgot password?" -- the underline drops away from the text rather than the text moving,
+   so nothing shifts around it. */
+
+body.folt-signin .page-card .page-card-body .forgot-password-message > a:hover,
+body.folt-signin .page-card .page-card-body .forgot-password-message > a:focus {
+  text-underline-offset: 4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body.folt-signin .page_content::before,
+  body.folt-signin .page_content::after,
+  body.folt-signin .folt-signin-brand::after,
+  body.folt-signin .folt-signin-top,
+  body.folt-signin .folt-signin-brand-inner,
+  body.folt-signin .folt-signin-foot,
+  body.folt-signin .page-card-head,
+  body.folt-signin .page-card .page-card-body,
+  body.folt-signin .page-card .page-card-actions {
+    animation: none;
+  }
+
+  body.folt-signin .folt-signin-plate,
+  body.folt-signin .folt-signin-foot a,
+  body.folt-signin .page-card .page-card-body input[type="text"],
+  body.folt-signin .page-card .page-card-body input[type="email"],
+  body.folt-signin .page-card .page-card-body input[type="password"],
+  body.folt-signin .page-card .page-card-body .field-icon,
+  body.folt-signin .page-card .page-card-body .password-field .toggle-password,
+  body.folt-signin .page-card .page-card-body .forgot-password-message > *,
+  body.folt-signin .page-card .page-card-actions .btn-login,
+  body.folt-signin .page-card .page-card-actions .btn-ldap-login,
+  body.folt-signin .page-card .page-card-actions .btn-signup,
+  body.folt-signin .page-card .page-card-actions .btn-login-option {
+    transition: none;
+  }
+
+  body.folt-signin .folt-signin-plate:hover,
+  body.folt-signin .page-card .page-card-actions .btn-login:hover,
+  body.folt-signin .page-card .page-card-actions .btn-login:focus,
+  body.folt-signin .page-card .page-card-actions .btn-login:active,
+  body.folt-signin .page-card .page-card-actions .btn-ldap-login:hover,
+  body.folt-signin .page-card .page-card-actions .btn-ldap-login:focus,
+  body.folt-signin .page-card .page-card-actions .btn-ldap-login:active,
+  body.folt-signin .page-card .page-card-actions .btn-signup:not(:disabled):hover,
+  body.folt-signin .page-card .page-card-actions .btn-signup:not(:disabled):focus,
+  body.folt-signin .page-card .page-card-actions .btn-signup:not(:disabled):active,
+  body.folt-signin .page-card .page-card-actions .btn-login-option:hover,
+  body.folt-signin .page-card .page-card-actions .btn-login-option:focus,
+  body.folt-signin .page-card .page-card-actions .btn-login-option:active {
+    transform: none;
+  }
+
+  /* NOT `transform: none` -- these two are positioned by their transform (trap 1). */
+  body.folt-signin .page-card .page-card-body .password-field .toggle-password:hover,
+  body.folt-signin .page-card .page-card-body .password-field .toggle-password:active {
+    transform: translateY(-50%);
+  }
+}
+
+/* ═══ 4. NARROW SCREENS ═══════════════════════════════════════════════════════════════
+
+   One breakpoint, at the width where the two columns stop leaving the form a usable one.
+   The panels stack and the brand panel becomes a header rather than disappearing: the logo
+   and the promise are what tell a user which system they are signing in to, and the support
+   line is what they need if they cannot. The lede, the rule and the status pill are what
+   get dropped -- on a phone they push the password field below the fold, which is a worse
+   outcome than a shorter promise.
+
+   These selectors are the same shape as their base rules, so they win inside the media
+   query for the same reason and would win outside it too. */
+
+@media (max-width: 900px) {
+  body.folt-signin .page_content {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 16px;
+    padding: 16px;
+    min-height: 0;
+  }
+
+  body.folt-signin .folt-signin-brand {
+    padding: 26px 24px 24px;
+    border-radius: 20px;
+  }
+
+  body.folt-signin .folt-signin-brand-inner {
+    margin: 0;
+    max-width: none;
+  }
+
+  body.folt-signin .folt-signin-plate img.app-logo {
+    height: 40px;
+  }
+
+  body.folt-signin .folt-signin-status,
+  body.folt-signin .folt-signin-lede,
+  body.folt-signin .folt-signin-rule {
+    display: none;
+  }
+
+  body.folt-signin .folt-signin-tag {
+    margin-top: 22px;
+    margin-bottom: 16px;
+  }
+
+  body.folt-signin .folt-signin-headline {
+    font-size: 26px;
+  }
+
+  body.folt-signin .folt-signin-foot {
+    margin-top: 22px;
+    font-size: 12px;
+  }
+
+  body.folt-signin .folt-signin-pane {
+    padding: 32px 20px 40px;
+    border-radius: 20px;
+  }
+
+  body.folt-signin .page-card {
+    max-width: 440px;
+  }
+
+  body.folt-signin .page-card-head h4 {
+    font-size: 26px;
+  }
+}
+
+/* ═══ 5. TURNING IT OFF ═══════════════════════════════════════════════════════════════
+
+   Two levers, in increasing order of blast radius:
+
+     * Remove `folt_login.js` from `web_include_js` in hooks.py. Nothing sets
+       `folt-signin` on <body>, every rule in this file stops matching, and /login is
+       frappe's own page in FoLT's typeface and colour. The stylesheet can stay listed.
+     * Remove both files from hooks.py for the stock v16 login page plus folt_theme.
+
+   Neither needs a rebuild: both files are plain assets under public/, so a `docker cp`
+   into a running container is enough (`bench build` is only for `.bundle.*` entries).
+   There is no runtime kill switch inside the file itself. */

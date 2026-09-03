@@ -13,7 +13,7 @@ app_license = "MIT"
 # the public website brand, favicon and the loading splash.
 app_logo_url = "/assets/folt_customizations/images/folt-logo.svg"
 
-# The website/portal half of the stylesheet set. Three files, and the order is load-bearing:
+# The website/portal half of the stylesheet set. Four files, and the order is load-bearing:
 #
 #   folt_theme.css   the SAME file the Desk loads (see app_include_css below). Every token it
 #                    sets -- --primary, --primary-color, --btn-primary, --heading-color,
@@ -26,13 +26,46 @@ app_logo_url = "/assets/folt_customizations/images/folt-logo.svg"
 #                    once for both.
 #   folt_portal.css  the supplier-portal components (the RFQ pricing page) plus a short,
 #                    enumerated set of rules for frappe's portal chrome.
+#   folt_login.css   the sign-in page: /login and /update-password as a two-column screen,
+#                    brand panel beside the form. The ONE file here whose position in this
+#                    list buys it nothing -- login.html emits login.bundle.css from its
+#                    `head_include` block, which base.html renders AFTER this whole loop, so
+#                    that file loads last on those two pages whatever we do. It wins on
+#                    specificity instead (every selector in it is prefixed `body.folt-signin`)
+#                    and needs its companion script to switch on: see web_include_js.
 #   folt_branding.css  the logo rules. LAST on purpose: its own comment says it is the last
 #                    stylesheet the website loads, which is why its navbar rule needs no
-#                    !important. Keep it there so that stays true.
+#                    !important. Keep it there so that stays true -- folt_login.css goes
+#                    ABOVE it for that reason, and cannot lose by sitting there: the two
+#                    collide on nothing, and folt_login.css out-specifies it anyway.
 web_include_css = [
     "/assets/folt_customizations/css/folt_theme.css",
     "/assets/folt_customizations/css/folt_portal.css",
+    "/assets/folt_customizations/css/folt_login.css",
     "/assets/folt_customizations/css/folt_branding.css",
+]
+
+# The sign-in page's DOM: the brand panel, the required-field markers, the greeting and the
+# keyboard hint. Website counterpart of app_include_js below, and a plain path for the same
+# reason -- anything without ".bundle." is passed through untouched, so no build step.
+#
+# WHY THIS IS A SCRIPT RATHER THAN A TEMPLATE. www/login.html and www/login.py are a pair,
+# and an app can shadow the template but not the controller that fills its context -- so
+# owning the markup means owning frappe's login logic, 2FA and reset-password routes
+# included. folt_login.js adds four nodes to the page frappe renders and changes no id, no
+# handler and no field. It is also the switch for folt_login.css: the stylesheet does
+# nothing until this script has put `folt-signin` on <body>, and the script bails out on any
+# markup it does not recognise -- so a future frappe template this file cannot read leaves
+# the STOCK login page in FoLT's typeface and colour rather than a broken one.
+#
+# base.html emits this loop in <body> BEFORE the template's own `script` block, i.e. before
+# login.js binds anything, and the script runs synchronously at that point -- which is what
+# keeps the stock card from flashing before the panel appears.
+#
+# It is included on every website page (there is no login-only include hook) and returns
+# immediately on all of them; the cost is one small cached file on the supplier portal.
+web_include_js = [
+    "/assets/folt_customizations/js/folt_login.js",
 ]
 
 # Same job for outgoing email: frappe inlines every `email_css` file into the message body

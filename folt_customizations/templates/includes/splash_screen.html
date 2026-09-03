@@ -1,0 +1,75 @@
+{#-
+  The loading splash: FoLT's animated emblem with the organisation's name beside it.
+
+  THIS FILE SHADOWS frappe/templates/includes/splash_screen.html, and that is safe here for
+  the one reason it is NOT safe for login.html: frappe's splash is four lines of markup with
+  a single context variable (`splash_image`, which hooks.py's website_context sets to
+  folt-emblem-animated.svg) and no controller behind it. login.html, by contrast, is
+  inseparable from www/login.py -- see the header of public/js/folt_login.js for why that
+  page is enhanced with a script instead of being shadowed like this one.
+
+  WHY THE SHADOW WORKS AT ALL: frappe/utils/jinja.py:193 builds the loader from
+  `reversed(frappe.get_installed_apps())`, and folt_customizations is last in that list --
+  so this app's templates/ is searched FIRST and wins. Nothing in hooks.py declares it; the
+  file's path is the whole registration. Rename it and frappe's own splash returns silently,
+  which is also the revert.
+
+  BOTH SURFACES GET IT, and they arrive by different routes:
+    www/desk.html:37       renders it into the page and desk.js removes it once boot
+                           finishes -- roughly half a second, the FoLT-branded half of
+                           every Desk load.
+    login/login.js:277     assigns it to `document.body.innerHTML` after a successful
+                           sign-in, i.e. it is the last thing a person sees on the sign-in
+                           page and the first thing they see of the Desk.
+
+  The login path is why the styling is INLINE rather than in a stylesheet. That path
+  replaces the whole body, and it is JS inside a Jinja-rendered template literal -- so the
+  markup here must carry its own layout, must contain no backtick and no ${, and cannot
+  rely on a class defined in a file whose load order it does not control. frappe made the
+  same call for the same reason: its own version inline-styles the <img>.
+
+  THE WIDTH AND HEIGHT ON THE ASSET ARE LOAD-BEARING. `.centered` is position:absolute
+  (scss/common/global.scss:137), i.e. shrink-to-fit, and an SVG with only a viewBox has no
+  intrinsic size and renders at 0x0 in that box -- which is how the splash showed nothing at
+  all before folt-emblem-animated.svg gained width="328" height="429". Setting a height
+  here and leaving width:auto follows that intrinsic ratio; see branding.py's SPLASH note.
+
+  THE TEXT COLOUR IS --text-color WITH THE BRAND NAVY BEHIND IT, and both halves of that
+  are load-bearing.
+
+  --text-color first, because the Desk splash renders under data-theme="dark" for a
+  dark-mode user and #001a33 on frappe's #171717 ground is 1.28:1 -- the same reason
+  folt_theme.css section 4 deliberately does not carry --heading-color into dark. frappe's
+  token is dark in light (#383838) and light in dark (#f8f8f8), so one declaration is
+  legible in both.
+
+  --folt-brand-navy as the FALLBACK, because --text-color IS A DESK TOKEN AND THE WEBSITE
+  DOES NOT DECLARE IT. That is measured, not assumed: on the sign-in page this span computed
+  to rgb(0,0,0), which is what an unresolvable var() in an inherited property does -- it
+  falls back to the parent's colour, not to anything chosen. Black is legible on the splash
+  and so the bug would have shipped looking fine, with the login hand-off in plain black and
+  the Desk boot in #383838 one navigation apart. folt_theme.css section 1 declares
+  --folt-brand-navy on a bare :root, which reaches BOTH surfaces, so the fallback resolves
+  where the token does not -- and on the Desk, where --text-color exists, it is never used.
+
+  --font-stack is Lexend on both surfaces (folt_theme.css section 2), and a custom property
+  resolves in an inline style just as it does in a rule.
+
+  THE MARK IS SIZED WITH A clamp(), not a fixed height, because this is the only
+  full-viewport element in the product: one number that looks right on a 27-inch display
+  dwarfs a phone, and one that suits a phone is lost on the display. 20vh with a 132px floor
+  and a 180px ceiling means the mark is as large as the viewport can carry -- 180px on any
+  desktop, ~156px on a phone -- and never taller than the text block beside it can balance.
+
+  No white-space:nowrap: on a narrow phone the name wraps beside the mark, which is better
+  than a lockup wider than the screen.
+-#}
+<div class="centered splash">
+	<div style="display: flex; align-items: center; gap: 18px; max-width: calc(100vw - 48px);">
+		<img src="{{ splash_image or "/assets/frappe/images/frappe-framework-logo.svg" }}"
+			alt="" style="height: clamp(132px, 20vh, 180px); width: auto; flex: 0 0 auto;">
+		<span style="font-family: var(--font-stack); font-size: 24px; font-weight: 600;
+			line-height: 1.25; letter-spacing: -0.01em; color: var(--text-color, var(--folt-brand-navy));">
+			{{ _("Friends of Lake Turkana") }}</span>
+	</div>
+</div>

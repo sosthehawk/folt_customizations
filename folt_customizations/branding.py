@@ -1,3 +1,5 @@
+import json
+
 import frappe
 
 # FoLT brand assets, served from this app's public/ dir.
@@ -171,6 +173,10 @@ NAVBAR_BRANDING = {
 # DESKTOP_ICON_LOGOS (keyed by docname, which the rename leaves as "Framework"); after the
 # rename the sidebar-header cascade no longer finds frappe's own framework.svg by label and
 # falls through to that logo_url, which is what we want.
+#
+# Renaming the row is only half the job, and the other half is invisible: a user who has ever
+# rearranged their /desk grid reads their labels out of a frozen per-user snapshot instead, and
+# no rename applied here ever reaches them. See _refresh_saved_layouts().
 DESKTOP_ICON_LABELS = {
     "Frappe HR": "FoLT HR",
     "ERPNext": "FoLT ERP",
@@ -262,6 +268,7 @@ def apply_branding():
     changed |= _apply_single("System Settings", SYSTEM_BRANDING)
     changed |= _apply_single("Navbar Settings", NAVBAR_BRANDING)
     changed |= _apply_desktop_icons()
+    changed |= _refresh_saved_layouts()
     changed |= _hide_navbar_items()
     changed |= _apply_email_brand_logo()
     changed |= _apply_email_footer()
@@ -484,6 +491,129 @@ def _apply_desktop_icons():
     return changed | _reparent_desktop_icons()
 
 
+def _renamed_labels():
+    """Desktop Icon docname -> the label FoLT gives it, for every icon we re-label.
+
+    For a standard icon the docname IS the label the shipping app gave it, which is what makes
+    this both the rename map and the old-label -> new-label map that the reparenting and the
+    saved-layout rewrite below need. Both sources of renames are folded in, so nothing that
+    renames an icon can be applied to the icon and forgotten everywhere else.
+    """
+    renames = dict(DESKTOP_ICON_LABELS)
+    for name, values in RELINKED_DESKTOP_ICONS.items():
+        if values.get("label"):
+            renames[name] = values["label"]
+    return renames
+
+
+# The fields of a saved /desk layout row that belong to the Desktop Icon rather than to the
+# arrangement. Everything else in the row -- idx, hidden, the folder an icon was dragged into --
+# is the user's own decision and is left exactly as they left it.
+LAYOUT_ICON_FIELDS = ("label", "logo_url", "link_to")
+
+
+def _refresh_saved_layouts():
+    """Re-apply the renames inside each user's saved /desk layout.
+
+    WHY THIS IS NEEDED AT ALL, because renaming the Desktop Icon looks like the whole job.
+    frappe v16 stores the /desk grid per user as a **Desktop Layout**: one JSON snapshot of the
+    icon rows, written by desktop_layout.save_layout the first time that user drags a tile,
+    creates a folder or hides one. desktop.py:17 hands it to the page and
+    desktop.js:sync_layout() then prefers it outright:
+
+        if (Object.keys(this.data).length != 0) frappe.desktop_icons = this.data;
+        else                                    frappe.desktop_icons = frappe.boot.desktop_icons;
+
+    So for anybody who has ever touched their layout, `frappe.boot.desktop_icons` -- the live
+    rows _apply_desktop_icons() maintains -- is never read again. The snapshot carries its own
+    `label`, and the tile renders `icon_data.label`, so the wording is frozen at whatever it was
+    on the day that user rearranged their Desk. That is why staging kept showing "Framework" and
+    "ERPNext Settings" long after the rename was applied, on a site whose Desktop Icon rows were
+    correct all along: the labels were right, and nothing was reading them.
+
+    It also freezes `parent_icon`, which is matched against the parent's *label* -- so a snapshot
+    taken before a folder was renamed loses its children (desktop.js:prepare() pushes an icon
+    whose `icon_map[parent_icon]` misses straight into the top-level grid). Remapping the old
+    label to the new one puts them back in the folder.
+
+    Deliberately a rewrite rather than a delete. Dropping the Desktop Layout row would also fix
+    the wording -- the page would fall back to boot.desktop_icons -- and would throw away every
+    arrangement decision the user has made: their tile order, their folders, the modules they
+    hid. Only the fields that describe the *icon* are re-read from the live row; the arrangement
+    is untouched.
+
+    Scoped to the icons this module re-labels, so a layout is rewritten for FoLT's renames and
+    for nothing else. Idempotent: a layout already in step is not written, so a second run is a
+    no-op.
+    """
+    renames = _renamed_labels()
+    live = {}
+    for name in set(renames) | set(DESKTOP_ICON_LOGOS):
+        row = frappe.db.get_value("Desktop Icon", name, LAYOUT_ICON_FIELDS, as_dict=True)
+        if row:
+            live[name] = row
+    if not live:
+        return False
+
+    changed = False
+    for name in frappe.get_all("Desktop Layout", pluck="name"):
+        stored = frappe.db.get_value("Desktop Layout", name, "layout")
+        if not stored:
+            continue
+        try:
+            layout = json.loads(stored)
+        except ValueError:
+            # A layout we cannot read is a layout we must not overwrite: the user's arrangement
+            # is in there, and replacing it with our own guess is worse than leaving the wording
+            # stale. Their next rearrange rewrites it from the live rows anyway.
+            continue
+        if not isinstance(layout, list):
+            continue
+        if not _refresh_layout_icons(layout, live, renames):
+            continue
+        frappe.db.set_value(
+            "Desktop Layout", name, "layout", json.dumps(layout), update_modified=False
+        )
+        changed = True
+
+    return changed
+
+
+def _refresh_layout_icons(icons, live, renames):
+    """Re-read the icon fields of one saved layout from the live rows. True if anything moved.
+
+    Recurses through `child_icons`, the copy of a folder's contents that the client writes back
+    alongside the flat list. desktop.js:prepare() rebuilds that list from `parent_icon` on every
+    render, so a stale nested copy changes nothing on screen -- it is rewritten so that the
+    stored document does not disagree with itself, which is the sort of thing that costs an hour
+    the next time somebody reads one of these by hand.
+    """
+    changed = False
+    for icon in icons:
+        if not isinstance(icon, dict):
+            continue
+
+        row = live.get(icon.get("name"))
+        if row:
+            for field in LAYOUT_ICON_FIELDS:
+                # A None from the live row is "this icon has no such value" (link_to is NULL on
+                # every App tile), not an instruction to clear what the layout holds.
+                if row.get(field) is not None and icon.get(field) != row[field]:
+                    icon[field] = row[field]
+                    changed = True
+
+        parent = renames.get(icon.get("parent_icon"))
+        if parent and icon.get("parent_icon") != parent:
+            icon["parent_icon"] = parent
+            changed = True
+
+        nested = icon.get("child_icons")
+        if isinstance(nested, list) and _refresh_layout_icons(nested, live, renames):
+            changed = True
+
+    return changed
+
+
 def _reparent_desktop_icons():
     """Re-point child icons at their parent's new label after a rename.
 
@@ -500,7 +630,7 @@ def _reparent_desktop_icons():
     and migrate resets both fields together so the pair is always re-applied as a unit.
     """
     changed = False
-    for old_label, new_label in DESKTOP_ICON_LABELS.items():
+    for old_label, new_label in _renamed_labels().items():
         for child in frappe.get_all(
             "Desktop Icon", filters={"parent_icon": old_label}, pluck="name"
         ):

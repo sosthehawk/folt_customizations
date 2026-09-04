@@ -154,8 +154,8 @@ body.folt-signin .page-footer {
   display: none;
 }
 
-/* THE TWO PANELS SIT ON THE PAGE, so the grid is padded rather than full-bleed: 28px of
-   the luminous ground shows all the way round, and 24px between the panels. `.page_content`
+/* THE TWO PANELS SIT ON THE PAGE, so the grid is padded rather than full-bleed: 8px of
+   the luminous ground shows all the way round, and 6px between the panels. `.page_content`
    holds exactly two children once folt_login.js has run -- the brand panel it inserted, and
    the <div> wrapping frappe's six sections, which it tags `folt-signin-pane`.
 
@@ -172,8 +172,8 @@ body.folt-signin .page_content {
   overflow: hidden;
   display: grid;
   grid-template-columns: minmax(0, 1.02fr) minmax(0, 1fr);
-  gap: 24px;
-  padding: 28px;
+  gap: 6px;
+  padding: 8px;
   box-sizing: border-box;
   min-height: 100vh;
   min-height: 100svh;
@@ -342,7 +342,7 @@ body.folt-signin .folt-signin-top {
 body.folt-signin .folt-signin-plate {
   display: inline-flex;
   align-items: center;
-  padding: 12px 18px;
+  padding: 16px 22px;
   border: 1px solid rgba(255, 255, 255, 0.9);
   border-radius: 18px;
   background-color: #fff;
@@ -350,14 +350,15 @@ body.folt-signin .folt-signin-plate {
   transition: transform 0.25s ease, box-shadow 0.25s ease;
 }
 
-/* 46px: folt-logo.svg is a 1084x413 lockup whose "FRIENDS of LAKE TURKANA" sits on two
-   lines, so the readable height is a third of the asset's. Below ~40px the second line
-   stops being legible on a 1x display -- which is the whole point of putting the logo
-   here. */
+/* 72px: folt-logo.svg is a 1084x413 lockup whose "FRIENDS of LAKE TURKANA" sits on two
+   lines, so the readable height is a third of the asset's -- at 72px that second line is
+   ~24px tall and reads as a wordmark rather than as texture. The height is what drives the
+   plate: `width: auto` on a 2.63:1 lockup makes it ~189px wide, and the top row wraps at
+   `flex-wrap: wrap` if it ever stops fitting beside the status pill. */
 
 body.folt-signin .folt-signin-plate img.app-logo {
   display: block;
-  height: 46px;
+  height: 72px;
   width: auto;
   max-height: none;
   max-width: 100%;
@@ -411,7 +412,7 @@ body.folt-signin .folt-signin-tag-check {
 body.folt-signin .folt-signin-brand-inner {
   position: relative;
   margin: auto 0;
-  max-width: 30rem;
+  max-width: 40rem;
   animation: folt-signin-rise 0.6s cubic-bezier(0.16, 1, 0.3, 1) 0.06s backwards;
 }
 
@@ -449,7 +450,7 @@ body.folt-signin .folt-signin-headline span {
 
 body.folt-signin .folt-signin-lede {
   margin: 20px 0 0;
-  max-width: 40ch;
+  max-width: 56ch;
   font-size: 16px;
   line-height: 1.65;
   color: var(--folt-signin-ink);
@@ -498,11 +499,25 @@ body.folt-signin .folt-signin-foot a:focus {
    centres whichever one is showing and the hidden siblings contribute nothing to a flex
    layout. */
 
+/* GRID, NOT FLEX, for one reason: a flex item with `width: auto` is shrink-to-fit, so the
+   visible <section> would size to its content and nothing wider -- `.page-card`'s own
+   `width: 100%` would then resolve against a box only as wide as the longest input's
+   intrinsic width, and its `max-width` would never get to bind. Raising that number alone
+   does nothing. A grid item, by contrast, stretches to its track by default, so the card
+   gets the panel's full content box to grow into and its cap is what decides the width.
+
+   The single track is `minmax(0, 1fr)` for the same reason as the outer grid: without the
+   0 floor, min-content sets a width the track cannot go below. `align-content: center`
+   centres the row rather than stretching it, which is what `align-items: center` did here
+   before -- and neither this rule nor any other in this file names a <section>, so the
+   inline `display` login.js writes to toggle them stays the only thing that owns it. */
+
 body.folt-signin .folt-signin-pane {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 48px 40px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: center;
+  justify-items: stretch;
+  padding: 48px 28px;
 }
 
 /* Fighting `.for-login .page-card,…{padding:24px;background-color:var(--bg-color);
@@ -513,7 +528,7 @@ body.folt-signin .folt-signin-pane {
    already outranks both. */
 
 body.folt-signin .page-card {
-  max-width: 432px;
+  max-width: 520px;
   min-height: 0;
   padding: 0;
   border: none;
@@ -1112,7 +1127,7 @@ body.folt-signin .page-card .page-card-body .forgot-password-message > a:focus {
   }
 
   body.folt-signin .folt-signin-plate img.app-logo {
-    height: 40px;
+    height: 54px;
   }
 
   body.folt-signin .folt-signin-status,

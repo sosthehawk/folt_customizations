@@ -3,7 +3,9 @@ from frappe import _
 from frappe.model.document import Document
 from frappe.utils import flt
 
+from folt_customizations.float_lifecycle import FUNDED_FLOAT_STATES
 from folt_customizations.participants import (
+	ACKNOWLEDGED_FORMS as ACKNOWLEDGED,
 	RATE_COMPONENTS,
 	check_duplicates,
 	get_rate_schedule,
@@ -11,7 +13,6 @@ from folt_customizations.participants import (
 	normalise_mobile,
 )
 
-ACKNOWLEDGED = ("Signature", "Thumbprint")
 UNRESOLVED = (None, "", "Pending")
 
 # The state the list reaches once the payout is complete. Step 3 of the finance workflow --
@@ -32,12 +33,35 @@ class ParticipantReimbursementList(Document):
 	def validate(self):
 		self.set_activity_from_advance()
 		self.validate_register_project()
+		self.validate_register_not_already_used()
 		self.normalise_rows()
 		check_duplicates(self.participants or [], _("reimbursement list"))
 		self.validate_rows_against_register()
 		self.apply_rate_basis()
 		self.set_totals()
 		self.validate_against_advance()
+		self.warn_about_sibling_drafts()
+
+	def warn_about_sibling_drafts(self):
+		"""Say that another draft is open on the same register, without blocking this save."""
+		drafts = [row for row in self._other_lists_on_register() if row.docstatus == 0]
+		if not drafts:
+			return
+
+		frappe.msgprint(
+			_(
+				"Another draft list is open on register {0}: {1}. Only one of them can be approved — "
+				"finish this one and delete the other."
+			).format(
+				frappe.bold(self.attendance_reference),
+				", ".join(
+					frappe.utils.get_link_to_form("Participant Reimbursement List", row.name)
+					for row in drafts
+				),
+			),
+			title=_("Another draft on this register"),
+			indicator="orange",
+		)
 
 	def before_update_after_submit(self):
 		"""Payouts are recorded against an approved list, so the paid roll-up and the
@@ -87,6 +111,24 @@ class ParticipantReimbursementList(Document):
 	def before_submit(self):
 		if not self.participants:
 			frappe.throw(_("A reimbursement list cannot be approved with no participants."))
+
+		# The other half of validate_register_not_already_used. By now this list is about to
+		# become a payment instruction, so a sibling in any state at all is one too many.
+		others = self._other_lists_on_register()
+		if others:
+			frappe.throw(
+				_(
+					"Register {0} is also on {1}. Two lists off one register pay every attendee twice — "
+					"delete or cancel the other one, or move its payees onto this list, before approving."
+				).format(
+					frappe.bold(self.attendance_reference),
+					", ".join(
+						frappe.utils.get_link_to_form("Participant Reimbursement List", row.name)
+						for row in others
+					),
+				),
+				title=_("Two lists on one register"),
+			)
 
 		if not self.attendance_reference and not all(row.off_register for row in self.participants):
 			frappe.throw(
@@ -143,6 +185,51 @@ class ParticipantReimbursementList(Document):
 					frappe.bold(self.attendance_reference)
 				),
 				title=_("Register not verified"),
+			)
+
+	def _other_lists_on_register(self) -> list[frappe._dict]:
+		if not self.attendance_reference:
+			return []
+
+		return frappe.get_all(
+			"Participant Reimbursement List",
+			filters={
+				"attendance_reference": self.attendance_reference,
+				"docstatus": ["<", 2],
+				"name": ["!=", self.name],
+			},
+			fields=["name", "docstatus"],
+		)
+
+	def validate_register_not_already_used(self):
+		"""One register, one list -- refused at submit, warned about in draft.
+
+		`activity_chain.make_reimbursement_list` already refuses a second list off one register,
+		but that only covers the hand-off: a list raised by hand, or given a register after it was
+		created, reached neither check, and two lists off one register pays every attendee twice.
+
+		The split between warning and refusing is not fussiness, it is what stops the check
+		deadlocking. Refusing on *save* whenever any other list exists means two drafts on one
+		register can never be saved again -- each sees the other, so neither can be edited or
+		corrected, and the only way out is deleting one. FoLT already had exactly that pair. A
+		second draft is a mistake in progress; a second *submitted* list is a second payment
+		instruction. So a submitted sibling is refused here and now, and a draft sibling is said
+		out loud and refused at `before_submit`, by which time one of them has been abandoned.
+		"""
+		submitted = [row for row in self._other_lists_on_register() if row.docstatus == 1]
+		if submitted:
+			frappe.throw(
+				_(
+					"Register {0} has already been paid out on {1}. Everyone on a register is paid once; "
+					"add any missed attendee to that list rather than starting a second one."
+				).format(
+					frappe.bold(self.attendance_reference),
+					", ".join(
+						frappe.utils.get_link_to_form("Participant Reimbursement List", row.name)
+						for row in submitted
+					),
+				),
+				title=_("Register already has a reimbursement list"),
 			)
 
 	def normalise_rows(self):
@@ -258,13 +345,40 @@ class ParticipantReimbursementList(Document):
 		self.total_paid = sum(flt(row.amount) for row in rows if row.payment_status == "Paid")
 
 	def validate_against_advance(self):
-		"""A list cannot pay out more than the float actually holds (F-04-E6)."""
+		"""A list cannot pay out more than the float actually holds (F-04-E6).
+
+		Two things are checked here and the order matters, because the second one used to answer
+		for both. A float that has already been retired and closed is not a float that is merely
+		too small, but the only objection raised was the arithmetic -- so attaching a list to a
+		finished float reported "a float cannot pay out more than it holds", which reads as
+		"find a bigger float" when the truth is "that float is done; this activity needs its own".
+		"""
 		if not self.employee_advance:
 			return
 
-		self.advance_disbursed = flt(
-			frappe.db.get_value("Employee Advance", self.employee_advance, "paid_amount")
+		advance = frappe.db.get_value(
+			"Employee Advance",
+			self.employee_advance,
+			["paid_amount", "claimed_amount", "workflow_state", "folt_project"],
+			as_dict=True,
 		)
+		if not advance:
+			return
+
+		self.advance_disbursed = flt(advance.paid_amount)
+
+		# A retired float pays out nothing further, whatever its headroom looks like. Both
+		# conditions are needed: `Closed` is the Head of Finance's decision, and a claim against
+		# the float is the fact underneath it -- a float can be accounted for before anybody
+		# closes it (float_lifecycle derives Accounted from claimed_amount).
+		if advance.workflow_state == "Closed":
+			frappe.throw(
+				_(
+					"Float {0} has been closed, so nothing further can be paid from it. If this activity "
+					"needs a payout, it needs its own float — raise one from its requisition."
+				).format(frappe.bold(self.employee_advance)),
+				title=_("Float is closed"),
+			)
 
 		if not self.advance_disbursed:
 			return
@@ -276,23 +390,86 @@ class ParticipantReimbursementList(Document):
 				"docstatus": ["<", 2],
 				"name": ["!=", self.name],
 			},
-			pluck="total_amount",
+			fields=["name", "total_amount", "workflow_state"],
 		)
 
-		committed = flt(self.total_amount) + sum(flt(amount) for amount in other_lists)
+		already = sum(flt(row.total_amount) for row in other_lists)
+		committed = flt(self.total_amount) + already
 
 		if committed > self.advance_disbursed:
-			frappe.throw(
-				_(
-					"This list commits {0} against float {1}, which has only {2} disbursed. "
-					"A float cannot pay out more than it holds."
-				).format(
-					frappe.bold(frappe.format_value(committed, {"fieldtype": "Currency"})),
+			# Name what is consuming the float. Being told the total is over by 140,500 is not
+			# actionable on its own -- the question is always "spent on what?", and the answer is
+			# usually one list somebody else raised.
+			consumers = [
+				_("{0} ({1}, {2})").format(
+					frappe.utils.get_link_to_form("Participant Reimbursement List", row.name),
+					row.workflow_state or _("Draft"),
+					frappe.format_value(flt(row.total_amount), {"fieldtype": "Currency"}),
+				)
+				for row in other_lists
+				if flt(row.total_amount)
+			]
+
+			message = [
+				_("This list commits {0}, but float {1} has {2} disbursed and {3} of that is already committed — leaving {4}.").format(
+					frappe.bold(frappe.format_value(flt(self.total_amount), {"fieldtype": "Currency"})),
 					self.employee_advance,
 					frappe.bold(frappe.format_value(self.advance_disbursed, {"fieldtype": "Currency"})),
-				),
-				title=_("Exceeds the float"),
-			)
+					frappe.format_value(already, {"fieldtype": "Currency"}),
+					frappe.bold(frappe.format_value(self.advance_disbursed - already, {"fieldtype": "Currency"})),
+				)
+			]
+			if consumers:
+				message.append(_("Already committed by: {0}").format(", ".join(consumers)))
+			if not advance.folt_project:
+				# The reason a register from an unrelated activity could reach this float at all:
+				# set_activity_from_advance has nothing to scope by, so the project check that
+				# annex 6.4.1 relies on never ran (see get_payable_floats).
+				message.append(
+					_("Note: float {0} carries no activity, so it is not scoped to a project. Set one on the float.").format(
+						self.employee_advance
+					)
+				)
+
+			frappe.throw("<br><br>".join(message), title=_("Exceeds the float"))
+
+
+@frappe.whitelist()
+@frappe.validate_and_sanitize_search_inputs
+def get_payable_floats(doctype, txt, searchfield, start, page_len, filters):
+	"""Link query for `employee_advance`: floats that can still pay somebody.
+
+	The field had no query at all, which is how a closed, fully-retired float came to be attached
+	to a list for an unrelated activity -- `activity_chain.funded_floats` does filter properly,
+	but it only serves the hand-off button, and nothing stopped a name being typed into the form.
+
+	`docstatus` and `workflow_state` are set last and override whatever arrived, for the same
+	reason `activity_participant_list.get_verified_registers` does it: this query exists to offer
+	floats that are disbursed and not closed, and a draft or closed one must not reach the
+	dropdown even if the caller asks for it.
+
+	The caller passes `folt_project` only once the list knows its activity, which a new list does
+	not -- so a blank list is offered every funded float, and one already scoped to a project is
+	offered only that project's. A float carrying NO project is therefore not offered to a scoped
+	list at all, and that is the intended answer: annex 6.4.1 makes the project the thing that
+	keeps a register and a float on the same activity, and the remedy is to set the activity on
+	the float rather than to widen this query. `validate_against_advance` says so in as many
+	words when it meets one.
+	"""
+	applied = dict(filters or {})
+	applied["docstatus"] = 1
+	applied["workflow_state"] = ["in", FUNDED_FLOAT_STATES]
+
+	return frappe.get_list(
+		"Employee Advance",
+		fields=["name", "employee_name", "paid_amount"],
+		filters=applied,
+		or_filters=[["name", "like", f"%{txt}%"], ["employee_name", "like", f"%{txt}%"]] if txt else None,
+		order_by="posting_date desc",
+		start=start,
+		page_length=page_len,
+		as_list=True,
+	)
 
 
 @frappe.whitelist()

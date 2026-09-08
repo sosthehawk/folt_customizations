@@ -3,6 +3,21 @@
 
 frappe.ui.form.on("Participant Reimbursement List", {
 	setup(frm) {
+		// Only floats that can still pay somebody are selectable. This field had no query at
+		// all, which is how a closed, fully-retired float came to be attached to a list for an
+		// unrelated activity — the amount ceiling then reported "a float cannot pay out more
+		// than it holds", which reads as "find a bigger float" rather than "that float is done".
+		frm.set_query("employee_advance", () => {
+			const filters = {};
+			// Scope to the project once it is known, but never filter on an empty activity —
+			// that would send `folt_project: undefined` and match nothing.
+			if (frm.doc.activity) filters.folt_project = frm.doc.activity;
+			return {
+				query: "folt_customizations.folt_customizations.doctype.participant_reimbursement_list.participant_reimbursement_list.get_payable_floats",
+				filters: filters,
+			};
+		});
+
 		// Only verified registers for this project are selectable (F-04-D5).
 		frm.set_query("attendance_reference", () => {
 			return {

@@ -1,0 +1,147 @@
+{#-
+  FoLT Attendance Sheet -- the W-04A register printed onto paper.
+
+  This is the sheet that goes into the room. FoLT already carried one: a blank pre-printed form
+  with these exact columns and nothing in them, which every attendee then filled in by hand.
+  That is where the re-keying in this workflow came from -- somebody had to type 57 handwritten
+  names, locations and mobile numbers afterwards, and handwriting is the one thing that cannot
+  be read back (measured against the real accountability pack: 38% on names, 0% on phone
+  numbers, and a wrong digit in a phone number is a payment to a stranger).
+
+  So the sheet prints the roster already in it. The attendee's job shrinks to signing against
+  their own name, and the office's job shrinks to ticking. Walk-ins still write, which is why
+  the blank continuation rows exist (F-04A-V6: a walk-in gets no separate process).
+
+  One template, both directions of the loop. While the register is a draft it is a sheet waiting
+  to be filled in: empty Present and Signature cells, blank rows at the bottom. Once verified,
+  the same format prints the record -- who attended, and how each of them acknowledged.
+
+  DELIBERATELY NOT PRINTED: id_number, gender, is_pwd, photo_consent. The mobile number has to
+  be here because it is the payout destination and the sheet is the attendee's one chance to
+  correct it. An ID number and a disability flag on paper that circulates a room of strangers
+  and is then scanned to a shared drive have no use on the day, and the register already holds
+  both. Do not add them because the child table happens to have them.
+-#}
+{%- set signing = doc.docstatus == 0 -%}
+{%- set CONTINUATION = 10 -%}
+{%- set rows = doc.participants or [] -%}
+{%- set preparer = frappe.db.get_value("User", doc.owner, "full_name") -%}
+{#- Two fields off the requisition, not the document: the print sandbox exposes db.get_value,
+    and loading the requisition with its child tables to read a budget line would be wasteful on
+    a form that is printed for every session of every activity. -#}
+{%- set requisition = frappe.db.get_value(
+      "Activity Requisition", doc.activity_requisition,
+      ["name", "budget_line"], as_dict=True) if doc.activity_requisition else None -%}
+
+{% include "folt_customizations/print_format_templates/_page_frame.html" %}
+
+<div class="folt-form folt-sheet">
+
+  <div class="folt-title">{{ _("Attendance Register") }}</div>
+  <div class="folt-subtitle">
+    {{ doc.name }}{% if doc.session_date %} &middot; {{ frappe.utils.formatdate(doc.session_date, "d MMMM yyyy") }}{% endif %}
+  </div>
+  <hr class="folt-rule">
+
+  <table class="folt-meta">
+    <tr>
+      <td class="label">{{ _("Activity") }}</td>
+      <td class="value">{{ doc.activity_title or doc.activity or "&mdash;" }}</td>
+      <td class="label">{{ _("Venue") }}</td>
+      <td class="value">{{ doc.venue or "&mdash;" }}</td>
+    </tr>
+    <tr>
+      <td class="label">{{ _("Session date") }}</td>
+      <td class="value">{{ frappe.utils.formatdate(doc.session_date) if doc.session_date else "&mdash;" }}</td>
+      <td class="label">{{ _("Requisition") }}</td>
+      <td class="value">
+        {%- if requisition %}{{ requisition.name }}{% if requisition.budget_line %} &middot; {{ requisition.budget_line }}{% endif %}
+        {%- else %}&mdash;{% endif -%}
+      </td>
+    </tr>
+    <tr>
+      <td class="label">{{ _("Prepared by") }}</td>
+      <td class="value">{{ preparer or doc.owner }}</td>
+      {%- if signing %}
+      <td class="label">{{ _("On roster") }}</td>
+      <td class="value">{{ rows | length }}</td>
+      {%- else %}
+      <td class="label">{{ _("Attendees") }}</td>
+      <td class="value">
+        {{ doc.total_attendees or 0 }}
+        {%- if doc.total_eligible %} &middot; {{ doc.total_eligible }} {{ _("eligible for reimbursement") }}{% endif %}
+      </td>
+      {%- endif %}
+    </tr>
+  </table>
+
+  {#- A real <thead>, which the other four FoLT formats do not need and this one does: a full
+      session runs past one page, and page two of a sheet people sign has to say which column is
+      which. The repeat is CSS (see folt_form.css, .folt-sheet block) -- _page_frame.html's
+      #header-html repeats the letterhead, not table headings. -#}
+  <table class="folt-lines">
+    <thead>
+      <tr>
+        <th class="mid" style="width: 4%;">{{ _("#") }}</th>
+        <th style="width: 25%;">{{ _("Name") }}</th>
+        <th class="mid" style="width: 13%;">{{ _("Mobile") }}</th>
+        <th style="width: 14%;">{{ _("Location") }}</th>
+        <th style="width: 14%;">{{ _("Category") }}</th>
+        <th class="mid" style="width: 6%;">{{ _("Present") }}</th>
+        <th style="width: 24%;">{{ _("Signature / Thumbprint") }}</th>
+      </tr>
+    </thead>
+    <tbody>
+      {%- for row in rows %}
+      <tr>
+        <td class="mid">{{ loop.index }}</td>
+        <td>{{ row.participant_name or "" }}</td>
+        <td class="mid">{{ row.mobile_number or "&mdash;" }}</td>
+        <td>{{ row.location or "&mdash;" }}</td>
+        <td>{{ _(row.category) if row.category else "&mdash;" }}</td>
+        {%- if signing %}
+        <td class="mid tick"></td>
+        <td class="sign"></td>
+        {%- else %}
+        <td class="mid tick">{% if row.attended %}&#10003;{% else %}&mdash;{% endif %}</td>
+        <td class="sign">{{ _(row.acknowledgement) if row.acknowledgement else "&mdash;" }}</td>
+        {%- endif %}
+      </tr>
+      {%- endfor %}
+
+      {#- Walk-ins. Numbered on from the roster so the sheet reads as one list, and only while
+          there is still something to write on -- a verified register printing empty rows would
+          be inviting an addition to a document that is already the record. -#}
+      {%- if signing %}
+      {%- for i in range(CONTINUATION) %}
+      <tr class="blank">
+        <td class="mid">{{ (rows | length) + loop.index }}</td>
+        <td></td>
+        <td></td>
+        <td></td>
+        <td></td>
+        <td class="mid tick"></td>
+        <td class="sign"></td>
+      </tr>
+      {%- endfor %}
+      {%- endif %}
+    </tbody>
+  </table>
+
+  <div class="folt-state">
+    <span class="pill">{{ _(doc.workflow_state) if doc.workflow_state else _("Draft") }}</span>
+  </div>
+
+  <table class="folt-signoff">
+    <tr>
+      <td><div class="line"></div><div class="role">{{ _("Prepared By") }}</div><div class="who">{{ preparer or "" }}</div></td>
+      <td><div class="line"></div><div class="role">{{ _("Facilitator") }}</div><div class="who">{{ _("Field Officer") }}</div></td>
+      <td><div class="line"></div><div class="role">{{ _("Verified By") }}</div><div class="who">{{ _("Head of Programs") }}</div></td>
+    </tr>
+  </table>
+
+  <div class="folt-note">
+    {{ _("Each attendee signs or thumbprints against their own name. A thumbprint is evidence exactly as a signature is. An attendee who is not on the list writes their name in a blank row. This sheet is scanned and attached to the register it was printed from.") }}
+  </div>
+
+</div>

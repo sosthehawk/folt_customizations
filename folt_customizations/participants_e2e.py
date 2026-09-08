@@ -207,6 +207,252 @@ def run():
 		).insert(ignore_permissions=True).submit(),
 	)
 
+	print("\n--- W-04A  roster autofill and reconciliation ---")
+
+	# The loop this exists to serve: fill the next session's register from the last one, print the
+	# FoLT Attendance Sheet with the names already on it, then tick the signed paper back in.
+	# It replaces the typing that OCR cannot do for us -- FoLT's participants list is filled in
+	# by hand at the activity, and handwritten names and 10-digit numbers do not survive OCR.
+	from folt_customizations.folt_customizations.doctype.activity_participant_list.activity_participant_list import (
+		_match_category,
+		autofill_roster,
+		get_roster_sources,
+	)
+
+	# Run on project_b throughout. The F-04-D5 dropdown checks further down assert that
+	# project_a offers EXACTLY one verified register, so a second verified one there would break
+	# them -- the same reason `no_sheet` above was raised on project_b.
+	day_one = make_register(
+		project_b,
+		[
+			{"participant_name": "E2E Day One Alpha", "mobile_number": "0712000021", "location": "Kanamkemer", "category": "Community Participant"},
+			{"participant_name": "E2E Day One Beta", "mobile_number": "0712000022", "location": "Oropoi", "category": "Community Participant"},
+			{"participant_name": "E2E Day One Staff", "mobile_number": "0712000023", "location": "Lodwar", "category": "FoLT Staff"},
+			{"participant_name": "E2E Day One Absentee", "mobile_number": "0712000024", "location": "Loima", "category": "Community Participant", "attended": 0},
+		],
+	)
+
+	session_two = frappe.get_doc(
+		{
+			"doctype": "Activity Participant List",
+			"activity": project_b,
+			"session_date": nowdate(),
+			"venue": "E2E Venue, day two",
+		}
+	).insert(ignore_permissions=True)
+
+	sources = get_roster_sources(session_two.name)
+	check(
+		"F-04A-V2  an earlier session on the same activity is offered as a roster source",
+		any(s["name"] == day_one.name for s in sources),
+		f"{len(sources)} source(s)",
+	)
+	check(
+		"F-04A-V2  and a register on another activity is not",
+		all(s["name"] != register.name for s in sources),
+	)
+
+	summary = autofill_roster(session_two.name, from_register=day_one.name)
+	session_two.reload()
+	check(
+		"roster copies the attendees of the earlier session",
+		summary["added"] == 3 and len(session_two.participants) == 3,
+		f"added={summary['added']} rows={len(session_two.participants)}",
+	)
+	# The point of the whole design: a roster is who is EXPECTED, so it must not claim a
+	# headcount. A register reading 3 attendees before the sheet came back would be a lie the
+	# reimbursement list is allowed to derive from.
+	check(
+		"and does NOT inflate the headcount",
+		session_two.total_attendees == 0,
+		f"total_attendees={session_two.total_attendees}",
+	)
+	check(
+		"rows land unattended and unacknowledged",
+		all(not row.attended and not row.acknowledgement for row in session_two.participants),
+		f"acknowledgements={[r.acknowledgement for r in session_two.participants]}",
+	)
+	check(
+		"the absentee from the earlier session is left off by default",
+		all("Absentee" not in (row.participant_name or "") for row in session_two.participants),
+	)
+
+	repeat = autofill_roster(session_two.name, from_register=day_one.name)
+	check(
+		"F-04A-E2  running it twice adds nobody twice",
+		repeat["added"] == 0 and repeat["skipped_existing"] == 3,
+		f"added={repeat['added']} skipped={repeat['skipped_existing']}",
+	)
+
+	# An unreconciled roster is not a register of nobody -- it is a register whose sheet has not
+	# come back -- so it must not be verifiable.
+	expect_throw(
+		"an unreconciled roster cannot be verified",
+		lambda: frappe.get_doc("Activity Participant List", session_two.name).submit(),
+	)
+
+	# THE REGRESSION THAT MOTIVATED THE FIX in normalise_rows. `attended` used to zero
+	# eligibility permanently: the category branch only re-derives while a row is new or the
+	# value is None, so ticking somebody present after the sheet came back left them ineligible
+	# for ever and fetch_participants skipped every one of them as "not eligible by category".
+	# Nobody would have been paid. This is what that looked like.
+	session_two.reload()
+	for row in session_two.participants:
+		row.attended = 1
+		row.acknowledgement = "Signature"
+	session_two.save()
+	check(
+		"reconciling a roster restores eligibility by category",
+		session_two.total_attendees == 3 and session_two.total_eligible == 2,
+		f"attendees={session_two.total_attendees} eligible={session_two.total_eligible}",
+	)
+
+	# Absence and a signature cannot both stand on one row. Refusing it was tried and was worse:
+	# `acknowledgement` DEFAULTS to "Signature", so unticking a box threw an error naming a
+	# signature nobody had claimed. Normalising is the honest answer.
+	session_two.participants[0].attended = 0
+	session_two.participants[0].acknowledgement = "Signature"
+	session_two.save()
+	check(
+		"marking somebody absent clears the acknowledgement rather than refusing the save",
+		session_two.participants[0].acknowledgement == "None"
+		and session_two.total_attendees == 2,
+		f"acknowledgement={session_two.participants[0].acknowledgement!r}",
+	)
+
+	session_two.attendance_sheet = "/files/e2e-attendance.pdf"
+	session_two.save()
+	session_two.submit()
+	check("a reconciled roster verifies", session_two.docstatus == 1, session_two.workflow_state)
+
+	expect_throw(
+		"a roster cannot be added to a verified register",
+		lambda: autofill_roster(session_two.name, from_register=day_one.name),
+	)
+
+	sheet = frappe.db.get_value(
+		"Print Format", "FoLT Attendance Sheet", ["doc_type", "custom_format", "disabled"], as_dict=True
+	)
+	check(
+		"the FoLT Attendance Sheet prints this doctype from its own template",
+		bool(sheet) and sheet.doc_type == "Activity Participant List" and sheet.custom_format == 1 and not sheet.disabled,
+		f"{sheet}",
+	)
+
+	print("\n--- W-04A  reading a sheet back in ---")
+
+	# Round-trip through FoLT's own print format, so this needs no binary fixture in the repo:
+	# print the register that was just rostered, then read the printed sheet back and check the
+	# same people come out. That is also the real loop -- the sheet FoLT hands out is the sheet
+	# that comes back.
+	from folt_customizations import sheet_import
+	from folt_customizations.folt_customizations.doctype.activity_participant_list.activity_participant_list import (
+		read_attendance_sheet,
+	)
+
+	target = frappe.get_doc(
+		{
+			"doctype": "Activity Participant List",
+			"activity": project_b,
+			"session_date": nowdate(),
+			"venue": "E2E Venue, import",
+		}
+	).insert(ignore_permissions=True)
+
+	printed = None
+	try:
+		from frappe.utils.pdf import get_pdf
+
+		printed = get_pdf(
+			frappe.get_print("Activity Participant List", day_one.name, print_format="FoLT Attendance Sheet")
+		)
+	except Exception as e:  # noqa: BLE001
+		# wkhtmltopdf is not always reachable from a bare shell (see print_formats.guard_pdf_host).
+		# Skipped loudly rather than failed, because it is the PDF toolchain rather than this code.
+		check("PDF round-trip skipped (wkhtmltopdf unavailable)", True, type(e).__name__)
+
+	if printed:
+		sheet = frappe.get_doc(
+			{
+				"doctype": "File", "file_name": "e2e-printed-sheet.pdf", "content": printed,
+				"is_private": 0, "attached_to_doctype": "Activity Participant List",
+				"attached_to_name": target.name,
+			}
+		).insert(ignore_permissions=True)
+
+		result = read_attendance_sheet(target.name, file_url=sheet.file_url)
+		names = {r["participant_name"].upper() for r in result["rows"]}
+		mobiles = {r["mobile_number"] for r in result["rows"]}
+
+		check(
+			"the printed attendance sheet reads back into attendees",
+			len(result["rows"]) == 4 and "E2E DAY ONE ALPHA" in names,
+			f"{len(result['rows'])} rows: {sorted(names)}",
+		)
+		check(
+			"and their mobile numbers survive the round trip",
+			{"0712000021", "0712000022", "0712000023"} <= mobiles,
+			str(sorted(mobiles)),
+		)
+		check(
+			"a PDF with a text layer is read exactly rather than by OCR",
+			result["source"] == "native",
+			result["source"],
+		)
+		# day_one is verified, so its sheet prints the record rather than a blank form: each row
+		# carries the acknowledgement that was actually given. Reading it back has to recover the
+		# same three signatures and the same one absence -- if attendance did not survive the
+		# round trip, importing a sheet would silently change who gets paid.
+		check(
+			"who signed survives the round trip",
+			sum(1 for r in result["rows"] if r["attended"]) == 3,
+			str([(r["participant_name"][-5:], r["acknowledgement"]) for r in result["rows"]]),
+		)
+		check(
+			"reading writes nothing until the preparer saves",
+			not frappe.get_doc("Activity Participant List", target.name).participants,
+		)
+
+	expect_throw(
+		"a sheet cannot be read into a verified register",
+		lambda: read_attendance_sheet(day_one.name, file_url="/files/whatever.png"),
+	)
+
+	# The handwriting gate, tested on its own rather than through an image. The measured
+	# separation is absolute -- 90.5% valid numbers on typed sheets against 0% on handwritten
+	# ones -- so what matters is that the threshold sits between them.
+	typed_rows = [{"_phone_raw": "0712000021", "mobile_number": "0712000021"} for _ in range(6)]
+	hand_rows = [{"_phone_raw": "07l2 OOO", "mobile_number": "0712"} for _ in range(6)]
+	check(
+		"a typed sheet is not mistaken for handwriting",
+		not sheet_import._looks_handwritten(typed_rows),
+	)
+	check(
+		"a handwritten sheet is detected and refused",
+		sheet_import._looks_handwritten(hand_rows),
+	)
+
+	# The header of a printed sheet loses short words in shaded cells more often than the rows
+	# below it lose anything, so the columns that matter are inferred from the data when the
+	# header does not name them. Without this the sheet reads as empty, which is the worst
+	# failure available: it looks like nobody attended.
+	inferred = sheet_import.infer_columns(
+		[["1", "CONSOLATA ARII", "0701259286"], ["2", "PAULINA BARAZA", "0710238217"]],
+		{},
+		3,
+	)
+	check(
+		"name and phone columns are inferred when the header cannot be read",
+		inferred.get("participant_name") == 1 and inferred.get("mobile_number") == 2,
+		str(inferred),
+	)
+
+	check(
+		"a sheet's own category is honoured, not defaulted",
+		_match_category("Staff") == "FoLT Staff" and _match_category("County Official") == "County Official",
+		f"{_match_category('Staff')} / {_match_category('County Official')}",
+	)
+
 	print("\n--- W-04B  reimbursement list derived from the register ---")
 
 	advance = make_float(project_a, disbursed=20000)

@@ -33,6 +33,17 @@ OVERDUE = "Overdue"
 ACCOUNTED = "Accounted"
 CLOSED = "Closed"
 
+# The states in which a float still has money that can be paid out of it. Lives here, with the
+# other float state names, rather than in activity_chain: both activity_chain (to offer floats
+# for a hand-off) and participant_reimbursement_list (to filter its own link field) need it, and
+# activity_chain already imports from participant_reimbursement_list -- so defining it in either
+# of those makes an import cycle.
+#
+# `Accounted` is included deliberately: a float can be accounted for while a second list is
+# still being prepared, because one activity legitimately pays out on several lists (F-04-V1).
+# `Closed` is not -- that is the Head of Finance saying the float is finished.
+FUNDED_FLOAT_STATES = (DISBURSED, OVERDUE, ACCOUNTED)
+
 # The only states this module will overwrite. Requested, Checked and Rejected all precede
 # disbursement, and Closed is the Head of Finance's deliberate sign-off that the float is
 # finished with -- an automated sweep must not undo a human decision, so neither end is derived.

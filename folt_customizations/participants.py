@@ -29,6 +29,13 @@ ELIGIBLE_CATEGORIES = {"Community Participant", "Elected Representative"}
 # (F-04-E4).
 ACKNOWLEDGEMENT_OPTIONS = ["", "Signature", "Thumbprint", "None"]
 
+# The two forms of acknowledgement that count as evidence. The distinction the register and the
+# reimbursement list both need is three-way, not two: "" means nobody has read the sheet yet,
+# "None" means somebody read it and recorded that no mark was given, and these two mean the
+# person acknowledged. A pre-printed roster is "" on every row until it comes back signed, which
+# is what lets the register tell an unreconciled roster from an attendee who left the cell blank.
+ACKNOWLEDGED_FORMS = ("Signature", "Thumbprint")
+
 RATE_COMPONENTS = ("transport", "sustenance", "accommodation")
 
 

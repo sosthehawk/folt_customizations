@@ -43,12 +43,13 @@ from frappe.utils import flt, nowdate
 from folt_customizations.folt_customizations.doctype.participant_reimbursement_list.participant_reimbursement_list import (
 	fetch_participants,
 )
+from folt_customizations.float_lifecycle import FUNDED_FLOAT_STATES
 from folt_customizations.workflow import get_approvers_for_state
 
-# The states a float has to have reached before money can be committed against it. Approved is
-# not enough: a reimbursement list is a payment instruction, and it cannot be prepared against a
-# float that has not been disbursed. See float_lifecycle for how these are derived.
-FUNDED_FLOAT_STATES = ("Disbursed", "Overdue", "Accounted")
+# FUNDED_FLOAT_STATES -- the states a float has to have reached before money can be committed
+# against it -- is imported above rather than defined here. Approved is not enough: a
+# reimbursement list is a payment instruction and cannot be prepared against a float that has
+# not been disbursed. float_lifecycle owns the float's state names and derives these.
 
 # A reimbursement list is retired once the payout has happened and the participants have
 # acknowledged it -- Partly Paid included, because a list with a failed payee still has to
@@ -184,9 +185,15 @@ def make_float_request(activity_requisition: str) -> str:
 def make_attendance_register(activity_requisition: str) -> str:
 	"""Open the register for the activity, on the date the requisition was approved for.
 
-	The attendees themselves are the one thing in this chain that cannot be copied forward: who
-	turned up is discovered on the day. So the register comes out headed and empty, which is
-	exactly what the programme officer carries into the room.
+	The register comes out headed and empty, because who turned up is discovered on the day and
+	no requisition knows it. What CAN be carried forward is the roster -- for a multi-session
+	activity the same people are expected again -- and that is
+	`activity_participant_list.autofill_roster`, reached from the register's own *Autofill
+	roster* button.
+
+	It is deliberately not done here. A register that arrived pre-stuffed with 200 names nobody
+	asked for is worse than an empty one: the preparer then has to prove a negative about every
+	row, and the roster's whole value is that somebody chose which earlier session to copy.
 	"""
 	requisition = _ready_source("Activity Requisition", activity_requisition, "Activity Participant List")
 

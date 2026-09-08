@@ -72,6 +72,31 @@ PRINT_FORMATS = {
         "stylesheet": "folt_form",
         "set_as_default": True,
     },
+    # The register printed onto paper, and the reason the rest of W-04A can stop being typed.
+    #
+    # FoLT already prints an attendance sheet -- a blank pre-printed form with the columns of
+    # Activity Participant Entry and nothing in them, filled in by hand at the activity. That is
+    # where the re-keying comes from: 57 handwritten names have to be typed by somebody
+    # afterwards, and handwritten Kenyan names and 10-digit numbers do not survive OCR (measured
+    # at 38% and 0% respectively on the real accountability pack). This format prints the same
+    # form with the roster already in it, so the field team ticks and signs rather than writes,
+    # and nothing has to be read back.
+    #
+    # One template serves both directions of the loop: the empty signature cells and the blank
+    # continuation rows for walk-ins appear only while the register is a draft, so a verified one
+    # prints as the record of who attended rather than as a sheet waiting to be filled in.
+    #
+    # Made the default because the doctype has no format of its own, which means it is currently
+    # printing frappe's auto layout.
+    "FoLT Attendance Sheet": {
+        "doc_type": "Activity Participant List",
+        "template": "folt_attendance_sheet",
+        "stylesheet": "folt_form",
+        # A sheet people write on needs the room; the same tightening the payslip and the float
+        # expense report get, and for the same reason.
+        "margins": 12.0,
+        "set_as_default": True,
+    },
 }
 
 TEMPLATE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "print_format_templates")

@@ -183,3 +183,52 @@ table.folt-signoff .who {
   color: #555;
   margin-top: 6px;
 }
+
+/*
+  The attendance sheet, and only the attendance sheet.
+
+  Everything here is scoped under .folt-sheet, because this is the one FoLT format whose rows a
+  person writes into rather than one a template fills. That needs two things the voucher, the
+  expense report, the intent to award and the waiver request all get away without, and neither
+  should reach them:
+
+  1. A repeating table header. A full session is 50+ names and runs past one page; without
+     table-header-group, page two arrives with no column headings and nobody knows which box to
+     sign in. _page_frame.html's #header-html repeats the letterhead, not the table.
+  2. A minimum writing height. Padding is not enough -- a hand needs a line's worth of room, and
+     the blank continuation rows for walk-ins need more of it than a pre-printed row, because a
+     walk-in writes their name, location and number as well as signing.
+
+  Heights do not need !important: the rule they have to survive is frappe's
+  `.print-format td, th { padding: 6px !important }`, which is padding, not height.
+*/
+.folt-sheet table.folt-lines thead {
+  display: table-header-group;
+}
+
+.folt-sheet table.folt-lines tr {
+  page-break-inside: avoid;
+}
+
+/*
+  Every row needs signing room, not just the blank ones: the attendee signs in the Signature
+  cell of their own pre-printed row. 30px is about 8mm, which is what the paper form FoLT
+  already uses -- the first draft of this sheet was set at the 20px the ruled tables on the
+  other formats use, and those rows are read, not written in.
+*/
+.folt-sheet table.folt-lines td {
+  height: 30px;
+}
+
+/* A walk-in writes their name, location and number as well as signing, so their row needs
+   more than somebody whose details are already printed. */
+.folt-sheet table.folt-lines tr.blank td {
+  height: 34px;
+}
+
+/* The two columns the attendee fills. Ruled a touch harder than the rest of the grid so the
+   boundary is unmistakable on a photocopy, which is what most of these sheets become. */
+.folt-sheet table.folt-lines td.tick,
+.folt-sheet table.folt-lines td.sign {
+  border-left: 0.7px solid #555;
+}

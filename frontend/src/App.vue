@@ -1,145 +1,75 @@
 <script setup lang="ts">
-// The Phase B spike. Deliberately not a product screen: it exists to prove the pipeline end to
-// end -- the page renders, the bundle loads from a hashed path, the session is ours, a POST to a
-// whitelisted method succeeds with the CSRF token, and a deep link reaches the same document.
-// Everything product-shaped waits for Phase C.
-import { onMounted, ref } from "vue";
+// The shell: navigation, whatever the route shows, and the server notices.
+//
+// The realtime connection lives here rather than in a view because it has to outlive every
+// navigation -- a socket torn down and rebuilt on each route change would miss exactly the
+// events that arrive while somebody is reading. It does not know what is on screen: it bumps
+// store.pulse and each view reloads its own data.
 
-import { boot } from "./lib/boot";
-import { call, FrappeError } from "./lib/api";
+import { onBeforeUnmount, onMounted } from "vue";
 
-const requisitions = ref<number | null>(null);
-const error = ref<string | null>(null);
+import AppNav from "./components/AppNav.vue";
+import ToastStack from "./components/ToastStack.vue";
+import { isLive, on as onRealtime, start, stop } from "./lib/realtime";
+import { loadBell, loadTasks, pulse } from "./lib/store";
+import { watchSystem } from "./lib/theme";
 
-type Tasks = { counts: Record<string, number> };
-const awaiting = ref<number | null>(null);
+function refresh() {
+  void loadBell();
+  void loadTasks("awaiting");
+  pulse();
+}
 
 onMounted(async () => {
-  try {
-    // A read, through the same POST path everything else uses.
-    requisitions.value = await call<number>("frappe.client.get_count", {
-      doctype: "Activity Requisition",
-    });
-
-    // A FoLT endpoint, which is the one that actually proves the CSRF token is accepted:
-    // frappe.client.* is whitelisted with allow_guest=False but my_tasks is ours, and it is the
-    // inbox Phase C is built on.
-    const tasks = await call<Tasks>(
-      "folt_customizations.folt_customizations.page.folt_tasks.folt_tasks.my_tasks",
-      { bucket: "awaiting" },
-    );
-    awaiting.value = tasks?.counts?.awaiting ?? 0;
-  } catch (e) {
-    error.value = e instanceof FrappeError ? e.message : String(e);
-  }
+  // The inline script in www/folt.html painted the right theme already; this takes it over.
+  watchSystem();
+  // The nav shows the awaiting count and the bell on every screen, so both load once here.
+  await Promise.all([loadTasks("awaiting"), loadBell()]);
+  onRealtime("notification", refresh);
+  onRealtime("doc_update", () => pulse());
+  onRealtime("folt_state_derived", () => pulse());
+  void start(refresh);
 });
+
+onBeforeUnmount(stop);
 </script>
 
 <template>
-  <main class="spike">
-    <h1>FoLT</h1>
-    <p class="who">{{ boot.full_name }} &middot; {{ boot.user }}</p>
-
-    <dl>
-      <dt>Activity Requisitions</dt>
-      <dd>{{ requisitions ?? "…" }}</dd>
-
-      <dt>Awaiting me</dt>
-      <dd>{{ awaiting ?? "…" }}</dd>
-
-      <dt>Roles</dt>
-      <dd>{{ boot.roles.filter((r) => r !== "All" && r !== "Guest").join(", ") }}</dd>
-
-      <dt>Deep-link path</dt>
-      <dd><code>{{ boot.app_path || "(none)" }}</code></dd>
-    </dl>
-
-    <p v-if="error" class="error">{{ error }}</p>
-
-    <p class="desk"><a href="/desk/folt-tasks">Open My Tasks in the Desk</a></p>
+  <a class="skip" href="#main">Skip to content</a>
+  <AppNav />
+  <main id="main" class="page">
+    <RouterView v-slot="{ Component }">
+      <component :is="Component" />
+    </RouterView>
   </main>
+  <ToastStack />
+  <p class="sr-only" aria-live="polite">{{ isLive() ? "Live updates on" : "Updating periodically" }}</p>
 </template>
 
-<style>
-/* Document-level, deliberately NOT scoped: a scoped block cannot reach <body>, and a page that
-   declares `color-scheme: light dark` (see www/folt.html) gets the browser's dark ground while
-   painting its own text -- which is how the first render of this spike came out near-black on
-   near-black. Declare both grounds explicitly or declare neither.
-
-   Tokens rather than literals, and the same names folt_desk.css uses, so Phase C can lift the
-   palette across without renaming anything. */
-:root {
-  --folt-bg: #ffffff;
-  --folt-fg: #171717;
-  --folt-muted: #7c7c7c;
-  --folt-danger-bg: #fff4f4;
-  --folt-danger-fg: #b00020;
-  --folt-link: #3c6a91; /* branding.EMAIL_ACCENT -- the wordmark blue */
+<style scoped>
+.page {
+  max-width: 76rem;
+  margin: 0 auto;
+  /* 16px side gutter at phone width, never a horizontal scrollbar; the bottom padding clears the
+     fixed tab bar plus the home indicator, or the last card sits under the nav. */
+  padding: 1.5rem 1rem calc(5.5rem + env(safe-area-inset-bottom, 0));
 }
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --folt-bg: #171717;
-    --folt-fg: #f4f4f4;
-    --folt-muted: #a0a0a0;
-    --folt-danger-bg: #2b1416;
-    --folt-danger-fg: #ff9c9c;
-    --folt-link: #8ab4d8;
+@media (min-width: 48rem) {
+  .page {
+    padding: 2rem 1.5rem 4rem;
   }
 }
-
-body {
-  margin: 0;
-  background: var(--folt-bg);
-  color: var(--folt-fg);
+.skip {
+  position: absolute;
+  left: -999px;
+  top: 0.5rem;
+  z-index: 100;
+  padding: 0.5rem 1rem;
+  border-radius: var(--radius-md);
+  background: var(--action);
+  color: var(--action-fg);
 }
-</style>
-
-<style scoped>
-.spike {
-  font-family:
-    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  max-width: 34rem;
-  margin: 0 auto;
-  padding: 2rem 1.25rem;
-  color: var(--folt-fg);
-}
-h1 {
-  margin: 0;
-  font-size: 1.5rem;
-}
-.who {
-  margin: 0.25rem 0 1.5rem;
-  color: var(--folt-muted);
-  font-size: 0.875rem;
-}
-dl {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 0.5rem 1rem;
-  margin: 0;
-  font-size: 0.9375rem;
-}
-dt {
-  color: var(--folt-muted);
-}
-dd {
-  margin: 0;
-  font-weight: 500;
-}
-.error {
-  margin-top: 1.5rem;
-  padding: 0.75rem 1rem;
-  border-radius: 0.5rem;
-  background: var(--folt-danger-bg);
-  color: var(--folt-danger-fg);
-  font-size: 0.875rem;
-}
-.desk {
-  margin-top: 2rem;
-  font-size: 0.875rem;
-}
-.desk a {
-  color: var(--folt-link);
+.skip:focus {
+  left: 0.5rem;
 }
 </style>

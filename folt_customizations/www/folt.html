@@ -10,6 +10,35 @@
 	<meta name="color-scheme" content="light dark">
 	<title>{{ _("FoLT") }}</title>
 	<link rel="icon" href="/assets/folt_customizations/images/folt-emblem.svg">
+
+	{#- The theme, resolved BEFORE any stylesheet applies and before anything is painted.
+
+	    frontend/src/styles/tokens.css selects its dark palette on `html[data-theme="dark"]` rather
+	    than on a prefers-color-scheme media query, so that an explicit choice in the app can
+	    overrule the operating system without the palette being written twice. The cost is this
+	    script, and it has to be INLINE and SYNCHRONOUS: deferred to the module bundle it would run
+	    after first paint and every dark-mode user would get a white flash on every load.
+
+	    Tiny and dependency-free on purpose: it is the only script here that is not the bundle and
+	    the only one that must never throw, so every branch falls back to light rather than to
+	    nothing. The key must match frontend/src/lib/theme.ts. No CSP is sent by either nginx
+	    layer, so an inline script is allowed. -#}
+	<script>
+		(function () {
+			var choice = "system";
+			try {
+				choice = localStorage.getItem("folt-theme") || "system";
+			} catch (e) {
+				/* Private windows and blocked site data both throw on read. Follow the device. */
+			}
+			var dark =
+				choice === "dark" ||
+				(choice === "system" &&
+					window.matchMedia &&
+					window.matchMedia("(prefers-color-scheme: dark)").matches);
+			document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
+		})();
+	</script>
 	{%- for href in styles %}
 	<link rel="stylesheet" href="{{ href }}">
 	{%- endfor %}

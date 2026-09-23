@@ -28,8 +28,10 @@ import frappe
 from frappe import _
 from frappe.utils import date_diff, nowdate
 
+from frappe.model.workflow import get_workflow
+
 from folt_customizations import workflow_shape
-from folt_customizations.workflow import is_own_todo
+from folt_customizations.workflow import is_own_todo, roles_the_owner_can_move
 
 BUCKETS = ("awaiting", "drafts", "approved", "archives")
 
@@ -107,9 +109,13 @@ def _for_doctype(doctype, shaped, states_roles, roles, bucket, limit) -> dict:
 	user = frappe.session.user
 
 	mine = [state for state, movers in states_roles.items() if roles & set(movers)]
-	submitted = {
-		state for lane in shaped["lanes"] if lane["docstatus"] == 1 for state in lane["states"]
-	}
+	workflow = get_workflow(doctype)
+	# Every submitted state, read off the workflow's own doc_status rather than off the lanes. The
+	# lanes hold the main path only, so reading them dropped the optional and detour states --
+	# Overdue, Partly Paid, Disputed -- and a float somebody approved went missing from their Done
+	# list for exactly as long as it was overdue.
+	submitted = {row.state for row in workflow.states if int(row.doc_status or 0) == 1}
+	owner_roles = {state: roles_the_owner_can_move(workflow, state) for state in states_roles}
 	ended = set(shaped["terminal"]) | {
 		state for state, info in shaped["off_path"].items() if info["kind"] == "turned_down"
 	}
@@ -150,7 +156,9 @@ def _for_doctype(doctype, shaped, states_roles, roles, bucket, limit) -> dict:
 	buckets["awaiting"] = [
 		row
 		for row in (query({state_field: ("in", mine), "docstatus": ("<", 2)}) if mine else [])
-		if not is_own_todo(row.owner, states_roles.get(row.get(state_field)) or [])
+		# Only the roles the author could use on their OWN document count: where the move out of
+		# this state refuses self-approval, holding its role does not make it the author's to-do.
+		if not is_own_todo(row.owner, owner_roles.get(row.get(state_field)) or [])
 	]
 
 	# Drafts: mine and not yet submitted. Deliberately not "in the first state" -- a document

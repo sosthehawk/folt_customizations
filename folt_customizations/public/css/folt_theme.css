@@ -125,7 +125,8 @@
 
    The two primaries are the same values the rest of the product already uses, so there
    is one FoLT blue and one dark tint across desk, email and the Vue app:
-   branding.py EMAIL_ACCENT and frontend/src/App.vue's --folt-link. */
+   branding.py EMAIL_ACCENT, and frontend/src/styles/tokens.css, which restates all nine
+   --folt-brand-* values for /folt (theme_e2e asserts the two files agree). */
 
 :root {
   /* The wordmark's blue (Asset-1FOLT.svg). Deliberately NOT the wordmark navy #001a33,

@@ -1,0 +1,304 @@
+/* The FoLT brand, for a page frappe's stylesheets never reach.
+
+   www/folt.html deliberately does not `{% extends %}` frappe's base template, so neither
+   desk.bundle.css nor public/css/folt_theme.css is loaded here -- this file is the whole design
+   system of /folt.
+
+   THE VALUES ARE COPIED, THE FILE IS NOT. folt_theme.css is mostly overrides aimed at frappe's own
+   chrome (`.btn.btn-primary`, `.awesomplete`, `body:not([data-path]) h1`), and its light block is
+   `:root:not([data-theme="dark"])`, which would paint light values over this page's dark mode.
+   So the nine --folt-brand-* values are restated below verbatim from folt_theme.css section 1,
+   which stays the one place the brand is reasoned about. theme_e2e.py asserts the two agree, so a
+   brand change that reaches one file and not the other fails a test instead of shipping two blues.
+
+   BRAND, ACTION AND DANGER ARE THREE DIFFERENT JOBS. The wordmark blue paints identity, links and
+   focus, and -- because it is not a warning colour -- the affirmative action too. Turning a
+   document down is the one red, and chips use frappe's designed status pairs (a foreground that is
+   defined to contrast with its own background, and redefined for dark), never the saturated ramp,
+   which folt_desk.css measured at 2.3:1 for white on --green-500. frappe's info blue (#0070cc) is
+   deliberately NOT used: beside the brand blue it reads as a second, slightly wrong brand. */
+
+@font-face {
+  font-family: "Lexend";
+  font-style: normal;
+  /* A RANGE, and it is mandatory rather than tidy: body text here asks for 420 (frappe's
+     --weight-regular, kept so /folt and the Desk set the same colour of text), and with static 400
+     and 500 files CSS Fonts 4 resolves 420 UP to 500. The variable file interpolates it exactly. */
+  font-weight: 100 900;
+  font-display: swap;
+  /* The stable served path, not an import: importing would put a second copy of the same 74 KB
+     under folt/static/, and a user arriving from the Desk already has this one cached. */
+  src: url("/assets/folt_customizations/fonts/lexend/lexend-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304,
+    U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "Lexend";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("/assets/folt_customizations/fonts/lexend/lexend-latin-ext.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308,
+    U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113,
+    U+2C60-2C7F, U+A720-A7FF;
+}
+
+:root {
+  color-scheme: light;
+
+  /* --- the brand, verbatim from folt_theme.css section 1 --- */
+  --folt-brand-primary: #3c6a91;
+  --folt-brand-primary-hover: #356083;
+  --folt-brand-navy: #001a33;
+  --folt-brand-primary-dark: #8ab4d8;
+  --folt-brand-primary-dark-hover: #a6c8e3;
+  --folt-brand-tint: #f4f7fa;
+  --folt-brand-tint-strong: #eaf1f7;
+  --folt-brand-tint-dark: #0e141a;
+  --folt-brand-tint-dark-strong: #1b262f;
+
+  --font: "Lexend", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial,
+    sans-serif;
+  --weight-regular: 420;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+
+  /* The Desk's 15/16px ladder (folt_theme.css), so text is the same size in both places. */
+  --text-xs: 13px;
+  --text-sm: 15px;
+  --text-base: 16px;
+  --text-lg: 18px;
+  --text-xl: 20px;
+  --text-2xl: 22px;
+  --text-3xl: 26px;
+
+  /* The sign-in page's material, as tokens rather than literals: 8px chips, 12px controls, 18px
+     plates, 24px panels -- the only radii folt_login.css allows. */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 18px;
+  --radius-xl: 24px;
+  --radius-pill: 999px;
+
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --dur-control: 0.16s;
+  --dur-rise: 0.5s;
+
+  --nav-height: 3.75rem;
+  --control-height: 2.75rem; /* 44px: comfortably over the 40px touch floor on a phone */
+
+  /* --- surfaces --- */
+  --brand: var(--folt-brand-primary);
+  --brand-hover: var(--folt-brand-primary-hover);
+  --brand-tint: var(--folt-brand-tint);
+  --brand-tint-strong: var(--folt-brand-tint-strong);
+  --heading: var(--folt-brand-navy);
+
+  --bg: var(--folt-brand-tint);
+  --surface: #ffffff;
+  --surface-sunk: #f3f3f3;
+  --border: #e2e2e2;
+  --border-strong: #c7c7c7;
+  --fg: #383838;
+  --muted: #525252;
+  --faint: #7c7c7c;
+
+  --action: var(--folt-brand-primary);
+  --action-hover: var(--folt-brand-primary-hover);
+  --action-fg: #ffffff;
+
+  /* --- status: frappe's designed pairs (desk.bundle, light) --- */
+  --ok: #16794c;
+  --ok-bg: #e4f5e9;
+  --warn: #bd3e0c;
+  --warn-bg: #fff1e7;
+  --danger: #b52a2a;
+  --danger-bg: #fff0f0;
+  --info: var(--folt-brand-primary);
+  --info-bg: var(--folt-brand-tint-strong);
+  --plain: #525252;
+  --plain-bg: #f3f3f3;
+
+  /* Navy-tinted rather than black, as on the sign-in page, so a shadow reads as depth on the
+     brand ground instead of as grime. Light only -- see the dark block. */
+  --shadow-card: 0 1px 2px rgb(0 26 51 / 0.05), 0 8px 24px rgb(0 26 51 / 0.05);
+  --shadow-lift: 0 12px 32px rgb(0 26 51 / 0.12);
+  --focus-ring: 0 0 0 4px rgb(60 106 145 / 0.25);
+
+  --glass: rgb(255 255 255 / 0.78);
+  --glass-rim: rgb(255 255 255 / 0.9);
+}
+
+/* THE DARK PALETTE IS SELECTED BY AN ATTRIBUTE, NOT A MEDIA QUERY, so the in-app theme choice can
+   overrule the device without the palette existing twice. www/folt.html sets data-theme before
+   first paint. Declare BOTH grounds or neither -- the original spike rendered near-black on
+   near-black because only one was declared. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  /* #3c6a91 on the dark ground is 3.13:1 -- under AA -- which is why folt_theme.css carries a
+     dark primary at all. Navy headings are 1.28:1 on #171717, so headings go to text colour. */
+  --brand: var(--folt-brand-primary-dark);
+  --brand-hover: var(--folt-brand-primary-dark-hover);
+  --brand-tint: var(--folt-brand-tint-dark);
+  --brand-tint-strong: var(--folt-brand-tint-dark-strong);
+  --heading: #f8f8f8;
+
+  --bg: var(--folt-brand-tint-dark);
+  --surface: #171717;
+  --surface-sunk: #232323;
+  --border: #2e2e2e;
+  --border-strong: #454545;
+  --fg: #f8f8f8;
+  --muted: #c7c7c7;
+  --faint: #a3a3a3;
+
+  --action: var(--folt-brand-primary-dark);
+  --action-hover: var(--folt-brand-primary-dark-hover);
+  --action-fg: #0e141a;
+
+  --ok: #58c08e;
+  --ok-bg: #0b2e1c;
+  --warn: #e79913;
+  --warn-bg: #371e06;
+  --danger: #fc7474;
+  --danger-bg: #361515;
+  --info: var(--folt-brand-primary-dark);
+  --info-bg: var(--folt-brand-tint-dark-strong);
+  --plain: #afafaf;
+  --plain-bg: #232323;
+
+  /* A black shadow is invisible on #171717, so elevation in dark is the border alone. */
+  --shadow-card: none;
+  --shadow-lift: 0 0 0 1px #454545;
+  --focus-ring: 0 0 0 4px rgb(138 180 216 / 0.3);
+
+  --glass: rgb(23 23 23 / 0.78);
+  --glass-rim: rgb(255 255 255 / 0.08);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font);
+  font-size: var(--text-base);
+  font-weight: var(--weight-regular);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1,
+h2,
+h3 {
+  color: var(--heading);
+  font-weight: var(--weight-semibold);
+  line-height: 1.25;
+  margin: 0;
+}
+
+a {
+  color: var(--brand);
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
+/* Shared button vocabulary: every action in the app is one of these three. */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-height: var(--control-height);
+  padding: 0 1.1rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  text-decoration: none;
+  cursor: pointer;
+  transition:
+    background-color var(--dur-control) ease,
+    border-color var(--dur-control) ease,
+    transform var(--dur-control) ease;
+}
+.btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+.btn-primary {
+  background: var(--action);
+  color: var(--action-fg);
+}
+.btn-primary:hover:not(:disabled) {
+  background: var(--action-hover);
+}
+.btn-secondary {
+  background: var(--surface);
+  border-color: var(--border-strong);
+  color: var(--fg);
+}
+.btn-secondary:hover:not(:disabled) {
+  border-color: var(--brand);
+}
+.btn-danger {
+  background: var(--surface);
+  border-color: color-mix(in srgb, var(--danger) 45%, transparent);
+  color: var(--danger);
+}
+.btn-danger:hover:not(:disabled) {
+  background: var(--danger-bg);
+}
+.btn-quiet {
+  background: none;
+  color: var(--brand);
+  padding: 0 0.5rem;
+}
+
+/* A card is a 1px border plus a light-mode-only shadow: --surface equals --bg nowhere, but in
+   dark the shadow is invisible, so the border has to carry the edge on its own. */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

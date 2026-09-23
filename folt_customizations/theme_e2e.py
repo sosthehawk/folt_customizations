@@ -314,6 +314,29 @@ def run():
 		f"{len(brand_hexes)} brand constants; stray: {sorted(set(stray)) or 'none'}",
 	)
 
+	# The /folt SPA loads no frappe stylesheet (www/folt.html extends nothing), so it restates the
+	# brand constants in frontend/src/styles/tokens.css rather than linking this file -- whose light
+	# block would paint over its dark mode. Two copies of one brand are only safe while they are the
+	# same copy, so every --folt-brand-* declared here must be declared there with the same value.
+	spa_tokens = os.path.join(frappe.get_app_path(APP), "..", "frontend", "src", "styles", "tokens.css")
+	if os.path.isfile(spa_tokens):
+		pattern = r"(--folt-brand-[\w-]+)\s*:\s*(#[0-9a-fA-F]{3,8})"
+		theme_brand = dict(re.findall(pattern, brand_block.group(1) if brand_block else ""))
+		with open(spa_tokens) as handle:
+			spa_brand = dict(re.findall(pattern, strip_comments(handle.read())))
+		drift = {
+			token: (value, spa_brand.get(token))
+			for token, value in theme_brand.items()
+			if (spa_brand.get(token) or "").lower() != value.lower()
+		}
+		check(
+			"the /folt SPA restates every brand constant with the same value",
+			bool(theme_brand) and not drift,
+			f"{len(theme_brand)} constants; differ (theme, spa): {drift or 'none'}",
+		)
+	else:
+		print("  note  frontend/src/styles/tokens.css is not in this tree; SPA brand drift not checked")
+
 	# Rule 4: frappe's semantic ramps keep their meaning. Green means done, red means danger.
 	semantic = re.findall(
 		r"^\s*(--(?:red|green|orange|amber|yellow|bg|text-on|alert|indicator-dot|diff)-[\w-]+)\s*:",

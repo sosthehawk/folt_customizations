@@ -1,6 +1,7 @@
 import frappe
 from frappe import _
 from frappe.desk.doctype.notification_log.notification_log import enqueue_create_notification
+from frappe.model.workflow import get_workflow
 from frappe.utils import get_url_to_form
 from frappe.utils.user import get_users_with_role
 
@@ -8,7 +9,7 @@ from frappe.utils.user import get_users_with_role
 # so the accent is the shared one -- see branding.EMAIL_ACCENT.
 from folt_customizations.branding import EMAIL_ACCENT
 from folt_customizations.procurement import COMMITTEE_REVIEW_STATE, EVALUATION_DOCTYPE
-from folt_customizations.workflow import is_own_todo
+from folt_customizations.workflow import is_own_todo, roles_the_owner_can_move
 
 # FoLT runs nine approval workflows, and until now nobody was told when a document landed in
 # their queue. Two things were switched off, and both gates have to be open for frappe to send
@@ -59,7 +60,8 @@ def notify_pending_approvers(doc, method=None):
     # stated in workflow.is_own_todo, because the My Tasks page needs the same answer to sort a
     # document into Drafts rather than Awaiting.
     owner = frappe.db.get_value(doc.reference_doctype, doc.reference_name, "owner")
-    if frappe.session.user == owner and is_own_todo(owner, roles):
+    owner_roles = roles_the_owner_can_move(get_workflow(doc.reference_doctype), doc.workflow_state)
+    if frappe.session.user == owner and is_own_todo(owner, [r for r in roles if r in owner_roles]):
         return
 
     recipients = {user for role in roles for user in get_users_with_role(role)}
@@ -267,4 +269,89 @@ def clear_read_notifications(name: str | None = None) -> int:
     if count:
         frappe.db.delete("Notification Log", filters)
 
+    return count
+
+
+# --- what the /folt bell reads ------------------------------------------------------------
+# frappe has a whitelisted `get_notification_logs`, and the SPA deliberately does not call it.
+# Three reasons, each sufficient on its own:
+#
+#  1. It is wrapped in @http_cache(max_age=60, stale_while_revalidate=3600). A bell that has just
+#     rung would be served a list up to a minute old -- which is precisely the failure a live push
+#     exists to prevent, arriving through the front door.
+#  2. It returns no unread count. The Desk does not need one from the server: it takes
+#     frappe.boot.notification_unread_count and maintains it by arithmetic thereafter (see
+#     clear_read_notifications below, which is entirely about that). The SPA's boot payload has no
+#     such key, and putting one there would bake a number into a server-rendered page that goes
+#     stale the moment a colleague acts.
+#  3. It selects fields=["*"]. The bell draws ten of them.
+
+
+@frappe.whitelist()
+def bell(limit: int = 20) -> dict:
+    """The caller's newest notifications, and how many are unread.
+
+    THE FILTER IS THE PERMISSION CHECK, the same way it is in clear_read_notifications: `for_user`
+    is always the session user, so there is no path from this endpoint to anybody else's bell.
+    """
+    limit = frappe.utils.cint(limit) or 20
+
+    logs = frappe.get_all(
+        "Notification Log",
+        filters={"for_user": frappe.session.user},
+        fields=[
+            "name",
+            "subject",
+            "email_content",
+            "type",
+            "document_type",
+            "document_name",
+            "from_user",
+            "link",
+            "read",
+            "creation",
+        ],
+        order_by="creation desc",
+        limit=limit,
+    )
+
+    senders = {log["from_user"] for log in logs if log["from_user"]}
+    named = (
+        {
+            row.name: row.full_name or row.name
+            for row in frappe.get_all(
+                "User", filters={"name": ("in", list(senders))}, fields=["name", "full_name"]
+            )
+        }
+        if senders
+        else {}
+    )
+    for log in logs:
+        log["from_user_name"] = named.get(log["from_user"])
+
+    return {
+        "unread": frappe.db.count("Notification Log", {"for_user": frappe.session.user, "read": 0}),
+        "logs": logs,
+    }
+
+
+@frappe.whitelist()
+def mark_notifications_read(name: str | None = None) -> int:
+    """Mark the caller's notifications read -- one if `name` is given, all of them if not.
+
+    The other half of clear_read_notifications, which deletes `read = 1` rows and therefore has
+    nothing to work on until something sets the flag. In the Desk frappe's own `mark_as_read`
+    does this; the SPA has no such handle, so it gets one here rather than reaching into
+    frappe.desk for a method whose signature it does not control.
+
+    Same filter-is-the-check shape: `for_user` is pinned to the session user, so a name belonging
+    to somebody else's bell matches nothing rather than being refused.
+    """
+    filters = {"for_user": frappe.session.user, "read": 0}
+    if name:
+        filters["name"] = str(name)
+
+    count = frappe.db.count("Notification Log", filters)
+    if count:
+        frappe.db.set_value("Notification Log", filters, "read", 1, update_modified=False)
     return count

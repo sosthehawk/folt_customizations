@@ -88,6 +88,12 @@ frappe.pages["folt-tasks"].on_page_load = function (wrapper) {
 
 	page.set_secondary_action(__("Refresh"), () => load());
 
+	// The opt-in door to /folt, the same queues in a phone-first app. A link and nothing more:
+	// the Desk stays everyone's landing page (workspaces.set_landing_page) until a user chooses.
+	page.add_inner_button(__("Open the FoLT app"), () => {
+		window.location.href = "/folt";
+	});
+
 	function load(bucket) {
 		if (bucket) state.bucket = bucket;
 

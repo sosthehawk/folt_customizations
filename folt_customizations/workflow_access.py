@@ -293,12 +293,28 @@ def hold_rejection_reason(doctype: str, name: str, reason: str) -> None:
 		frappe.throw(_("Say why this is being turned down."), title=_("A reason is required"))
 
 	frappe.has_permission(doctype, "write", doc=name, throw=True)
+	park_reason(doctype, name, reason)
+
+
+def park_reason(doctype: str, name: str, reason: str):
+	"""Hold `reason` for the next turn-down of this document, keyed to its CURRENT stored version.
+
+	The one place the key is written, for both callers: the Desk's dialog above, and spa.act, which
+	parks the reason inside the same request as the transition -- after any edits it saved, which
+	is why the version is read back from the database here rather than taken from a document in
+	memory. A saved document's in-memory `modified` is a string and the stored one a datetime whose
+	str() drops a zero microsecond, so the two can disagree about the same instant; the database
+	is what require_rejection_reason reads, so the database is what this reads. Returns the version
+	so the caller can forget exactly what it parked.
+	"""
+	modified = frappe.db.get_value(doctype, name, "modified")
 	frappe.cache.set_value(
-		_reason_key(doctype, name, frappe.db.get_value(doctype, name, "modified")),
+		_reason_key(doctype, name, modified),
 		reason,
 		user=frappe.session.user,
 		expires_in_sec=REASON_HOLD_SECONDS,
 	)
+	return modified
 
 
 def held_reason(doctype: str, name: str, modified) -> str | None:

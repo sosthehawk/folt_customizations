@@ -65,6 +65,32 @@ def is_own_todo(owner: str, roles: list[str]) -> bool:
     return not set(roles).isdisjoint(frappe.get_roles(owner))
 
 
+def roles_the_owner_can_move(workflow, state: str) -> list[str]:
+    """The roles on `state`'s forward moves that the document's OWN AUTHOR may use.
+
+    What callers of is_own_todo must pass, and not the plain movers. Eight FoLT transitions set
+    `allow_self_approval: 0`, and on those a role match proves nothing: a Finance Manager who
+    raised a Purchase Order holds the role that approves it, and is exactly the person frappe's
+    has_approval_access will refuse. Passing every mover made is_own_todo call that order "their
+    own to-do", which took it out of every OTHER Finance Manager's queue and suppressed their bell
+    too -- a document waiting on somebody, shown to nobody. Filtering here keeps is_own_todo's one
+    rule intact and makes it ask the right question: can the author move this on themselves?
+    """
+    from folt_customizations.workflow_access import is_turn_down
+
+    return sorted(
+        {
+            row.allowed
+            for row in workflow.transitions
+            if row.state == state
+            and row.allowed
+            and row.next_state != state
+            and int(row.allow_self_approval or 0)
+            and not is_turn_down(workflow, row.state, row.next_state)
+        }
+    )
+
+
 def get_approvers_for_state(workflow, state: str) -> dict:
     """The roles allowed to act on `state`, resolved to the users holding them.
 

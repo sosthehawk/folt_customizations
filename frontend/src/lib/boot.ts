@@ -12,6 +12,8 @@ export type Boot = {
   csrf_token: string;
   asset_base: string;
   app_path: string;
+  /** The socket.io namespace -- see lib/realtime.ts. */
+  sitename: string;
 };
 
 function read(): Boot {

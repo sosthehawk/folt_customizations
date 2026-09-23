@@ -23,6 +23,9 @@ from frappe import _
 # the submodule by the time a Desk request runs -- `frappe.sessions` is not bound on the package
 # otherwise, and it is not in a `bench execute`.
 from frappe.sessions import get_csrf_token
+from frappe.website.utils import get_home_page
+
+from folt_customizations.supplier_portal import desk_app_visible
 
 # Where the bundle is served from. Inside the app's public/ dir on purpose -- see
 # frontend/vite.config.ts for why that placement is load-bearing rather than arbitrary.
@@ -58,6 +61,14 @@ def get_context(context):
 		frappe.local.flags.redirect_location = "/login?redirect-to=" + frappe.utils.quoted(target)
 		raise frappe.Redirect
 
+	if not desk_app_visible():
+		# A supplier (a Website User) has a working portal at /rfq/<name> and no business in a
+		# staff app: every endpoint behind this page would answer them empty or refuse, so the
+		# shell would load, spin and say nothing useful. Same rule as the Desk's apps-screen tile,
+		# from the same function, so the two cannot disagree about who is staff.
+		frappe.local.flags.redirect_location = get_home_page() or "/"
+		raise frappe.Redirect
+
 	context.csrf_token = get_csrf_token()
 	context.scripts, context.styles = _assets()
 
@@ -72,6 +83,10 @@ def get_context(context):
 			"roles": frappe.get_roles(),
 			"csrf_token": context.csrf_token,
 			"asset_base": ASSET_BASE,
+			# The socket.io namespace is /<sitename> (frappe's realtime server keys rooms on it).
+			# Deliberately no port: the SPA is only ever served through the frontend nginx, so the
+			# socket is always on the document's own origin.
+			"sitename": frappe.local.site,
 			# The tail of a deep link, handed over by the route rule so the SPA router can pick it
 			# up without re-parsing window.location.
 			"app_path": frappe.form_dict.get("app_path") or "",

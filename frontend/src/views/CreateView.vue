@@ -9,10 +9,11 @@ import EmptyState from "../components/EmptyState.vue";
 import FormAlert from "../components/FormAlert.vue";
 import Icon from "../components/Icon.vue";
 import SkeletonList from "../components/SkeletonList.vue";
+import RowsEditor from "../components/forms/RowsEditor.vue";
 import StepForm from "../components/forms/StepForm.vue";
 import { errorText } from "../lib/api";
 import { docPath, fromSlug, listPath } from "../lib/doctypes";
-import { missing, useDraft } from "../lib/draft";
+import { missing, missingRows, useDraft } from "../lib/draft";
 import { createDoc, newForm, type WriteResult } from "../lib/store";
 import type { NewForm } from "../lib/types";
 
@@ -26,6 +27,7 @@ const draft = useDraft(() => spec.value);
 const errors = ref<Record<string, string>>({});
 const result = ref<(WriteResult & { name?: string }) | null>(null);
 const busy = ref(false);
+const rowProblems = ref<string[]>([]);
 
 onMounted(async () => {
   if (!meta.value) return;
@@ -53,8 +55,12 @@ async function create() {
     const v = draft.value(f.fieldname);
     if (v !== null && v !== undefined && v !== "") values[f.fieldname] = v;
   }
+  // The tables travel as the same row operations a save sends: every row is an `add`.
+  const patch = draft.patch();
+  for (const t of spec.value.tables) if (patch[t.fieldname]) values[t.fieldname] = patch[t.fieldname];
   errors.value = missing(spec.value, draft.value);
-  if (Object.keys(errors.value).length) return;
+  rowProblems.value = missingRows(spec.value, draft);
+  if (Object.keys(errors.value).length || rowProblems.value.length) return;
   busy.value = true;
   result.value = await createDoc(meta.value.doctype, values as never);
   busy.value = false;
@@ -76,6 +82,16 @@ const attachments = computed(() => spec.value?.fields.filter((f) => f.fieldtype 
       <SkeletonList v-else-if="!spec" :rows="3" height="4rem" />
       <form v-else class="card pad form" novalidate @submit.prevent="create">
         <StepForm :form="spec" :draft="draft" :doctype="meta.doctype" :errors="errors" :disabled="busy" @touched="touched" />
+        <RowsEditor
+          v-for="t in spec.tables"
+          :key="t.fieldname"
+          :table="t"
+          :draft="draft"
+          :doctype="meta.doctype"
+          doc-name=""
+          :disabled="busy"
+        />
+        <FormAlert v-if="rowProblems.length" title="Before it can be saved" :html="rowProblems.join('<br>')" />
         <p v-if="attachments.length" class="later">
           {{ attachments.map((a) => a.label).join(", ") }} can be attached once it is saved.
         </p>

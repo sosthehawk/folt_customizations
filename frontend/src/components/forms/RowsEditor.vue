@@ -298,7 +298,8 @@ const count = computed(() => props.table.rows.length - removed.value.size + t.va
   color: var(--fg);
   font-size: var(--text-sm);
 }
-.cell :deep(input:not([type="checkbox"])),
+/* Not the picker's own input: it styles itself, with room on the right for its clear button. */
+.cell :deep(input:not([type="checkbox"]):not(.folt-input)),
 .cell :deep(select),
 .cell :deep(textarea) {
   width: 100%;

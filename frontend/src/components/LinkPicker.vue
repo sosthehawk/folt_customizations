@@ -110,11 +110,12 @@ watch(() => JSON.stringify(props.context ?? {}), () => {
         @input="onInput"
         @focus="onFocus"
         @blur="open = false"
+        @keydown.esc.stop="open = false"
       />
       <button v-if="modelValue && allowed && !disabled" type="button" class="clear" aria-label="Clear" @mousedown.prevent="clear">×</button>
     </div>
     <p v-if="!allowed && reason" class="why">{{ reason }}</p>
-    <ul v-if="open && allowed && options.length" class="list" role="listbox">
+    <ul v-if="open && allowed && options.length" class="options" role="listbox">
       <!-- mousedown, not click: blur fires first on click and the list is gone before it lands. -->
       <li v-for="option in options" :key="option.value">
         <button type="button" @mousedown.prevent="choose(option)">
@@ -135,6 +136,7 @@ watch(() => JSON.stringify(props.context ?? {}), () => {
 }
 .box {
   position: relative;
+  width: 100%;
 }
 .folt-input {
   width: 100%;
@@ -182,7 +184,9 @@ watch(() => JSON.stringify(props.context ?? {}), () => {
   color: var(--warn);
   font-size: var(--text-xs);
 }
-.list {
+/* Not `.list`: a scoped `.list button` also matches an ANCESTOR with that class -- the row
+   editor's <ol class="list"> -- and stretched the clear button across the input. */
+.options {
   position: absolute;
   z-index: 10;
   top: calc(100% + 4px);
@@ -198,7 +202,7 @@ watch(() => JSON.stringify(props.context ?? {}), () => {
   background: var(--surface);
   box-shadow: var(--shadow-lift);
 }
-.list button {
+.options button {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 0 0.5rem;
@@ -211,7 +215,7 @@ watch(() => JSON.stringify(props.context ?? {}), () => {
   text-align: left;
   cursor: pointer;
 }
-.list button:hover {
+.options button:hover {
   background: var(--brand-tint);
 }
 .label {

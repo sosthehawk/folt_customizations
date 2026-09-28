@@ -13,6 +13,7 @@ export const DOCTYPES: DoctypeInfo[] = [
   { doctype: "Activity Participant List", slug: "attendance-register", noun: "Attendance register", plural: "Attendance registers", chain: "activity" },
   { doctype: "Participant Reimbursement List", slug: "reimbursement-list", noun: "Reimbursement list", plural: "Reimbursement lists", chain: "activity" },
   { doctype: "Expense Claim", slug: "float-retirement", noun: "Float retirement", plural: "Float retirements", chain: "activity" },
+  { doctype: "Request for Quotation", slug: "rfq", noun: "Request for quotation", plural: "Requests for quotation", chain: "procurement" },
   { doctype: "Supplier Quotation", slug: "bid", noun: "Supplier bid", plural: "Supplier bids", chain: "procurement" },
   { doctype: "Procurement Committee Evaluation", slug: "committee-evaluation", noun: "Committee evaluation", plural: "Committee evaluations", chain: "procurement" },
   { doctype: "Derogation Waiver Request", slug: "waiver", noun: "Waiver request", plural: "Waiver requests", chain: "procurement" },

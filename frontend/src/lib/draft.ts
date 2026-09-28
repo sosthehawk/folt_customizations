@@ -124,6 +124,30 @@ export function shown(showIf: Record<string, FieldValue> | undefined, read: (f: 
   return Object.entries(showIf).every(([field, expected]) => same(read(field) ?? 0, expected));
 }
 
+const blank = (v: FieldValue | undefined) => v === null || v === undefined || String(v).trim() === "";
+
+/** What the editable tables are missing: a mandatory table with no rows left in it, or a
+ *  required column left blank on a row. Asked before sending, so an RFQ with no suppliers is
+ *  stopped in the form rather than by frappe's "Value missing" after the round trip. */
+export function missingRows(form: Form, draft: Draft): string[] {
+  const out = new Set<string>();
+  for (const t of form.tables) {
+    if (!t.add && !t.columns.length) continue;
+    const edits = draft.state.tables[t.fieldname];
+    const removed = new Set(edits?.remove ?? []);
+    const kept = t.rows.filter((r) => !removed.has(r.name));
+    const added = edits?.add ?? [];
+    if (t.reqd && t.add && kept.length + added.length === 0) out.add(`Add at least one row to ${t.label}.`);
+    for (const column of t.columns.filter((c) => c.reqd)) {
+      const gap =
+        added.some((r) => blank(r.values[column.fieldname])) ||
+        kept.some((r) => r.editable && blank(draft.cell(t.fieldname, r.name, column.fieldname)));
+      if (gap) out.add(`${t.label}: ${column.label} is needed on every row.`);
+    }
+  }
+  return [...out];
+}
+
 /** Required fields with nothing in them, by fieldname -> message. Mirrors the server's `reqd`. */
 export function missing(form: Form, read: (f: string) => FieldValue): Record<string, string> {
   const out: Record<string, string> = {};

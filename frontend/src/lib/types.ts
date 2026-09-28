@@ -183,6 +183,8 @@ export type TableSpec = {
   add: boolean;
   remove: boolean;
   own_rows: boolean;
+  /** The table itself is mandatory: a document cannot be saved with no rows in it. */
+  reqd: boolean;
   new_row: Record<string, FieldValue>;
 };
 

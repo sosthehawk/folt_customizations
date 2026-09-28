@@ -11,6 +11,7 @@ import { loadCatalogue, store } from "../lib/store";
 
 const DESCRIPTIONS: Record<string, string> = {
   "Activity Requisition": "Plan an activity and its budget. Once approved, the float request and the attendance register are raised from it.",
+  "Request for Quotation": "Invite pre-qualified suppliers to quote. Once it is sent, their bids come back to be evaluated by the committee.",
   "Derogation Waiver Request": "Make the case for buying from one supplier without competing it. Once authorised, the purchase order is raised from it.",
 };
 

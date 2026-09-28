@@ -2,11 +2,14 @@
 // The read-only details, in the sections step_forms.SUMMARY declares. Link values show the
 // target's title where the reader may see it; the server leaves out fields above their permlevel.
 import { money, day } from "../../lib/format";
+import SafeHtml from "../SafeHtml.vue";
 import type { FieldSpec, FieldValue, SummarySection } from "../../lib/types";
 
 import { computed } from "vue";
 
 const props = defineProps<{ sections: SummarySection[] }>();
+
+const RICH = new Set(["Text Editor", "Text", "Small Text", "Long Text"]);
 
 // A section whose every field is empty is a heading over nothing; leave it out.
 const visible = computed(() =>
@@ -30,9 +33,11 @@ function show(field: FieldSpec, value: FieldValue, display: string | null | unde
       <h3>{{ section.label }}</h3>
       <dl v-if="section.fields" class="fields">
         <template v-for="field in section.fields" :key="field.fieldname">
-          <div v-if="show(field, field.value ?? null, field.display, section.currency)" class="pair">
+          <div v-if="show(field, field.value ?? null, field.display, section.currency)" class="pair" :class="{ wide: RICH.has(field.fieldtype) }">
             <dt>{{ field.label }}</dt>
-            <dd>{{ show(field, field.value ?? null, field.display, section.currency) }}</dd>
+            <!-- A rich-text field is HTML (an RFQ's message to suppliers): rendered, sanitised. -->
+            <dd v-if="field.fieldtype === 'Text Editor'"><SafeHtml :html="String(field.value)" tag="div" class="rich" /></dd>
+            <dd v-else>{{ show(field, field.value ?? null, field.display, section.currency) }}</dd>
           </div>
         </template>
       </dl>
@@ -78,6 +83,17 @@ function show(field: FieldSpec, value: FieldValue, display: string | null | unde
   display: grid;
   gap: 0.1rem;
   min-width: 0;
+}
+.pair.wide {
+  grid-column: 1 / -1;
+}
+.rich :deep(p),
+.rich :deep(ol),
+.rich :deep(ul) {
+  margin: 0 0 0.5rem;
+}
+.rich {
+  white-space: normal;
 }
 dt {
   color: var(--faint);

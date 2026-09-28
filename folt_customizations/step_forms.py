@@ -60,7 +60,9 @@ def step(fields=(), required=(), tables=None, show_if=None, virtual=(), tools=()
 	)
 
 
-def table(columns=(), show=(), add=False, remove=False, rows="all", own_field="member", required=(), new_row=None) -> Table:
+def table(columns=(), show=(), add=False, remove=False, rows="all", own_field="member", required=(), new_row=None, filled=None) -> Table:
+	"""`filled`: {column: hint} for columns the meta marks mandatory but the server completes when
+	left empty (spa._complete) -- offered, not required, with the hint saying what fills them."""
 	return Table(
 		columns=list(columns),
 		show=list(show),
@@ -70,6 +72,7 @@ def table(columns=(), show=(), add=False, remove=False, rows="all", own_field="m
 		own_field=own_field,
 		required=list(required),
 		new_row=new_row or {},
+		filled=filled or {},
 	)
 
 
@@ -278,7 +281,37 @@ STEP_FORMS: dict[tuple[str, str], Step] = {
 	("Expense Claim", "Draft"): step(fields=("remark",)),
 }
 
-# Creating a document from nothing -- the two chain starters. Everything else is created by a
+# --- Request for Quotation (no workflow) -------------------------------------------------------
+# Where the procurement chain starts: the competition itself. It has no workflow -- erpnext submits
+# it, which is what emails the invited suppliers their portal link -- so its only editable state is
+# "Draft" (docstatus 0), and who may edit it is its DocPerm alone. The lines take what the buyer
+# decides; the server fills the unit fields from the Item (spa._complete), as the Desk's
+# get_item_details does in the browser, so no UOM picker is needed.
+_RFQ = step(
+	fields=("title", "transaction_date", "schedule_date", "message_for_supplier"),
+	required=("title", "schedule_date"),
+	tables={
+		"suppliers": table(
+			columns=("supplier", "send_email"),
+			show=("supplier_name", "email_id"),
+			add=True,
+			remove=True,
+			required=("supplier",),
+			new_row={"send_email": 1},
+		),
+		"items": table(
+			columns=("item_code", "qty", "schedule_date", "project_name"),
+			show=("item_name", "uom"),
+			add=True,
+			remove=True,
+			required=("item_code", "qty"),
+			filled={"schedule_date": "Leave blank to use the RFQ's Required Date."},
+		),
+	},
+)
+STEP_FORMS[("Request for Quotation", "Draft")] = _RFQ
+
+# Creating a document from nothing -- the chain starters. Everything else is created by a
 # hand-off from the document before it (activity_chain / procurement_chain), which is how it
 # arrives already filled in and linked.
 CREATE_FORMS: dict[str, Step] = {
@@ -290,7 +323,11 @@ CREATE_FORMS: dict[str, Step] = {
 	"Derogation Waiver Request": step(
 		fields=STEP_FORMS[("Derogation Waiver Request", "Draft")].fields,
 	),
+	"Request for Quotation": _RFQ,
 }
+
+# A document with no workflow is moved on by submitting it; this is what that is called in /folt.
+SUBMIT_ACTIONS = {"Request for Quotation": "Send to suppliers"}
 
 # Virtual fields: a value a step form edits that is not one field on the document.
 VIRTUAL_FIELDS = {
@@ -367,6 +404,12 @@ SUMMARY: dict[str, list[tuple]] = {
 		("Earnings", {"table": "earnings", "columns": ["salary_component", "amount"]}),
 		("Deductions", {"table": "deductions", "columns": ["salary_component", "amount"]}),
 	],
+	"Request for Quotation": [
+		("Competition", ["title", "transaction_date", "schedule_date", "company"]),
+		("Invited suppliers", {"table": "suppliers", "columns": ["supplier", "email_id", "send_email", "quote_status"]}),
+		("Lines", {"table": "items", "columns": ["item_code", "item_name", "qty", "uom", "schedule_date", "project_name"]}),
+		("Message to suppliers", ["message_for_supplier"]),
+	],
 	"Supplier Quotation": [
 		("Bid", ["supplier", "transaction_date", "valid_till", "grand_total"]),
 		("Items", {"table": "items", "columns": ["item_code", "item_name", "qty", "uom", "rate", "amount"]}),
@@ -384,6 +427,7 @@ SPA_DOCTYPES = (
 	"Derogation Waiver Request",
 	"Purchase Order",
 	"Salary Slip",
+	"Request for Quotation",
 	"Supplier Quotation",
 )
 
@@ -409,7 +453,14 @@ def audit() -> list[str]:
 	for (doctype, state), entry in STEP_FORMS.items():
 		where = f"{doctype} / {state}"
 		if not get_workflow_name(doctype):
-			problems.append(f"{where}: no active workflow")
+			# A document with no workflow has one editable state, its draft; its DocPerm is the
+			# only answer to who edits it.
+			if state != "Draft" or doctype not in SUBMIT_ACTIONS:
+				problems.append(f"{where}: no active workflow, and not a declared no-workflow draft")
+				continue
+			problems += _check_fields(doctype, entry.fields, where, False)
+			for fieldname, spec in entry.tables.items():
+				problems += _check_table(doctype, fieldname, spec, where, False)
 			continue
 		workflow = frappe.get_cached_doc("Workflow", get_workflow_name(doctype))
 		row = next((s for s in workflow.states if s.state == state), None)

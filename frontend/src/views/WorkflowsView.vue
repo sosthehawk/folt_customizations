@@ -70,6 +70,14 @@ watch(() => store.pulse, () => void loadCatalogue());
               </RouterLink>
             </li>
           </ol>
+          <ol v-if="!wf.lanes.length" class="lanes plain">
+            <li v-for="(n, status) in wf.counts" :key="status" class="lane">
+              <RouterLink :to="{ path: listPath(wf.doctype), query: { state: status } }" class="lane-link">
+                <span>{{ status }}</span>
+                <span class="lane-n" :class="{ zero: !n }">{{ n }}</span>
+              </RouterLink>
+            </li>
+          </ol>
           <div v-if="Object.keys(wf.off_path).length" class="off">
             <RouterLink
               v-for="(_, state) in wf.off_path"

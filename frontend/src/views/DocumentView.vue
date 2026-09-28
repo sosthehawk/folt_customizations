@@ -22,8 +22,8 @@ import StepTracker from "../components/doc/StepTracker.vue";
 import Timeline from "../components/doc/Timeline.vue";
 import RowsEditor from "../components/forms/RowsEditor.vue";
 import StepForm from "../components/forms/StepForm.vue";
-import { fromSlug, info, listPath } from "../lib/doctypes";
-import { missing, useDraft } from "../lib/draft";
+import { docPath, fromSlug, info, listPath } from "../lib/doctypes";
+import { missing, missingRows, useDraft } from "../lib/draft";
 import { money, roles } from "../lib/format";
 import { watchDoc } from "../lib/realtime";
 import { actOn, attachTo, docFor, loadDoc, saveDoc, store, toast, type WriteResult } from "../lib/store";
@@ -82,7 +82,9 @@ watch(() => store.pulse, () => {
 function validate(): boolean {
   if (!form.value) return true;
   errors.value = missing(form.value, draft.value);
-  return !Object.keys(errors.value).length;
+  const rows = missingRows(form.value, draft);
+  if (rows.length) saveResult.value = { ok: false, title: "Before it can be saved", error: rows.join("<br>"), stale: false };
+  return !Object.keys(errors.value).length && !rows.length;
 }
 
 function touched(fieldname: string) {
@@ -262,7 +264,7 @@ function discard() {
             <h2 class="section-title">Bids received</h2>
             <ul class="bids">
               <li v-for="b in doc.context.bids" :key="b.supplier_quotation">
-                <span>{{ b.supplier }}</span>
+                <RouterLink :to="docPath('Supplier Quotation', b.supplier_quotation)">{{ b.supplier }}</RouterLink>
                 <span class="amount">{{ money(b.grand_total, b.currency) }}</span>
               </li>
             </ul>

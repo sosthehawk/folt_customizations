@@ -74,26 +74,32 @@ def catalogue() -> list[dict]:
 				"can_create": doctype in step_forms.CREATE_FORMS and bool(frappe.has_permission(doctype, "create")),
 			}
 		)
-	# Supplier Quotation has no workflow and so no guide, but the procurement chain starts at a
-	# submitted bid, and a buyer needs somewhere in the SPA to find one.
-	if frappe.has_permission("Supplier Quotation", "read"):
+	# The two procurement documents with no workflow and so no guide: the RFQ that opens a
+	# competition and the bids that answer it. The chain starts there, so a buyer needs somewhere
+	# in the SPA to find -- and, for the RFQ, to raise -- them.
+	for doctype in ("Request for Quotation", "Supplier Quotation"):
+		if not frappe.has_permission(doctype, "read"):
+			continue
 		by_status = {
 			row.get("docstatus"): row.get("COUNT(*)")
-			for row in frappe.get_list("Supplier Quotation", fields=["docstatus", {"COUNT": "*"}], group_by="docstatus")
+			for row in frappe.get_list(doctype, fields=["docstatus", {"COUNT": "*"}], group_by="docstatus")
 		}
 		out.append(
 			{
-				"doctype": "Supplier Quotation",
-				"label": _("Supplier Quotation"),
+				"doctype": doctype,
+				"label": _(doctype),
 				"lanes": [],
 				"off_path": {},
 				"chain": None,
-				"counts": {"Draft": by_status.get(0, 0), "Submitted": by_status.get(1, 0), "Cancelled": by_status.get(2, 0)},
+				"counts": {name: by_status.get(status, 0) for status, name in _DOCSTATUS_NAMES.items()},
 				"tones": {"Draft": "plain", "Submitted": "ok", "Cancelled": "danger"},
-				"can_create": False,
+				"can_create": doctype in step_forms.CREATE_FORMS and bool(frappe.has_permission(doctype, "create")),
 			}
 		)
 	return out
+
+
+_DOCSTATUS_NAMES = {0: "Draft", 1: "Submitted", 2: "Cancelled"}
 
 
 @frappe.whitelist()
@@ -119,13 +125,13 @@ def documents(doctype: str, state: str | None = None, query: str = "", start: in
 	if query:
 		like = f"%{query.strip()}%"
 		or_filters = [["name", "like", like]]
-		if meta.title_field:
-			or_filters.append([meta.title_field, "like", like])
+		if _title_field(meta):
+			or_filters.append([_title_field(meta), "like", like])
 
 	if shaped:
 		fields = _fields(doctype, state_field)
 	else:
-		fields = ["name", "owner", "modified", "docstatus"] + ([meta.title_field] if meta.title_field else [])
+		fields = ["name", "owner", "modified", "docstatus"] + ([_title_field(meta)] if _title_field(meta) else [])
 
 	found = frappe.get_list(
 		doctype,
@@ -150,8 +156,8 @@ def _plain_row(doctype, meta, row) -> dict:
 	return {
 		"doctype": doctype,
 		"name": row.name,
-		"title": (meta.title_field and row.get(meta.title_field)) or row.name,
-		"state": {0: "Draft", 1: "Submitted", 2: "Cancelled"}[row.docstatus],
+		"title": (_title_field(meta) and row.get(_title_field(meta))) or row.name,
+		"state": _DOCSTATUS_NAMES[row.docstatus],
 		"lane": None,
 		"of": 0,
 		"step_label": None,
@@ -193,8 +199,8 @@ def document(doctype: str, name: str) -> dict:
 		"state": state,
 		"tones": state_tones(doctype),
 		"guide": guide,
-		"actions": actions_for(doc) if workflow_name else [],
-		"form": form_for(doc) if workflow_name else _no_form(_("This document has no approval workflow.")),
+		"actions": actions_for(doc),
+		"form": form_for(doc),
 		"summary": summary_for(doc),
 		"context": context_for(doc),
 		"desk_url": f"/desk/{frappe.scrub(doctype).replace('_', '-')}/{quote(doc.name)}",
@@ -203,7 +209,7 @@ def document(doctype: str, name: str) -> dict:
 
 def _unguided(doc) -> dict:
 	"""The part of a guide a document with no workflow still has: its hand-offs and its route."""
-	state = procurement_chain._state(doc)
+	state = _state_of(doc)
 	return {
 		"doctype": doc.doctype,
 		"name": doc.name,
@@ -216,7 +222,7 @@ def _unguided(doc) -> dict:
 		"off_path": None,
 		"chain": None,
 		"handoffs": procurement_chain.handoffs_for(doc),
-		"note": procurement_chain.route_note(doc),
+		"note": procurement_chain.route_note(doc) or _rfq_note(doc),
 		"waiting_for": {"roles": [], "approvers": [], "unassigned": False},
 		"can_act": False,
 		"timeline": [],
@@ -224,6 +230,22 @@ def _unguided(doc) -> dict:
 		"blocked_by": [],
 		"rejection_reason": None,
 	}
+
+
+def _rfq_note(doc) -> str | None:
+	"""Where a request for quotation is, in the one sentence its form was missing."""
+	if doc.doctype != "Request for Quotation":
+		return None
+	if doc.docstatus == 0:
+		if doc.has_permission("submit"):
+			return _("When it is sent, every supplier with Send email ticked is emailed a link to quote on the supplier portal.")
+		return _("Sending it to the suppliers needs a Purchase Manager. Prepare it here and ask them to send it.")
+	if doc.docstatus == 1:
+		quoted = sum(1 for row in doc.suppliers or [] if row.quote_status == "Received")
+		return _("Sent. {0} of {1} invited suppliers have quoted. A committee evaluation is raised from any submitted bid.").format(
+			quoted, len(doc.suppliers or [])
+		)
+	return None
 
 
 def state_tones(doctype: str) -> dict[str, str]:
@@ -274,6 +296,22 @@ def actions_for(doc) -> list[dict]:
 	"""
 	if doc.docstatus == 2 or doc.is_new():
 		return []
+	if not get_workflow_name(doc.doctype):
+		label = step_forms.SUBMIT_ACTIONS.get(doc.doctype)
+		if not label or doc.docstatus != 0 or not doc.has_permission("submit"):
+			return []
+		return [
+			{
+				"action": label,
+				"label": _(label),
+				"next_state": _("Submitted"),
+				"kind": "forward",
+				"needs_reason": False,
+				"submits": True,
+				"blocks": [],
+				"primary": True,
+			}
+		]
 	workflow = get_workflow(doc.doctype)
 	state = doc.get(workflow.workflow_state_field)
 	user = frappe.session.user
@@ -315,10 +353,9 @@ def actions_for(doc) -> list[dict]:
 
 def form_for(doc) -> dict:
 	"""What this step lets the reader edit, with current values -- or why it lets them edit nothing."""
-	workflow = get_workflow(doc.doctype)
-	state = doc.get(workflow.workflow_state_field)
+	state = _state_of(doc)
 	entry = step_forms.STEP_FORMS.get((doc.doctype, state))
-	custodians = _custodians(workflow, state)
+	custodians = _custodians(get_workflow(doc.doctype), state) if get_workflow_name(doc.doctype) else []
 	if not entry:
 		return _no_form(None, custodians=custodians)
 
@@ -367,12 +404,13 @@ def _form_payload(doc, entry, editable: bool, why_not: str | None, custodians: l
 			{
 				"fieldname": fieldname,
 				"label": _(field.label),
-				"columns": [_field_spec(child, c, None, spec.required, titles) for c in spec.columns],
+				"columns": [_filled(_field_spec(child, c, None, spec.required, titles), spec) for c in spec.columns],
 				"show": [_field_spec(child, c, None, (), titles) for c in spec.show],
 				"rows": rows,
 				"add": editable and spec.add,
 				"remove": editable and spec.remove,
 				"own_rows": spec.rows == "own",
+				"reqd": bool(field.reqd),
 				"new_row": spec.new_row,
 			}
 		)
@@ -461,6 +499,10 @@ def context_for(doc) -> dict:
 
 		context["bids"] = [{k: _plain(v) for k, v in bid.items()} for bid in rfq_quotations(doc.request_for_quotation)]
 		context["me_on_committee"] = any(row.member == frappe.session.user for row in doc.members or [])
+	elif doc.doctype == "Request for Quotation" and doc.docstatus == 1:
+		from folt_customizations.procurement import rfq_quotations
+
+		context["bids"] = [{k: _plain(v) for k, v in bid.items()} for bid in rfq_quotations(doc.name)]
 	elif doc.doctype == "Employee Advance":
 		paid, claimed, returned = flt(doc.paid_amount), flt(doc.claimed_amount), flt(doc.return_amount)
 		context["float"] = {"paid": paid, "claimed": claimed, "returned": returned, "balance": paid - claimed - returned}
@@ -484,6 +526,7 @@ def save(doctype: str, name: str, values: str | dict | None = None, modified: st
 	doc = _load(doctype, name, modified)
 	entry = _editable_step(doc)
 	_apply_patch(doc, entry, _parse(values))
+	_complete(doc)
 	doc.save()
 	return document(doctype, doc.name)
 
@@ -502,6 +545,8 @@ def act(
 	The order below is forced; see the module docstring.
 	"""
 	doc = _load(doctype, name, modified)
+	if not get_workflow_name(doctype):
+		return _submit(doc, action, _parse(values))
 	workflow = get_workflow(doctype)
 	state = doc.get(workflow.workflow_state_field)
 
@@ -551,6 +596,61 @@ def act(
 	return document(doctype, doc.name)
 
 
+def _submit(doc, action: str, patch: dict) -> dict:
+	"""The one move a document with no workflow has: submitting it (for an RFQ, sending it).
+
+	Edits travel with it exactly as they do on a workflow transition -- applied, completed, then
+	submitted in the same request -- so a buyer who fixes a line and presses Send does not send
+	the old line.
+	"""
+	label = step_forms.SUBMIT_ACTIONS.get(doc.doctype)
+	if action != label or doc.docstatus != 0:
+		frappe.throw(_("{0} cannot be taken on {1}.").format(frappe.bold(_(action)), frappe.bold(doc.name)), title=_("Not an action you can take"))
+	if not doc.has_permission("submit"):
+		frappe.throw(
+			_("Sending {0} needs submit permission on {1}, which a Purchase Manager holds.").format(frappe.bold(doc.name), _(doc.doctype)),
+			frappe.PermissionError,
+			title=_("Not an action you can take"),
+		)
+	if patch:
+		_apply_patch(doc, _editable_step(doc, taking=action), patch)
+	_complete(doc)
+	doc.submit()
+	return document(doc.doctype, doc.name)
+
+
+def _complete(doc):
+	"""What the Desk's form script fills in the browser and a patch does not carry.
+
+	An RFQ line needs its UOM, stock UOM, conversion factor, name and description; erpnext's form
+	gets them from get_item_details as the item is picked, and the controller does not (it only
+	multiplies by the conversion factor it is given). A supplier row needs a contact for the email
+	to have an address. Filled only where empty, so nothing a buyer chose is overwritten.
+	"""
+	if doc.doctype != "Request for Quotation":
+		return
+	for row in doc.get("items") or []:
+		if not row.item_code:
+			continue
+		item = frappe.get_cached_value("Item", row.item_code, ["stock_uom", "purchase_uom", "item_name", "description"], as_dict=True)
+		if not item:
+			continue
+		row.stock_uom = row.stock_uom or item.stock_uom
+		row.uom = row.uom or item.purchase_uom or item.stock_uom
+		if not row.conversion_factor:
+			row.conversion_factor = 1 if row.uom == row.stock_uom else (
+				frappe.db.get_value("UOM Conversion Detail", {"parent": row.item_code, "uom": row.uom}, "conversion_factor") or 1
+			)
+		row.item_name = row.item_name or item.item_name
+		row.description = row.description or item.description or item.item_name
+		row.schedule_date = row.schedule_date or doc.schedule_date or doc.transaction_date
+	for row in doc.get("suppliers") or []:
+		if row.supplier and not row.contact:
+			row.contact = frappe.db.get_value("Supplier", row.supplier, "supplier_primary_contact") or frappe.db.get_value(
+				"Dynamic Link", {"link_doctype": "Supplier", "link_name": row.supplier, "parenttype": "Contact"}, "parent"
+			)
+
+
 @frappe.whitelist()
 def new_form(doctype: str) -> dict:
 	"""The blank form for a chain starter, with the defaults a new document would get."""
@@ -580,6 +680,7 @@ def create(doctype: str, values: str | dict | None = None) -> dict:
 	_apply_patch(doc, entry, _parse(values), state=_("a new document"))
 	if doctype == "Derogation Waiver Request" and not doc.get("organisation_project_name"):
 		doc.organisation_project_name = procurement_chain.get_waiver_heading(doc.get("project"))
+	_complete(doc)
 	doc.insert()
 	return {"name": doc.name, "document": document(doctype, doc.name)}
 
@@ -773,6 +874,15 @@ def _custom_source(doctype, fieldname, target, query, context, limit):
 
 		filters = {"activity": context["activity"]} if context.get("activity") else {}
 		return _tuples(get_verified_registers(target, txt, "name", 0, limit, filters))
+	if doctype == "Request for Quotation" and fieldname == "supplier":
+		# The pre-qualified register: disabled suppliers and those whose folt_qualified_until has
+		# passed are left out, so a lapsed supplier is not invited to a competition it could not
+		# be awarded (purchase_order.require_award_authority would refuse the order).
+		from folt_customizations.supplier import qualified_supplier_query
+
+		rows = qualified_supplier_query("Supplier", txt, "name", 0, limit, {})
+		# The query answers [name, supplier_group]; the group is the hint, not the label.
+		return [{"value": name, "label": name, "hint": group or ""} for name, group in rows or []]
 	if doctype == "Procurement Committee Evaluation" and fieldname == "recommended_supplier_quotation":
 		# Only bids in this competition, and only submitted ones: a draft bid can be recommended and
 		# approved, and then erpnext's mapper refuses to order it.
@@ -884,6 +994,9 @@ def _default_filters(target: str, meta) -> dict:
 		filters["status"] = "Open"
 	if target == "FoLT Participant" and meta.get_field("is_active"):
 		filters["is_active"] = 1
+	if target == "Item":
+		# Variant templates cannot be bought, and a sales-only item is not something to quote for.
+		filters.update({"has_variants": 0, "is_purchase_item": 1})
 	return filters
 
 
@@ -1111,10 +1224,9 @@ def _why_not_editable(doc, custodians: list[str]) -> str | None:
 
 def _editable_step(doc, taking: str | None = None):
 	"""The step form for the document's current state, if this user may use it -- else refuse."""
-	workflow = get_workflow(doc.doctype)
-	state = doc.get(workflow.workflow_state_field)
+	state = _state_of(doc)
 	entry = step_forms.STEP_FORMS.get((doc.doctype, state))
-	custodians = _custodians(workflow, state)
+	custodians = _custodians(get_workflow(doc.doctype), state) if get_workflow_name(doc.doctype) else []
 	if not entry:
 		frappe.throw(
 			_("Nothing on {0} is edited at {1}{2}.").format(
@@ -1138,10 +1250,15 @@ def _editable_step(doc, taking: str | None = None):
 
 
 def _step_label(doc) -> str:
+	return _(_state_of(doc) or "")
+
+
+def _state_of(doc) -> str | None:
+	"""The workflow state, or -- for a document with no workflow -- Draft, Submitted or Cancelled."""
 	name = get_workflow_name(doc.doctype)
-	if not name:
-		return doc.name
-	return _(doc.get(get_workflow(doc.doctype).workflow_state_field) or "")
+	if name:
+		return doc.get(get_workflow(doc.doctype).workflow_state_field)
+	return _DOCSTATUS_NAMES.get(doc.docstatus)
 
 
 def _labels(meta, entry) -> str:
@@ -1171,6 +1288,15 @@ def _field_spec(meta, fieldname: str, doc, required, titles) -> dict:
 	return spec
 
 
+def _filled(spec: dict, table) -> dict:
+	"""A column the server completes is offered, not demanded -- see step_forms.table(filled=)."""
+	hint = (table.filled or {}).get(spec["fieldname"])
+	if hint:
+		spec["reqd"] = False
+		spec["description"] = _(hint)
+	return spec
+
+
 def _virtual_spec(doc, name: str) -> dict:
 	spec = dict(step_forms.VIRTUAL_FIELDS[name])
 	spec["fieldname"] = name
@@ -1194,8 +1320,18 @@ _TITLE_FALLBACK = {
 }
 
 
+# Where a doctype's declared title_field names the wrong thing. erpnext sets Request for
+# Quotation's to `company`, which is the same for every RFQ FoLT raises; its `title` field is what
+# says which competition it is.
+_TITLE_OVERRIDE = {"Request for Quotation": "title"}
+
+
+def _title_field(meta) -> str | None:
+	return _TITLE_OVERRIDE.get(meta.name) or meta.title_field
+
+
 def _title_of(doc) -> str:
-	title_field = doc.meta.title_field or _TITLE_FALLBACK.get(doc.doctype)
+	title_field = _TITLE_OVERRIDE.get(doc.doctype) or doc.meta.title_field or _TITLE_FALLBACK.get(doc.doctype)
 	value = title_field and doc.get(title_field)
 	if not value:
 		return doc.name
@@ -1244,7 +1380,7 @@ class _Titles:
 		key = (doctype, name)
 		if key not in self.cache:
 			meta = frappe.get_meta(doctype)
-			field = "full_name" if doctype == "User" else meta.title_field
+			field = "full_name" if doctype == "User" else _title_field(meta)
 			value = frappe.db.get_value(doctype, name, field) if field and meta.get_field(field) or doctype == "User" else None
 			self.cache[key] = value if value and value != name else None
 		return self.cache[key]

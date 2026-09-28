@@ -358,7 +358,10 @@ def _run():
 	print("\n--- 15  the committee's own rows ---")
 	_committee_rows()
 
-	print("\n--- 16  the fixes bundled with this ---")
+	print("\n--- 16  a request for quotation, from nothing to sent ---")
+	_request_for_quotation()
+
+	print("\n--- 17  the fixes bundled with this ---")
 	retirement = get_workflow("Expense Claim")
 	rejected = next(s for s in retirement.states if s.state == "Rejected")
 	check(
@@ -379,6 +382,68 @@ def _run():
 	float_flow = get_workflow("Employee Advance")
 	submitted_states = {s.state for s in float_flow.states if int(s.doc_status or 0) == 1}
 	check("Overdue is a submitted state the Done bucket now reads", "Overdue" in submitted_states)
+
+
+def _request_for_quotation():
+	"""Raised by the buyer, sent by somebody holding submit, all rolled back at the end of run()."""
+	from folt_customizations.supplier import expired_suppliers
+
+	lapsed = set(expired_suppliers() or [])
+	supplier = next(
+		(s for s in frappe.get_all("Supplier", filters={"disabled": 0}, pluck="name", order_by="name") if s not in lapsed), None
+	)
+	item = frappe.db.get_value("Item", {"disabled": 0, "has_variants": 0, "is_purchase_item": 1}, "name")
+	if not supplier or not item:
+		print("  note  not exercised -- no qualified supplier or purchasable item on this site")
+		return
+
+	values = {
+		"title": "E2E SPA Stationery for Q4",
+		"schedule_date": add_days(nowdate(), 14),
+		"message_for_supplier": "Please quote for the items below.",
+		# send_email 0: the site's suppliers carry real addresses (folt-rate-card-rfq).
+		"suppliers": {"add": [{"supplier": supplier, "send_email": 0}]},
+		"items": {"add": [{"item_code": item, "qty": 3}]},
+	}
+	created = as_user(PURCHASER, lambda: spa.create("Request for Quotation", values))
+	rfq = frappe.get_doc("Request for Quotation", created["name"])
+	line = rfq.items[0]
+	check("a buyer raises an RFQ from a patch, with its lines and suppliers", len(rfq.items) == 1 and len(rfq.suppliers) == 1, rfq.name)
+	check(
+		"the server filled what the Desk's item script would have (UOM, conversion, name)",
+		bool(line.uom and line.stock_uom and line.conversion_factor and line.item_name),
+		f"{line.uom}/{line.stock_uom}/{line.conversion_factor}",
+	)
+	check("a line with no date takes the RFQ's Required By", str(line.schedule_date) == str(rfq.schedule_date))
+	check("its title is what it is called, not the company", created["document"]["title"] == values["title"], created["document"]["title"])
+
+	answer = as_user(PURCHASER, lambda: spa.options("Request for Quotation", "suppliers.supplier"))
+	check(
+		"the supplier picker offers the pre-qualified register only",
+		answer["allowed"] and not (lapsed & {o["value"] for o in answer["options"]}),
+		f"{len(answer['options'])} offered, {len(lapsed)} lapsed",
+	)
+
+	actions = as_user(PURCHASER, lambda: spa.document("Request for Quotation", rfq.name)["actions"])
+	check("a Purchase User is not offered Send (they hold no submit on an RFQ)", not actions, str(actions))
+	why = refused(lambda: as_user(PURCHASER, lambda: spa.act("Request for Quotation", rfq.name, "Send to suppliers")))
+	check("...and is refused if they ask", bool(why), why or "")
+
+	as_user(PURCHASER, lambda: spa.save("Request for Quotation", rfq.name, {"items": {"update": [{"name": line.name, "qty": 5}]}}))
+	check("the buyer edits a line of the draft", frappe.db.get_value("Request for Quotation Item", line.name, "qty") == 5)
+
+	sent = spa.act("Request for Quotation", rfq.name, "Send to suppliers")  # as Administrator: holds submit
+	check("somebody holding submit sends it", frappe.db.get_value("Request for Quotation", rfq.name, "docstatus") == 1)
+	check("once sent it is not editable here", not sent["form"]["editable"] and not sent["actions"])
+
+	evaluation = as_user(PURCHASER, lambda: spa.document("Procurement Committee Evaluation", frappe.get_all("Procurement Committee Evaluation", pluck="name", limit=1)[0]))
+	rfq_field = next((f for s in evaluation["summary"] for f in s.get("fields") or [] if f["fieldname"] == "request_for_quotation"), None)
+	company = frappe.db.get_value("Request for Quotation", rfq_field["value"], "company") if rfq_field and rfq_field.get("value") else None
+	check(
+		"an evaluation no longer labels its RFQ with the company name",
+		not rfq_field or not company or rfq_field.get("display") != company,
+		str(rfq_field and rfq_field.get("display")),
+	)
 
 
 def _committee_rows():

@@ -147,6 +147,32 @@ def run():
 
 
 def _run():
+	print("\n--- 0  boot, for a client served from another container ---")
+	guest = as_user("Guest", spa.boot)
+	check("a Guest is answered, not refused, and gets no CSRF token", guest == {"user": "Guest", "is_staff": False}, str(guest))
+
+	def staff_boot():
+		# A bench process has no session object for get_csrf_token to generate into, so seed the
+		# token the way a request's session would already hold it; the generating path is proven
+		# over HTTP instead (folt-workflow-ui's README, Verification).
+		frappe.local.session.data.csrf_token = "e2e-boot-token"
+		return spa.boot()
+
+	staff = as_user(REQUESTER, staff_boot)
+	check(
+		"staff get their session's CSRF token, roles and site",
+		staff.get("is_staff") is True
+		and staff.get("csrf_token") == "e2e-boot-token"
+		and "Employee" in (staff.get("roles") or [])
+		and staff.get("sitename") == frappe.local.site,
+		str(sorted(staff)),
+	)
+	supplier = frappe.db.get_value("User", {"user_type": "Website User", "enabled": 1}, "name")
+	if supplier:
+		outside = as_user(supplier, spa.boot)
+		# Keys only in the detail: the payload names a real supplier contact.
+		check("a Website User is told they are not staff and gets no token", outside.get("is_staff") is False and "csrf_token" not in outside, str(sorted(outside)))
+
 	print("\n--- 1  the registry agrees with the site ---")
 	problems = step_forms.audit()
 	check("step_forms.audit() finds nothing wrong", not problems, "; ".join(problems[:3]))

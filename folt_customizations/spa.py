@@ -37,15 +37,52 @@ from frappe.model.workflow import (
 	get_workflow_name,
 	has_approval_access,
 )
+# Imported explicitly: `frappe.sessions` is not bound on the package unless something else has
+# imported it first (see www/folt.py).
+from frappe.sessions import get_csrf_token
 from frappe.utils import cint, flt, getdate
 
 from folt_customizations import activity_chain, procurement_chain, step_forms, workflow_shape
 from folt_customizations.document_guide import _documents, get_guide, guide_map
 from folt_customizations.folt_customizations.page.folt_tasks.folt_tasks import _fields, _row
 from folt_customizations.float_lifecycle import FUNDED_FLOAT_STATES
+from folt_customizations.supplier_portal import desk_app_visible
 from folt_customizations.workflow_access import forget_held_reason, is_turn_down, park_reason
 
 ADMINISTRATOR = "Administrator"
+
+
+# --- booting a client served from elsewhere -----------------------------------------------------
+
+
+@frappe.whitelist(allow_guest=True, methods=["GET"])
+def boot() -> dict:
+	"""Who is signed in, and the CSRF token their writes must carry -- for a client NOT rendered here.
+
+	/folt gets this payload rendered into its page by www/folt.py. The separately deployed React
+	client (folt-workflow-ui, its own container proxying /api on the same origin) is static files
+	and has no server render to carry it, so it asks once at start-up and again after signing in.
+
+	GET on purpose: frappe checks the CSRF header only on unsafe methods (auth.validate_csrf_token),
+	and this is how the client gets the token in the first place. Guests are answered rather than
+	refused, so "nobody is signed in" reads as data and not as a 403 the client has to interpret.
+	A non-staff user (a supplier, a Website User) gets no token: every endpoint behind the client
+	would refuse them anyway (see www/folt.py), and the client sends them to their portal instead.
+	NOTHING SENSITIVE GOES IN HERE -- the same rule as www/folt.py's boot payload.
+	"""
+	user = frappe.session.user
+	if user == "Guest":
+		return {"user": "Guest", "is_staff": False}
+	out = {
+		"user": user,
+		"full_name": frappe.utils.get_fullname(user),
+		"is_staff": desk_app_visible(),
+		"sitename": frappe.local.site,
+	}
+	if out["is_staff"]:
+		out["roles"] = frappe.get_roles()
+		out["csrf_token"] = get_csrf_token()
+	return out
 
 
 # --- reading ------------------------------------------------------------------------------------

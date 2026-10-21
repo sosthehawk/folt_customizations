@@ -169,9 +169,14 @@ def _run():
 	)
 	supplier = frappe.db.get_value("User", {"user_type": "Website User", "enabled": 1}, "name")
 	if supplier:
-		outside = as_user(supplier, spa.boot)
-		# Keys only in the detail: the payload names a real supplier contact.
-		check("a Website User is told they are not staff and gets no token", outside.get("is_staff") is False and "csrf_token" not in outside, str(sorted(outside)))
+		outside = as_user(supplier, staff_boot)
+		# Keys only in the detail: the payload names a real supplier contact. The token is theirs
+		# (the React client's supplier sections save with it); the roles stay staff-only.
+		check(
+			"a Website User is told they are not staff, gets their token, and no roles",
+			outside.get("is_staff") is False and outside.get("csrf_token") == "e2e-boot-token" and "roles" not in outside,
+			str(sorted(outside)),
+		)
 
 	print("\n--- 1  the registry agrees with the site ---")
 	problems = step_forms.audit()

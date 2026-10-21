@@ -66,8 +66,10 @@ def boot() -> dict:
 	GET on purpose: frappe checks the CSRF header only on unsafe methods (auth.validate_csrf_token),
 	and this is how the client gets the token in the first place. Guests are answered rather than
 	refused, so "nobody is signed in" reads as data and not as a 403 the client has to interpret.
-	A non-staff user (a supplier, a Website User) gets no token: every endpoint behind the client
-	would refuse them anyway (see www/folt.py), and the client sends them to their portal instead.
+	A non-staff user (a supplier, a Website User) gets the token too, but no roles: the React client
+	gives a supplier its own sections (supplier_portal.portal_overview / save_quotation), and a save
+	is a POST Frappe checks the token on. The token is the session's own, so handing it to the
+	session's holder discloses nothing. The /folt client still refuses non-staff (www/folt.py).
 	NOTHING SENSITIVE GOES IN HERE -- the same rule as www/folt.py's boot payload.
 	"""
 	user = frappe.session.user
@@ -81,7 +83,7 @@ def boot() -> dict:
 	}
 	if out["is_staff"]:
 		out["roles"] = frappe.get_roles()
-		out["csrf_token"] = get_csrf_token()
+	out["csrf_token"] = get_csrf_token()
 	return out
 
 

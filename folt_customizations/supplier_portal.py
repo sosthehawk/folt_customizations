@@ -57,13 +57,23 @@ Three separate things have to be true for that, and none of them is true on a st
    offer and the committee may already be scoring it, so the portal shows it and offers no
    button. Reopening a bid is a buyer's decision (cancel and amend in the Desk), not a
    supplier's.
+
+4. THE FOLT APP READS THE SAME THINGS.
+
+   The React client (folt-workflow-ui) gives suppliers the same shell staff use, through its BFF,
+   as the supplier's own session. `portal_overview` and `portal_rfq` are its two reads; it saves
+   through `save_quotation` above, so there is one write path whichever page a supplier uses.
+   Both reads scope to the suppliers the session user is a portal user of and to nothing else --
+   the same answer to "who is this visitor" as part 2 -- and read with get_all, because a
+   Website User holds no desk read on any of these doctypes. That is why they return only the
+   fields a supplier may see: never another bidder, never FoLT's price history.
 """
 
 from contextlib import contextmanager
 
 import frappe
 from frappe import _
-from frappe.utils import flt, nowdate
+from frappe.utils import cint, flt, nowdate
 
 from erpnext.buying.doctype.request_for_quotation.request_for_quotation import create_rfq_items
 
@@ -325,3 +335,240 @@ def session_supplier(rfq) -> str:
 			return row.supplier
 
 	frappe.throw(_("Not Permitted"), frappe.PermissionError)
+
+
+# --- 4. reading, for the FoLT app ---------------------------------------------------------
+
+# How much of each list the overview carries: the newest, which is all a supplier works from.
+OVERVIEW_LIMIT = 100
+ORDERS_LIMIT = 50
+
+
+def my_suppliers(user: str | None = None) -> list[str]:
+	"""The suppliers `user` (the session user by default) is a portal user of."""
+	return frappe.get_all(
+		"Portal User",
+		filters={"parenttype": "Supplier", "user": user or frappe.session.user},
+		pluck="parent",
+		order_by="parent asc",
+	)
+
+
+def quoted_prices(quotation: str | None) -> dict:
+	"""A quotation's lines keyed by the RFQ line they price (request_for_quotation_item).
+
+	Keyed on the RFQ line, not the item code: an RFQ may ask for the same item twice (two dates,
+	two routes), which FoLT's transport requests routinely do.
+	"""
+	if not quotation:
+		return {}
+	return {
+		row.request_for_quotation_item: row
+		for row in frappe.get_all(
+			"Supplier Quotation Item",
+			filters={"parent": quotation},
+			fields=["request_for_quotation_item", "qty", "rate"],
+		)
+	}
+
+
+def _standing(rfq: str, supplier: str) -> tuple[str, str | None]:
+	"""Where `supplier` stands on one RFQ: ("draft", name), ("submitted", name) or ("to_price", None).
+
+	A draft wins over a submitted bid, the same order as the portal page: it is what the supplier
+	last worked on and can still change.
+	"""
+	draft = draft_quotation(rfq, supplier)
+	if draft:
+		return "draft", draft
+	submitted = frappe.db.sql(
+		"""select sq.name from `tabSupplier Quotation` sq
+		join `tabSupplier Quotation Item` sqi on sqi.parent = sq.name
+		where sqi.request_for_quotation = %s and sq.supplier = %s and sq.docstatus = 1
+		order by sq.creation desc limit 1""",
+		(rfq, supplier),
+	)
+	return ("submitted", submitted[0][0]) if submitted else ("to_price", None)
+
+
+@frappe.whitelist(methods=["GET"])
+def portal_overview() -> dict:
+	"""Everything a supplier login has with FoLT: the RFQs it was sent, its quotations, its orders.
+
+	Empty lists, not an error, for a login that is nobody's portal user -- the client reads that
+	as "this account is not set up as a supplier" and says so.
+	"""
+	mine = my_suppliers()
+	out = {"suppliers": [], "rfqs": [], "quotations": [], "orders": []}
+	if not mine:
+		return out
+
+	out["suppliers"] = frappe.get_all(
+		"Supplier", filters={"name": ["in", mine]}, fields=["name", "supplier_name"], order_by="supplier_name asc"
+	)
+
+	invited = frappe.db.sql(
+		"""select rfq.name, rfq.title, rfq.transaction_date, rfq.schedule_date, rfqs.supplier,
+			(select count(*) from `tabRequest for Quotation Item` i where i.parent = rfq.name) as line_count
+		from `tabRequest for Quotation` rfq
+		join `tabRequest for Quotation Supplier` rfqs on rfqs.parent = rfq.name
+		where rfq.docstatus = 1 and rfqs.supplier in %(mine)s
+		order by rfq.transaction_date desc, rfq.name desc
+		limit %(limit)s""",
+		{"mine": mine, "limit": OVERVIEW_LIMIT},
+		as_dict=True,
+	)
+	totals = {}
+	for row in invited:
+		status, quotation = _standing(row.name, row.supplier)
+		if quotation and quotation not in totals:
+			totals[quotation] = frappe.db.get_value("Supplier Quotation", quotation, ["grand_total", "currency"], as_dict=True)
+		money = totals.get(quotation) or {}
+		out["rfqs"].append(
+			{
+				"name": row.name,
+				"title": row.title or None,
+				"transaction_date": str(row.transaction_date) if row.transaction_date else None,
+				"schedule_date": str(row.schedule_date) if row.schedule_date else None,
+				"supplier": row.supplier,
+				"lines": cint(row.line_count),
+				"status": status,
+				"quotation": quotation,
+				"total": flt(money.get("grand_total")) if quotation else None,
+				"currency": money.get("currency"),
+			}
+		)
+
+	quotations = frappe.get_all(
+		"Supplier Quotation",
+		filters={"supplier": ["in", mine], "docstatus": ["<", 2]},
+		fields=["name", "supplier", "status", "docstatus", "grand_total", "currency", "transaction_date", "valid_till"],
+		order_by="creation desc",
+		limit=OVERVIEW_LIMIT,
+	)
+	rfq_of = {}
+	if quotations:
+		for row in frappe.get_all(
+			"Supplier Quotation Item",
+			filters={"parent": ["in", [q.name for q in quotations]], "request_for_quotation": ["is", "set"]},
+			fields=["parent", "request_for_quotation"],
+		):
+			rfq_of.setdefault(row.parent, row.request_for_quotation)
+	for q in quotations:
+		out["quotations"].append(
+			{
+				"name": q.name,
+				"supplier": q.supplier,
+				"rfq": rfq_of.get(q.name),
+				"status": q.status,
+				"docstatus": q.docstatus,
+				"grand_total": flt(q.grand_total),
+				"currency": q.currency,
+				"transaction_date": str(q.transaction_date) if q.transaction_date else None,
+				"valid_till": str(q.valid_till) if q.valid_till else None,
+			}
+		)
+
+	orders = frappe.get_all(
+		"Purchase Order",
+		filters={"supplier": ["in", mine], "docstatus": 1},
+		fields=["name", "supplier", "status", "grand_total", "currency", "transaction_date", "schedule_date", "per_received", "per_billed"],
+		order_by="transaction_date desc, name desc",
+		limit=ORDERS_LIMIT,
+	)
+	lines = {}
+	if orders:
+		for row in frappe.get_all(
+			"Purchase Order Item",
+			filters={"parent": ["in", [o.name for o in orders]]},
+			fields=["parent", "item_name", "description", "qty", "uom", "rate", "amount", "schedule_date"],
+			order_by="idx asc",
+		):
+			lines.setdefault(row.parent, []).append(
+				{
+					"item_name": row.item_name,
+					"description": row.description,
+					"qty": flt(row.qty),
+					"uom": row.uom,
+					"rate": flt(row.rate),
+					"amount": flt(row.amount),
+					"schedule_date": str(row.schedule_date) if row.schedule_date else None,
+				}
+			)
+	for o in orders:
+		out["orders"].append(
+			{
+				"name": o.name,
+				"supplier": o.supplier,
+				"status": o.status,
+				"grand_total": flt(o.grand_total),
+				"currency": o.currency,
+				"transaction_date": str(o.transaction_date) if o.transaction_date else None,
+				"schedule_date": str(o.schedule_date) if o.schedule_date else None,
+				"per_received": flt(o.per_received),
+				"per_billed": flt(o.per_billed),
+				"items": lines.get(o.name, []),
+			}
+		)
+	return out
+
+
+@frappe.whitelist(methods=["GET"])
+def portal_rfq(name: str) -> dict:
+	"""One RFQ as the supplier prices it: FoLT's lines, with the prices they have already quoted.
+
+	The same rules as the portal page (templates/pages/rfq.py): session_supplier resolves *and*
+	authorises; prices come from the draft when there is one and from the submitted bid
+	otherwise; and the bid is editable while it is a draft, or while there is no bid yet.
+	"""
+	doc = frappe.get_doc("Request for Quotation", name)
+	if doc.docstatus != 1:
+		frappe.throw(_("Not Permitted"), frappe.PermissionError)
+	supplier = session_supplier(doc)
+	status, shown = _standing(doc.name, supplier)
+	quoted = quoted_prices(shown)
+
+	if shown:
+		currency, terms = frappe.db.get_value("Supplier Quotation", shown, ["currency", "terms"])
+	else:
+		terms = None
+		currency = frappe.db.get_value("Supplier", supplier, "default_currency") or frappe.get_cached_value(
+			"Company", doc.company, "default_currency"
+		)
+
+	items = []
+	for item in doc.items:
+		row = quoted.get(item.name)
+		items.append(
+			{
+				"request_for_quotation_item": item.name,
+				"idx": item.idx,
+				"item_code": item.item_code,
+				"item_name": item.item_name,
+				"description": item.description,
+				"qty": flt(item.qty),
+				"uom": item.uom,
+				"schedule_date": str(item.schedule_date) if item.schedule_date else None,
+				"quoted_qty": flt(row.qty) if row else None,
+				"rate": flt(row.rate) if row else None,
+			}
+		)
+
+	return {
+		"name": doc.name,
+		"title": doc.title or None,
+		"company": doc.company,
+		"transaction_date": str(doc.transaction_date) if doc.transaction_date else None,
+		"schedule_date": str(doc.schedule_date) if doc.schedule_date else None,
+		"supplier": supplier,
+		"supplier_name": frappe.db.get_value("Supplier", supplier, "supplier_name"),
+		"message": doc.message_for_supplier or None,
+		"rfq_terms": doc.terms or None,
+		"currency": currency,
+		"status": status,
+		"quotation": shown,
+		"editable": status != "submitted",
+		"terms": terms or None,
+		"items": items,
+	}
+

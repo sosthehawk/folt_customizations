@@ -75,16 +75,7 @@ def _load_quoted_prices(doc, quotation):
 	asks for the same item twice (two delivery dates, two locations), which FoLT's transport
 	requests routinely do.
 	"""
-	quoted = {}
-	if quotation:
-		quoted = {
-			row.request_for_quotation_item: row
-			for row in frappe.get_all(
-				"Supplier Quotation Item",
-				filters={"parent": quotation},
-				fields=["request_for_quotation_item", "qty", "rate"],
-			)
-		}
+	quoted = supplier_portal.quoted_prices(quotation)
 
 	for item in doc.items:
 		row = quoted.get(item.name)

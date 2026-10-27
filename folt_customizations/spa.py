@@ -83,6 +83,10 @@ def boot() -> dict:
 	}
 	if out["is_staff"]:
 		out["roles"] = frappe.get_roles()
+		# The person menu offers "Switch user" only to those frappe would let impersonate.
+		out["can_impersonate"] = bool(frappe.has_permission("User", "impersonate"))
+	# Set by frappe's impersonate() on the new session: whose session this really is.
+	out["impersonated_by"] = (frappe.session.data or {}).get("impersonated_by") or None
 	out["csrf_token"] = get_csrf_token()
 	return out
 

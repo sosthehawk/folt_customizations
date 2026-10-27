@@ -179,7 +179,7 @@ def _run(employee):
 	horizon = add_days(nowdate(), 60)
 
 	print("\n--- 0  registration ---")
-	for fn in (bff_support.backups, bff_support.my_holidays, bff_support.my_leave_approvers, bff_support.activity_feed):
+	for fn in (bff_support.backups, bff_support.my_holidays, bff_support.my_leave_approvers, bff_support.activity_feed, bff_support.switch_targets):
 		check(
 			f"{fn.__name__} is whitelisted for GET only, and not for Guests",
 			fn in frappe.whitelisted
@@ -733,7 +733,21 @@ def _note(title, public, content="<p>E2E</p>", expires=None):
 
 
 def _decision_reason_field():
-	print("\n--- 12  Leave Application.folt_decision_reason ---")
+	print("\n--- 12  switch_targets: only for those who may impersonate ---")
+	for user in USERS:
+		refusal = as_user(user, lambda: refused(bff_support.switch_targets, frappe.PermissionError))
+		check(f"{user} cannot list switch targets (no User impersonate)", refusal is not None)
+	targets = as_user("Administrator", bff_support.switch_targets)["users"]
+	logins = {t["user"] for t in targets}
+	check("Administrator gets enabled desk users, never itself or Guest", targets and not logins & {"Administrator", "Guest"}, str(len(targets)))
+	check("every target has a name and the four fields the contract names", all(set(t) == {"user", "full_name", "label", "image"} and t["full_name"] for t in targets))
+	labels = {t["user"]: t["label"] for t in targets}
+	check("a role holder reads as their role", labels.get(HEAD_OF_FINANCE) not in (None, "Employee", "All", "Desk User"), str(labels.get(HEAD_OF_FINANCE)))
+	check("someone with only the Employee role reads as Employee, not blank", frappe.get_roles(REQUESTER) and labels.get(REQUESTER) == ("Employee" if not (set(frappe.get_roles(REQUESTER)) - {"All", "Guest", "Desk User", "Employee", "Employee Self Service"}) else labels.get(REQUESTER)), str(labels.get(REQUESTER)))
+	narrowed = as_user("Administrator", lambda: bff_support.switch_targets("fin"))["users"]
+	check("q narrows by name or login", narrowed and all("fin" in (t["user"] + t["full_name"]).lower() for t in narrowed), str([t["user"] for t in narrowed]))
+
+	print("\n--- 13  Leave Application.folt_decision_reason ---")
 	field = frappe.get_meta("Leave Application").get_field("folt_decision_reason")
 	check(
 		"installed: Small Text, permlevel 1, after the approver's name, no_copy, print_hide",

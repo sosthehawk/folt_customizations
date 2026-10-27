@@ -1,4 +1,4 @@
-"""Four reads the FoLT BFF needs that Frappe cannot answer for the person asking.
+"""Five reads the FoLT BFF needs that Frappe cannot answer for the person asking.
 
 The Go BFF (folt-workflow-ui, openapi/bff.v1.yaml) talks to Frappe AS THE USER, through
 /api/resource and /api/method, so every answer it gets is already permission-scoped by Frappe. For
@@ -14,6 +14,11 @@ something the user may not read.
   my_leave_approvers()  HRMS's approval details ask for Department read (the Employee role has
                         select only), and its default-approver lookup does not walk up the
                         department tree although its approver dropdown does.
+  switch_targets()      The person menu's "Switch user" list: the people an impersonator may switch
+                        to, each with a line saying who they are (designation, else main role).
+                        That line needs Employee and Has Role reads; the list is refused outright
+                        unless frappe.has_permission("User", "impersonate") -- the same check
+                        frappe's own impersonate() makes before it switches anyone.
   activity_feed()       The Home feed is the workflow timeline, which lives in Comment rows, and
                         the Employee role cannot read Comment. Each row is permission-checked
                         against the DOCUMENT it is about, so a user sees exactly the moves on the
@@ -471,3 +476,79 @@ def _announcements() -> list[dict]:
 		}
 		for note in notes
 	]
+
+
+# --- switch_targets ------------------------------------------------------------------------
+
+# Roles every login carries: never the line that says who somebody is.
+_GENERIC_ROLES = {"All", "Guest", "Desk User", "Employee", "Employee Self Service"}
+SWITCH_LIMIT = 50
+
+
+@frappe.whitelist(methods=["GET"])
+def switch_targets(q: str | None = None) -> dict:
+	"""Who the caller may switch to: enabled desk users other than themselves and Administrator.
+
+	Refused unless the caller holds User "impersonate" -- frappe.core.doctype.user.user.impersonate
+	asks exactly that before switching, so this list never offers a switch that would then fail.
+	`label` is the person's Active Employee designation, else their first role that is not one every
+	login carries, else "Employee" for someone who holds only that (the SPA's primaryRole reads the
+	same way). Up to 50, by name; `q` narrows by name or login.
+	"""
+	if not frappe.has_permission("User", "impersonate"):
+		frappe.throw(_("Not permitted"), frappe.PermissionError)
+
+	filters = [
+		["enabled", "=", 1],
+		["user_type", "=", "System User"],
+		["name", "not in", ["Guest", "Administrator", frappe.session.user]],
+	]
+	or_filters = None
+	text = (q or "").strip()
+	if text:
+		like = f"%{text}%"
+		or_filters = [["full_name", "like", like], ["name", "like", like]]
+	users = frappe.get_all(
+		"User",
+		filters=filters,
+		or_filters=or_filters,
+		fields=["name", "full_name", "user_image"],
+		order_by="full_name asc",
+		limit=SWITCH_LIMIT,
+	)
+	names = [u.name for u in users]
+	designations = {}
+	roles: dict[str, list[str]] = {}
+	employees: set[str] = set()
+	if names:
+		for row in frappe.get_all(
+			"Employee",
+			filters={"user_id": ["in", names], "status": "Active"},
+			fields=["user_id", "designation"],
+		):
+			if row.designation:
+				designations.setdefault(row.user_id, row.designation)
+		for row in frappe.get_all(
+			"Has Role",
+			filters={"parenttype": "User", "parent": ["in", names]},
+			fields=["parent", "role"],
+			order_by="idx asc",
+		):
+			if row.role not in _GENERIC_ROLES:
+				roles.setdefault(row.parent, []).append(row.role)
+			elif row.role == "Employee":
+				employees.add(row.parent)
+	return {
+		"users": [
+			{
+				"user": u.name,
+				"full_name": u.full_name or u.name,
+				"label": designations.get(u.name)
+				or (roles.get(u.name) or [None])[0]
+				or ("Employee" if u.name in employees else None),
+				"image": u.user_image or None,
+			}
+			for u in users
+		]
+	}
+

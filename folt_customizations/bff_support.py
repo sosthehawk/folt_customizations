@@ -236,10 +236,17 @@ def _date(value: str):
 # --- leave approvers ------------------------------------------------------------------------------
 
 
+HR_ROLES = {"HR User", "HR Manager"}
+
+
 @frappe.whitelist(methods=["GET"])
-def my_leave_approvers() -> dict:
+def my_leave_approvers(employee: str | None = None) -> dict:
 	"""Who the session employee may send a leave application to, which one to preselect, and
 	whether choosing one is mandatory.
+
+	`employee` is for HR recording leave on someone's behalf (HR User / HR Manager only, asked
+	before anything else): the same answer for that employee, with neither them nor the person
+	recording it offered as approver.
 
 	MANDATORY IS ENFORCED BY THE BFF. HR Settings' `leave_approver_mandatory_in_leave_application`
 	is honoured by HRMS only in the browser (leave_application.js toggles `reqd`); nothing on the
@@ -255,9 +262,16 @@ def my_leave_approvers() -> dict:
 		cint(frappe.db.get_single_value("HR Settings", "leave_approver_mandatory_in_leave_application"))
 	)
 	user = frappe.session.user
-	employee = frappe.db.get_value(
-		"Employee", {"user_id": user, "status": "Active"}, ["name", "department", "leave_approver"], as_dict=True
-	)
+	if employee:
+		if user != "Administrator" and not HR_ROLES.intersection(frappe.get_roles()):
+			frappe.throw(_("Only HR can record leave for someone else."), frappe.PermissionError)
+		employee = frappe.db.get_value(
+			"Employee", {"name": employee, "status": "Active"}, ["name", "department", "leave_approver", "user_id"], as_dict=True
+		)
+	else:
+		employee = frappe.db.get_value(
+			"Employee", {"user_id": user, "status": "Active"}, ["name", "department", "leave_approver", "user_id"], as_dict=True
+		)
 	if not employee:
 		return {"employee": None, "is_mandatory": is_mandatory, "default": None, "approvers": []}
 
@@ -283,7 +297,7 @@ def my_leave_approvers() -> dict:
 		own_department = [row.approver for row in rows if row.parent == employee.department]
 
 	# Nobody approves their own leave, and a disabled account cannot sign in to approve anything.
-	unique = [u for u in dict.fromkeys(candidates) if u and u != user]
+	unique = [u for u in dict.fromkeys(candidates) if u and u not in (user, employee.user_id)]
 	users = {}
 	if unique:
 		for row in frappe.get_all("User", filters={"name": ["in", unique]}, fields=["name", "full_name", "enabled"]):

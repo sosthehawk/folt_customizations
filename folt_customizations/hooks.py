@@ -342,6 +342,16 @@ scheduler_events = {
     ],
 }
 
+# Salary slips are confidential: HRMS lets the Employee role read every one, so without a payroll
+# role a person reads only their own -- in lists, reports, the form, /printview and the API. See
+# salary_slip_access.py.
+permission_query_conditions = {
+    "Salary Slip": "folt_customizations.salary_slip_access.salary_slip_query",
+}
+has_permission = {
+    "Salary Slip": "folt_customizations.salary_slip_access.salary_slip_permission",
+}
+
 # ERPNext mails a Request for Quotation to its suppliers as the bare `Message for Supplier`
 # field: no FoLT mark, no statement of what is being asked for, and no link to the portal where
 # the quotation is actually entered. The subclass wraps that message in a branded frame carrying

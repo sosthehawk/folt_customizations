@@ -411,7 +411,10 @@ def _holidays(employee, month_start, horizon):
 	)
 	check(
 		"company list in February, the employee's own from March, B again from June",
-		dates == ["2030-02-14", "2030-03-10", "2030-05-15", "2030-06-20"] and got["holiday_lists"] == [HOLIDAYS_B, HOLIDAYS_A],
+		# Only this suite's own lists: a site may already assign the company a real calendar, which
+		# still applies in 2030 but has no days in it.
+		dates == ["2030-02-14", "2030-03-10", "2030-05-15", "2030-06-20"]
+		and [name for name in got["holiday_lists"] if name in (HOLIDAYS_A, HOLIDAYS_B)] == [HOLIDAYS_B, HOLIDAYS_A],
 		str(got["holiday_lists"]),
 	)
 	by_date = {h["date"]: h for h in got["holidays"]}
@@ -743,7 +746,12 @@ def _decision_reason_field():
 	check("every target has a name and the four fields the contract names", all(set(t) == {"user", "full_name", "label", "image"} and t["full_name"] for t in targets))
 	labels = {t["user"]: t["label"] for t in targets}
 	check("a role holder reads as their role", labels.get(HEAD_OF_FINANCE) not in (None, "Employee", "All", "Desk User"), str(labels.get(HEAD_OF_FINANCE)))
-	check("someone with only the Employee role reads as Employee, not blank", frappe.get_roles(REQUESTER) and labels.get(REQUESTER) == ("Employee" if not (set(frappe.get_roles(REQUESTER)) - {"All", "Guest", "Desk User", "Employee", "Employee Self Service"}) else labels.get(REQUESTER)), str(labels.get(REQUESTER)))
+	designation = frappe.db.get_value("Employee", {"user_id": REQUESTER, "status": "Active"}, "designation")
+	check(
+		"someone with only the Employee role reads as their designation, else Employee -- never blank",
+		labels.get(REQUESTER) == (designation or "Employee"),
+		f"{labels.get(REQUESTER)} (designation {designation})",
+	)
 	narrowed = as_user("Administrator", lambda: bff_support.switch_targets("fin"))["users"]
 	check("q narrows by name or login", narrowed and all("fin" in (t["user"] + t["full_name"]).lower() for t in narrowed), str([t["user"] for t in narrowed]))
 

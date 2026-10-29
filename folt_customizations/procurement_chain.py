@@ -47,7 +47,7 @@ create the thing the button offers -- a button that always throws is worse than 
 import frappe
 from frappe import _
 from frappe.model.workflow import get_workflow, get_workflow_name
-from frappe.utils import flt, fmt_money, formatdate, get_link_to_form, nowdate
+from frappe.utils import flt, fmt_money, formatdate, get_link_to_form, getdate, nowdate
 
 from folt_customizations.activity_chain import Handoff
 from folt_customizations.procurement import (
@@ -420,6 +420,7 @@ def make_award_order(committee_evaluation: str) -> dict:
 		"quotation": evaluation.recommended_supplier_quotation,
 		"total": flt(order.grand_total),
 		"currency": order.currency,
+		"note": _moved_note(order),
 	}
 
 
@@ -461,6 +462,7 @@ def make_waiver_order(derogation_waiver_request: str) -> dict:
 		"quotation": waiver.supplier_quotation,
 		"total": flt(order.grand_total),
 		"currency": order.currency,
+		"note": _moved_note(order),
 	}
 
 
@@ -498,16 +500,37 @@ def _order_from_quotation(quotation: str, authority_field: str, authority: str, 
 	long the price holds, not when the goods are wanted. The RFQ's own Required By is used where
 	there is one; failing that the order is dated today and the caller is told to correct it,
 	which is the honest version of a date nobody has stated.
+
+	A Required By that has already passed is moved to today, on the order and on every line:
+	ERPNext refuses an order whose lines are wanted before the order's own date, and an award that
+	took longer than the competition planned is ordinary, not an error. The date it replaced is kept
+	on the order's flags so the caller can say so (`required_by_moved_from`).
 	"""
 	from erpnext.buying.doctype.supplier_quotation.supplier_quotation import make_purchase_order
 
 	order = make_purchase_order(quotation)
 	order.set(authority_field, authority)
 	order.transaction_date = nowdate()
-	order.schedule_date = required_by or order.schedule_date or nowdate()
+	wanted = required_by or order.schedule_date or nowdate()
+	if getdate(wanted) < getdate(nowdate()):
+		order.flags.required_by_moved_from = str(wanted)
+		wanted = nowdate()
+	order.schedule_date = wanted
+	for row in order.items:
+		if not row.schedule_date or getdate(row.schedule_date) < getdate(wanted):
+			row.schedule_date = wanted
 	order.insert()
 
 	return order
+
+
+def _moved_note(order) -> str | None:
+	"""What to tell the buyer when the competition's Required By had already passed."""
+	if not order.flags.get("required_by_moved_from"):
+		return None
+	return _("The request asked for delivery by {0}, which has passed, so this order is wanted by {1}. Change it if the supplier agreed another date.").format(
+		formatdate(order.flags.required_by_moved_from), formatdate(order.schedule_date)
+	)
 
 
 # --- what happens next ----------------------------------------------------------------------

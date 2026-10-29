@@ -155,9 +155,12 @@ LINK_FIELD_PERMISSIONS = {
 		role: ("select",) for role in ("Operations Support Officer", "Procurement Committee", "Head of Finance")
 	},
 	# The committee and the Head of Finance award against the quotations, so they need to read
-	# them, not just reference them.
+	# them, not just reference them. The Operations Support Officer prepares a Derogation / Waiver
+	# Request from the bid it waives competition for (procurement_chain.make_waiver_request reads
+	# it first), and nobody else may prepare one -- so without read here the hand-off could only
+	# ever be made as Administrator.
 	"Supplier Quotation": {
-		role: ("read",) for role in ("Procurement Committee", "Head of Finance")
+		role: ("read",) for role in ("Procurement Committee", "Head of Finance", "Operations Support Officer")
 	},
 	"Request for Quotation": {
 		role: ("read",) for role in ("Procurement Committee", "Head of Finance")

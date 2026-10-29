@@ -167,7 +167,8 @@ def _run():
 		and staff.get("sitename") == frappe.local.site,
 		str(sorted(staff)),
 	)
-	supplier = frappe.db.get_value("User", {"user_type": "Website User", "enabled": 1}, "name")
+	# Guest is a Website User too; on a fresh site it is the only one, and it is not a login.
+	supplier = frappe.db.get_value("User", {"user_type": "Website User", "enabled": 1, "name": ["not in", ["Guest"]]}, "name")
 	if supplier:
 		outside = as_user(supplier, staff_boot)
 		# Keys only in the detail: the payload names a real supplier contact. The token is theirs

@@ -209,6 +209,7 @@ after_install = [
     "folt_customizations.print_formats.apply_print_formats",
     "folt_customizations.supplier_portal.link_portal_users",
     "folt_customizations.leave_notifications.apply_leave_notification_templates",
+    "folt_customizations.hr_accounts.apply_hr_accounts",
 ]
 after_migrate = [
     "folt_customizations.branding.apply_branding",
@@ -220,6 +221,8 @@ after_migrate = [
     "folt_customizations.print_formats.apply_print_formats",
     "folt_customizations.supplier_portal.link_portal_users",
     "folt_customizations.leave_notifications.apply_leave_notification_templates",
+    # After the fixtures sync: their empty `accounts` tables would otherwise wipe the ledgers.
+    "folt_customizations.hr_accounts.apply_hr_accounts",
 ]
 
 # A supplier pre-qualified for several FoLT categories carries the extras in the

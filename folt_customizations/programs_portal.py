@@ -263,6 +263,14 @@ def record(doctype, name=None):
 	perms = docinfo.get("permissions") or {}
 	if doctype in READ_ONLY:
 		perms = {"read": perms.get("read")}
+	elif workflow and perms.get("write"):
+		# Who may change a record at its state is the workflow's allow_edit
+		# (workflow_access.enforce_state_custodian refuses anybody else's save), so Edit is offered
+		# only to them.
+		roles = set(frappe.get_roles())
+		perms["write"] = frappe.session.user == "Administrator" or any(
+			row.allow_edit in roles for row in get_workflow(doctype).states if row.state == workflow["state"]
+		)
 	return {
 		"doctype": doctype,
 		"name": doc.name,
@@ -273,12 +281,23 @@ def record(doctype, name=None):
 		"tree": _tree_context(doc) if meta.is_tree else None,
 		"usage": [] if meta.issingle else usage(doctype, doc.name),
 		"timeline": {
-			"versions": [{"owner": v.get("owner"), "creation": v.get("creation"), "detail": version_summary(v.get("data"))} for v in docinfo.get("versions", [])],
+			"versions": [{"owner": v.get("owner"), "creation": v.get("creation"), "detail": _change(v.get("data"))} for v in docinfo.get("versions", [])],
 			"comments": [{"comment_type": c.get("comment_type"), "content": c.get("content"), "owner": c.get("owner"), "creation": c.get("creation")} for c in docinfo.get("comments", [])],
 			"workflow_logs": [{"content": c.get("content"), "owner": c.get("owner"), "creation": c.get("creation")} for c in docinfo.get("workflow_logs", [])],
 		},
 		"attachments": [{"name": a.get("name"), "file_name": a.get("file_name"), "file_url": a.get("file_url"), "is_private": a.get("is_private")} for a in docinfo.get("attachments", [])],
 	}
+
+
+# What the tree and the lifecycle keep for themselves: not news in a record's history.
+_QUIET = {"lft", "rgt", "old_parent", "is_active", "modified"}
+
+
+def _change(data):
+	d = parse_json(data, {}) or {}
+	if isinstance(d, dict) and d.get("changed"):
+		d = {**d, "changed": [c for c in d["changed"] if c and c[0] not in _QUIET]}
+	return version_summary(frappe.as_json(d))
 
 
 def _tree_context(doc):

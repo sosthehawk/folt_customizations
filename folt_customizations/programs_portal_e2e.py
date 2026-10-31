@@ -128,6 +128,10 @@ def run():
 	frappe.db.commit()
 	cat.reload()
 	check("approved: Active and active", cat.workflow_state == masterdata.ACTIVE and cat.is_active)
+	check("a preparer is not offered Edit on an Active record", not as_user(PREPARER, lambda: pp.record("FoLT Program Category", cat.name))["permissions"]["write"])
+	check("its steward is", as_user(ADMIN, lambda: pp.record("FoLT Program Category", cat.name))["permissions"]["write"])
+	history = as_user(PREPARER, lambda: pp.record("FoLT Program Category", cat.name))["timeline"]["versions"]
+	check("the history leaves out is_active and the tree's own fields", not any("is_active" in v["detail"] for v in history), [v["detail"] for v in history])
 	found = as_user(PREPARER, lambda: pp.link_search("FoLT Program Category", MARK))
 	check("an active category is offered by the link search", any(o.get("value") == cat.name for o in found), found)
 

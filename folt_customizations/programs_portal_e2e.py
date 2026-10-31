@@ -60,13 +60,96 @@ def teardown():
 	frappe.set_user("Administrator")
 	frappe.flags.in_test_teardown = True
 	try:
-		for dt in ("FoLT Program", "FoLT Program Category", "FoLT Program Type"):
+		for name in frappe.get_all("Activity Requisition", filters={"activity_program": ["like", f"{MARK}%"]}, pluck="name"):
+			frappe.delete_doc("Activity Requisition", name, force=True, ignore_permissions=True)
+		# Dependants first: what links to a master goes before it.
+		for dt in ("FoLT Funding Allocation", "FoLT Reporting Period", "FoLT Program", "FoLT Activity Template", "FoLT Indicator",
+		           "FoLT Output", "FoLT Outcome", "FoLT Objective", "FoLT Grant Project", "FoLT Donor", "FoLT Partner",
+		           "FoLT Beneficiary Category", "FoLT Budget Line", "FoLT Program Category", "FoLT Program Type"):
 			title = masterdata.MASTERS[dt][2]
-			for name in frappe.get_all(dt, filters={title: ["like", f"{MARK}%"]}, pluck="name"):
+			for name in frappe.get_all(dt, filters={title: ["like", f"{MARK}%"]}, pluck="name", order_by="creation desc"):
 				frappe.delete_doc(dt, name, force=True, ignore_permissions=True)
 	finally:
 		frappe.flags.in_test_teardown = False
 	frappe.db.commit()
+
+
+ME = "meofficer.test@folt.test"  # M&E Officer
+MANAGER = "progmanager.test@folt.test"  # Program Manager
+
+
+def active(user, doctype, values):
+	"""A record prepared by `user` and approved by the approver: what other records may link to."""
+	name = as_user(user, lambda: pp.save(doctype, values))["name"]
+	as_user(user, lambda: pp.act(doctype, name, "transition", "Submit for Review"))
+	as_user(APPROVER, lambda: pp.act(doctype, name, "transition", "Approve"))
+	frappe.db.commit()
+	return name
+
+
+def phases_4_to_6():
+	print("\n--- funders and partners: what is sensitive stays with those who manage funders ---")
+	donor = active(MANAGER, "FoLT Donor", {"donor_name": f"{MARK} Lake Fund", "organization_type": "Foundation", "email": "grants@lakefund.example",
+	                                       "funding_conditions": "Spend within the lake basin."})
+	seen = as_user(PREPARER, lambda: pp.record("FoLT Donor", donor))["doc"]
+	check("a programme officer does not see a donor's email or conditions", not seen.get("email") and not seen.get("funding_conditions"), sorted(k for k, v in seen.items() if v))
+	check("a programme manager does", as_user(MANAGER, lambda: pp.record("FoLT Donor", donor))["doc"].get("email") == "grants@lakefund.example")
+	expect_throw("a partner named like an existing one is refused", lambda: (
+		as_user(PREPARER, lambda: pp.save("FoLT Partner", {"partner_name": f"{MARK} Turkana Women Network"})),
+		frappe.db.commit(),
+		as_user(PREPARER, lambda: pp.save("FoLT Partner", {"partner_name": f"{MARK} turkana women network ltd"})),
+	))
+
+	print("\n--- the results framework: each level hangs from an approved one ---")
+	objective = active(ME, "FoLT Objective", {"objective_name": f"{MARK} Children learn"})
+	check("an objective is named by its generated code", objective.startswith("OBJ-"), objective)
+	expect_throw("an outcome cannot hang from a draft objective", lambda: as_user(ME, lambda: (
+		pp.save("FoLT Outcome", {"outcome_name": f"{MARK} orphan", "objective": as_user(ME, lambda: pp.save("FoLT Objective", {"objective_name": f"{MARK} Draft objective"}))["name"]}))))
+	outcome = active(ME, "FoLT Outcome", {"outcome_name": f"{MARK} More children enrol", "objective": objective})
+	output = active(ME, "FoLT Output", {"output_name": f"{MARK} Classrooms built", "outcome": outcome, "expected_quantity": 4, "uom": "Nos"})
+	indicator = active(ME, "FoLT Indicator", {"indicator_name": f"{MARK} Classrooms in use", "indicator_type": "Quantitative", "output": output,
+	                                         "baseline_value": 0, "target_value": 4, "frequency": "Quarterly"})
+	activity = active(MANAGER, "FoLT Activity Template", {"activity_name": f"{MARK} School construction", "objective": objective, "outcome": outcome,
+	                                                     "expected_output": output, "indicators": [{"indicator": indicator}], "locations": [{"location": "Kakuma"}]})
+	program = active(MANAGER, "FoLT Program", {"program_name": f"{MARK} Lake schools", "objectives": [{"objective": objective}],
+	                                          "activities": [{"activity_template": activity}], "locations": [{"location": "Turkana West"}]})
+	shown = as_user(MANAGER, lambda: pp.record("FoLT Program", program))
+	check("a programme names its objective and activity by title", shown["link_titles"].get("FoLT Objective", {}).get(objective) == f"{MARK} Children learn"
+	      and shown["link_titles"].get("FoLT Activity Template", {}).get(activity) == f"{MARK} School construction", shown["link_titles"])
+	check("an outcome list gives its objectives' titles", as_user(ME, lambda: pp.records("FoLT Outcome", q=MARK))["link_titles"].get("FoLT Objective", {}).get(objective) == f"{MARK} Children learn")
+	used = as_user(ME, lambda: pp.record("FoLT Indicator", indicator))["usage"]
+	check("an indicator shows the activity measured by it", any(u["doctype"] == "FoLT Activity Template" and activity in u["sample"] for u in used), used)
+	check("an objective shows its outcome and the programme", {"FoLT Outcome", "FoLT Program"} <= {u["doctype"] for u in as_user(ME, lambda: pp.record("FoLT Objective", objective))["usage"]})
+
+	print("\n--- money: allocations stay within what a funding source holds ---")
+	source = active(MANAGER, "FoLT Grant Project", {"grant_name": f"{MARK} Lake Fund schools grant", "donor": donor, "grant_currency": "KES", "total_amount": 1000000})
+	first = active(MANAGER, "FoLT Funding Allocation", {"allocation_title": f"{MARK} Schools 2026", "program": program, "funding_source": source, "amount": 700000})
+	check("an allocation takes its donor and currency from the source", frappe.db.get_value("FoLT Funding Allocation", first, ["donor", "currency"]) == (donor, "KES"))
+	expect_throw("a second allocation beyond the source's total is refused", lambda: as_user(MANAGER, lambda: pp.save("FoLT Funding Allocation", {
+		"allocation_title": f"{MARK} Too much", "program": program, "funding_source": source, "amount": 400000})))
+	line = active(MANAGER, "FoLT Budget Line", {"budget_line_name": f"{MARK} Construction", "classification": "Budget line"})
+	check("a budget line is named by its code", line.startswith("BGL-"), line)
+
+	print("\n--- reporting periods ---")
+	expect_throw("a report cannot be due before its period ends", lambda: as_user(MANAGER, lambda: pp.save("FoLT Reporting Period", {
+		"period_name": f"{MARK} Q1 bad", "frequency": "Quarterly", "start_date": "2026-07-01", "end_date": "2026-09-30", "deadline": "2026-09-01"})))
+	late = active(MANAGER, "FoLT Reporting Period", {"period_name": f"{MARK} Q4 2025", "frequency": "Quarterly", "program": program, "donor": donor,
+	                                                  "start_date": "2025-10-01", "end_date": "2025-12-31", "deadline": "2026-01-31"})
+	check("an open report past its due date is Overdue", frappe.db.get_value("FoLT Reporting Period", late, "reporting_status") == "Overdue")
+	masterdata.flag_reporting_periods()
+
+	print("\n--- the activity chain names approved master data only ---")
+	requester = frappe.db.get_value("Employee", {"user_id": "requester.test@folt.test"}, "name")
+	draft_program = as_user(MANAGER, lambda: pp.save("FoLT Program", {"program_name": f"{MARK} Not yet approved"}))["name"]
+	frappe.db.commit()
+	def requisition(prog):
+		return frappe.get_doc({"doctype": "Activity Requisition", "activity_program": f"{MARK} activity", "requested_by": requester,
+		                       "activity_date": "2026-11-20", "company": frappe.defaults.get_global_default("company") or frappe.get_all("Company", pluck="name")[0],
+		                       "budget_amount": 1000, "budget_line": "Transport", "program": prog, "budget_classification": line}).insert()
+	expect_throw("a requisition cannot name a programme still in draft", lambda: as_user("requester.test@folt.test", lambda: requisition(draft_program)))
+	req = as_user("requester.test@folt.test", lambda: requisition(program))
+	frappe.db.commit()
+	check("a requisition names an approved programme and budget line", frappe.db.get_value("Activity Requisition", req.name, ["program", "budget_classification"]) == (program, line))
 
 
 def run():
@@ -180,6 +263,8 @@ def run():
 	check("Turkana County has its six sub-counties", len(turkana) == 6, [n["name"] for n in turkana])
 	kakuma = as_user(PREPARER, lambda: pp.record("FoLT Location", "Kakuma"))["tree"]
 	check("a location knows its ancestors", kakuma["ancestors"] == ["Kenya", "Turkana County", "Turkana West"], kakuma["ancestors"])
+
+	phases_4_to_6()
 
 	print("\n--- the auditor reads and changes nothing ---")
 	check("the auditor reads the dashboard", as_user(AUDITOR, pp.dashboard)["masters"])

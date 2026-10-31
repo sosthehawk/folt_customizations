@@ -1,0 +1,13 @@
+{
+  "doctype": "DocType",
+  "name": "FoLT Indicator Link",
+  "module": "Folt Customizations",
+  "custom": 0,
+  "istable": 1,
+  "sort_field": "modified",
+  "sort_order": "DESC",
+  "fields": [
+    { "fieldname": "indicator", "fieldtype": "Link", "label": "Indicator", "options": "FoLT Indicator", "reqd": 1, "in_list_view": 1 }
+  ],
+  "permissions": []
+}

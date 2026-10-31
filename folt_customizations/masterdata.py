@@ -56,6 +56,16 @@ MASTERS = {
 	"FoLT Location": ("location_code", "LOC-", "location_name", False),
 	"FoLT Donor": ("donor_code", "DON-", "donor_name", True),
 	"FoLT Grant Project": ("grant_code", "FND-", "grant_name", True),
+	"FoLT Partner": ("partner_code", "PTN-", "partner_name", True),
+	"FoLT Beneficiary Category": ("category_code", "BEN-", "category_name", True),
+	"FoLT Objective": ("objective_code", "OBJ-", "objective_name", True),
+	"FoLT Outcome": ("outcome_code", "OUT-", "outcome_name", False),
+	"FoLT Output": ("output_code", "OPT-", "output_name", False),
+	"FoLT Indicator": ("indicator_code", "IND-", "indicator_name", False),
+	"FoLT Activity Template": ("activity_code", "ACT-", "activity_name", True),
+	"FoLT Budget Line": ("budget_line_code", "BGL-", "budget_line_name", False),
+	"FoLT Funding Allocation": ("allocation_code", "ALC-", "allocation_title", False),
+	"FoLT Reporting Period": ("period_code", "RPT-", "period_name", False),
 }
 
 _LEGAL_SUFFIXES = r"\b(ltd|limited|inc|incorporated|plc|llc|foundation|trust|org|organisation|organization|the)\b"
@@ -171,7 +181,7 @@ def _master_links(doc):
 						yield df.label, cdf.options, row.get(cdf.fieldname)
 
 
-def check_master_links(doc):
+def check_master_links(doc, method=None):
 	"""A master record newly linked here must be Active. Links that were already there stay."""
 	before = doc.get_doc_before_save() if not doc.is_new() else None
 	had = {(target, value) for _label, target, value in _master_links(before)} if before else set()
@@ -318,4 +328,49 @@ def apply_master_data():
 	ensure_settings()
 	apply_master_workflows()
 	geography.apply_location_tree()
+	frappe.db.commit()
+
+
+# --- reporting periods (daily) ----------------------------------------------------------------
+
+
+def flag_reporting_periods():
+	"""Daily: an open report past its due date is Overdue; one due within the Settings' reminder
+	window is a Notification Log for its responsible person and the Settings' notify role."""
+	from frappe.utils import add_days, getdate, nowdate
+
+	today = getdate(nowdate())
+	for name in frappe.get_all(
+		"FoLT Reporting Period", filters={"reporting_status": "Open", "deadline": ["<", today], "is_active": 1}, pluck="name"
+	):
+		frappe.db.set_value("FoLT Reporting Period", name, "reporting_status", "Overdue")
+
+	settings = _settings()
+	days = settings.reminder_days or 0
+	if days <= 0:
+		return
+	due = add_days(today, days)
+	extra = []
+	if settings.notify_role:
+		extra = frappe.get_all("Has Role", filters={"role": settings.notify_role, "parenttype": "User"}, pluck="parent")
+	for p in frappe.get_all(
+		"FoLT Reporting Period",
+		filters={"reporting_status": "Open", "deadline": due, "is_active": 1},
+		fields=["name", "period_name", "deadline", "responsible", "program"],
+	):
+		owner = frappe.db.get_value("Employee", p.responsible, "user_id") if p.responsible else None
+		for user in {u for u in [owner, *extra] if u and frappe.db.get_value("User", u, "enabled")}:
+			frappe.get_doc(
+				{
+					"doctype": "Notification Log",
+					"for_user": user,
+					"type": "Alert",
+					"document_type": "FoLT Reporting Period",
+					"document_name": p.name,
+					"subject": _("Report due in {0} days: {1}").format(days, p.period_name),
+					"email_content": _("{0}{1} is due on {2}.").format(
+						p.period_name, f" ({p.program})" if p.program else "", frappe.utils.formatdate(p.deadline)
+					),
+				}
+			).insert(ignore_permissions=True)
 	frappe.db.commit()

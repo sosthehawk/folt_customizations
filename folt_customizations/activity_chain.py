@@ -376,9 +376,14 @@ def make_float_retirement(reimbursement_list: str) -> dict:
 	spent = sum(flt(row.total_paid) for row in lists)
 	unclaimed = flt(advance.paid_amount) - flt(advance.claimed_amount)
 
+	dimensions = _requisition_dimensions(advance, "Expense Claim")
+	for row in expenses:
+		row.update(_requisition_dimensions(advance, "Expense Claim Detail"))
+
 	claim = frappe.get_doc(
 		{
 			"doctype": "Expense Claim",
+			**dimensions,
 			"employee": advance.employee,
 			"company": advance.company,
 			"posting_date": posting_date,
@@ -602,3 +607,22 @@ def _expense_claim_type(company: str) -> str:
 # `bootinfo.folt_chain`. document_guide.add_guide_to_bootinfo now carries it, alongside the step
 # plan of every workflow -- CHAIN_STEPS and CHAIN_LENGTH above are what it reads. One boot key
 # describing where a document sits, rather than two describing overlapping halves of it.
+
+
+# The requisition's Programs master data, as the accounting dimensions of what posts from it.
+_DIMENSIONS = {"program": "program", "donor": "donor", "grant_project": "grant_project", "location": "location"}
+
+
+def _requisition_dimensions(advance, doctype: str) -> dict:
+	"""{dimension field: value} for `doctype`, from the requisition behind the float.
+
+	Only the dimensions the doctype has (ERPNext adds them per accounting doctype) and the
+	requisition filled in: the retirement posts against the same programme, donor, grant and
+	place the activity was approved for, so the ledger can be read by them.
+	"""
+	name = advance.get("folt_activity_requisition")
+	if not name:
+		return {}
+	values = frappe.db.get_value("Activity Requisition", name, list(_DIMENSIONS.values()), as_dict=True) or {}
+	meta = frappe.get_meta(doctype)
+	return {field: values.get(source) for field, source in _DIMENSIONS.items() if values.get(source) and meta.has_field(field)}

@@ -1,0 +1,14 @@
+{
+  "doctype": "DocType",
+  "name": "FoLT Program Target Group",
+  "module": "Folt Customizations",
+  "custom": 0,
+  "istable": 1,
+  "sort_field": "modified",
+  "sort_order": "DESC",
+  "fields": [
+    { "fieldname": "beneficiary_category", "fieldtype": "Link", "label": "Beneficiary category", "options": "FoLT Beneficiary Category", "reqd": 1, "in_list_view": 1, "columns": 6 },
+    { "fieldname": "expected_number", "fieldtype": "Int", "label": "Expected number", "in_list_view": 1, "columns": 4 }
+  ],
+  "permissions": []
+}

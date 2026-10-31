@@ -96,5 +96,6 @@ class ActivityRequisition(Document):
 				"expected_start_date": self.activity_date,
 				"expected_end_date": self.activity_end_date or self.activity_date,
 				"cost_center": self.cost_center,
+				"folt_program": self.program,
 			}
 		).insert(ignore_permissions=True).name

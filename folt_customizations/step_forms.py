@@ -88,6 +88,10 @@ _REQUISITION = (
 	"cost_center",
 	"donor",
 	"grant_project",
+	"program",
+	"activity_template",
+	"location",
+	"budget_classification",
 	"float_required",
 	"float_holder",
 	"float_amount",
@@ -137,7 +141,7 @@ STEP_FORMS: dict[tuple[str, str], Step] = {
 	# The Head of Finance codes the activity against the budget before approving it; approval
 	# submits, which is when before_submit opens the Project if none is named.
 	("Activity Requisition", "Pending Head of Finance"): step(
-		fields=("budget_line", "project", "cost_center", "donor", "grant_project"),
+		fields=("budget_line", "budget_classification", "project", "cost_center", "donor", "grant_project", "program"),
 	),
 	# --- Attendance register ------------------------------------------------------------------
 	("Activity Participant List", "Draft"): step(

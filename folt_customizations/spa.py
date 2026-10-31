@@ -42,7 +42,7 @@ from frappe.model.workflow import (
 from frappe.sessions import get_csrf_token
 from frappe.utils import cint, flt, getdate
 
-from folt_customizations import activity_chain, procurement_chain, step_forms, workflow_shape
+from folt_customizations import activity_chain, masterdata, procurement_chain, step_forms, workflow_shape
 from folt_customizations.document_guide import _documents, get_guide, guide_map
 from folt_customizations.folt_customizations.page.folt_tasks.folt_tasks import _fields, _row
 from folt_customizations.float_lifecycle import FUNDED_FLOAT_STATES
@@ -1040,6 +1040,9 @@ def _default_filters(target: str, meta) -> dict:
 		# nothing and the picker just looked empty (the Gosolar lesson). Status is unambiguous.
 		filters["status"] = "Open"
 	if target == "FoLT Participant" and meta.get_field("is_active"):
+		filters["is_active"] = 1
+	# A Programs master record is offered once approved (masterdata.py), never as a draft.
+	if target in masterdata.MASTERS:
 		filters["is_active"] = 1
 	if target == "Item":
 		# Variant templates cannot be bought, and a sales-only item is not something to quote for.

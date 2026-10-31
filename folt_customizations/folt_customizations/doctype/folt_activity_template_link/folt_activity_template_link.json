@@ -1,0 +1,13 @@
+{
+  "doctype": "DocType",
+  "name": "FoLT Activity Template Link",
+  "module": "Folt Customizations",
+  "custom": 0,
+  "istable": 1,
+  "sort_field": "modified",
+  "sort_order": "DESC",
+  "fields": [
+    { "fieldname": "activity_template", "fieldtype": "Link", "label": "Activity", "options": "FoLT Activity Template", "reqd": 1, "in_list_view": 1 }
+  ],
+  "permissions": []
+}

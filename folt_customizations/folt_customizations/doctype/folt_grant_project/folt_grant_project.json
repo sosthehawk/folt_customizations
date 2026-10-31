@@ -15,9 +15,17 @@
     { "fieldname": "grant_name", "fieldtype": "Data", "label": "Funding source / grant", "reqd": 1, "unique": 1, "in_list_view": 1, "bold": 1 },
     { "fieldname": "grant_code", "fieldtype": "Data", "label": "Code", "in_list_view": 1, "description": "Left blank, a code is generated from the prefix in Master Data Settings." },
     { "fieldname": "donor", "fieldtype": "Link", "label": "Donor", "options": "FoLT Donor", "reqd": 1, "in_list_view": 1, "in_standard_filter": 1 },
+    { "fieldname": "funding_category", "fieldtype": "Select", "label": "Funding category", "options": "\nGrant\nLoan\nDonation\nIn-kind\nGovernment allocation\nOwn funds", "in_standard_filter": 1 },
+    { "fieldname": "source_type", "fieldtype": "Select", "label": "Source type", "options": "\nRestricted\nUnrestricted\nEarmarked" },
+    { "fieldname": "reference_number", "fieldtype": "Data", "label": "Reference number" },
+    { "fieldname": "grant_column", "fieldtype": "Column Break" },
     { "fieldname": "start_date", "fieldtype": "Date", "label": "Start date" },
     { "fieldname": "end_date", "fieldtype": "Date", "label": "End date" },
     { "fieldname": "grant_currency", "fieldtype": "Link", "label": "Grant currency", "options": "Currency" },
+    { "fieldname": "total_amount", "fieldtype": "Currency", "label": "Total amount", "options": "grant_currency" },
+    { "fieldname": "terms_section", "fieldtype": "Section Break", "label": "Terms" },
+    { "fieldname": "restrictions", "fieldtype": "Text", "label": "Funding restrictions", "permlevel": 1 },
+    { "fieldname": "approval_requirements", "fieldtype": "Text", "label": "Approval requirements", "description": "Whose approval the donor requires before money is spent or moved." },
     { "fieldname": "lifecycle_section", "fieldtype": "Section Break", "label": "Lifecycle", "collapsible": 1 },
     { "fieldname": "workflow_state", "fieldtype": "Link", "options": "Workflow State", "label": "Status", "read_only": 1, "no_copy": 1, "in_standard_filter": 1 },
     { "fieldname": "is_active", "fieldtype": "Check", "label": "Active", "read_only": 1, "no_copy": 1, "default": "0", "in_standard_filter": 1 },
@@ -33,6 +41,13 @@
     { "role": "Program Officer", "read": 1, "write": 1, "create": 1, "report": 1, "print": 1 },
     { "role": "M&E Officer", "read": 1, "write": 1, "create": 1, "report": 1, "export": 1, "print": 1 },
     { "role": "Auditor", "read": 1, "report": 1, "export": 1, "print": 1 },
-    { "role": "Employee", "read": 1 }
+    { "role": "Employee", "read": 1 },
+    { "role": "Accounts Manager", "permlevel": 1, "read": 1, "write": 1 },
+    { "role": "Auditor", "permlevel": 1, "read": 1 },
+    { "role": "Head of Programs", "permlevel": 1, "read": 1, "write": 1 },
+    { "role": "Master Data Administrator", "permlevel": 1, "read": 1, "write": 1 },
+    { "role": "Master Data Approver", "permlevel": 1, "read": 1 },
+    { "role": "Program Manager", "permlevel": 1, "read": 1, "write": 1 },
+    { "role": "System Manager", "permlevel": 1, "read": 1, "write": 1 }
   ]
 }

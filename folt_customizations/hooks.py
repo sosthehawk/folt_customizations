@@ -271,6 +271,10 @@ doc_events = {
     "Supplier": {
         "validate": "folt_customizations.supplier.validate",
     },
+    # A Programs master record newly named on a requisition must be an approved, active one.
+    "Activity Requisition": {
+        "validate": "folt_customizations.masterdata.check_master_links",
+    },
     # `All Departments`, the root of the Department tree, cannot be saved at all in stock
     # erpnext: `company` is mandatory and the root's is NULL by design, and erpnext's own
     # validate then makes the root its own parent, which the nested set rejects. That matters
@@ -359,6 +363,7 @@ doc_events = {
 scheduler_events = {
     "daily": [
         "folt_customizations.float_lifecycle.flag_overdue_floats",
+        "folt_customizations.masterdata.flag_reporting_periods",
     ],
 }
 

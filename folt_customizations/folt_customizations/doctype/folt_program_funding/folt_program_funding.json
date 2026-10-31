@@ -1,0 +1,15 @@
+{
+  "doctype": "DocType",
+  "name": "FoLT Program Funding",
+  "module": "Folt Customizations",
+  "custom": 0,
+  "istable": 1,
+  "sort_field": "modified",
+  "sort_order": "DESC",
+  "fields": [
+    { "fieldname": "funding_source", "fieldtype": "Link", "label": "Funding source", "options": "FoLT Grant Project", "reqd": 1, "in_list_view": 1, "columns": 4 },
+    { "fieldname": "donor", "fieldtype": "Link", "label": "Donor", "options": "FoLT Donor", "fetch_from": "funding_source.donor", "read_only": 1, "in_list_view": 1, "columns": 3 },
+    { "fieldname": "amount", "fieldtype": "Currency", "label": "Amount", "in_list_view": 1, "columns": 3 }
+  ],
+  "permissions": []
+}

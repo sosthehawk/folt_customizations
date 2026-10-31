@@ -46,6 +46,16 @@ DOCTYPES = {
 	"FoLT Location": (["location_code", "location_level", "parent_folt_location", "is_group"], ["name", "location_code"], None),
 	"FoLT Donor": (["donor_code"], ["name", "donor_code"], None),
 	"FoLT Grant Project": (["grant_code", "donor", "start_date", "end_date", "grant_currency"], ["name", "grant_code", "donor"], "start_date"),
+	"FoLT Partner": (["partner_code", "partner_type", "registration_number"], ["name", "partner_code"], None),
+	"FoLT Beneficiary Category": (["category_code", "classification", "parent_folt_beneficiary_category", "is_group"], ["name", "category_code"], None),
+	"FoLT Objective": (["objective_name", "strategic_alignment"], ["name", "objective_name"], None),
+	"FoLT Outcome": (["outcome_name", "objective"], ["name", "outcome_name"], None),
+	"FoLT Output": (["output_name", "outcome", "expected_quantity", "uom"], ["name", "output_name"], None),
+	"FoLT Indicator": (["indicator_name", "indicator_type", "output", "target_value", "frequency"], ["name", "indicator_name"], None),
+	"FoLT Activity Template": (["activity_name", "activity_category", "department", "standard_duration_days"], ["name", "activity_name"], None),
+	"FoLT Budget Line": (["budget_line_name", "classification", "parent_folt_budget_line", "account"], ["name", "budget_line_name"], None),
+	"FoLT Funding Allocation": (["allocation_title", "program", "funding_source", "fiscal_year", "amount", "currency"], ["name", "allocation_title"], "creation"),
+	"FoLT Reporting Period": (["period_name", "frequency", "program", "donor", "deadline", "reporting_status"], ["name", "period_name"], "deadline"),
 	"Department": (["department_name", "parent_department", "company", "is_group", "disabled"], ["name", "department_name"], None),
 	"FoLT Master Data Settings": ([], [], None),
 }
@@ -54,7 +64,7 @@ READ_ONLY = {"Department"}
 # What a master form's Link fields may search: the masters, and the ERPNext records they point at.
 LINK_TARGETS = set(DOCTYPES) | {
 	"Company", "Department", "Employee", "Cost Center", "Project", "Currency", "UOM", "Account", "Supplier",
-	"Customer", "Fiscal Year", "Project Template", "Role", "Workflow State",
+	"Customer", "Fiscal Year", "Project Template", "Role", "Workflow State", "Budget",
 }
 
 # Fields that only the lifecycle, the tree or the server set.
@@ -197,7 +207,9 @@ def records(doctype, q=None, filters=None, order_by=None, start=0, page_length=2
 	rows = frappe.get_list(doctype, fields=fields, filters=where, or_filters=or_filters, order_by=order,
 	                       limit_start=cint(start), limit_page_length=page_length)
 	total = frappe.get_list(doctype, fields=[{"COUNT": "*", "as": "total"}], filters=where, or_filters=or_filters)
+	link_cols = [c for c in cols if c["fieldtype"] == "Link"]
 	return {
+		"link_titles": link_titles((c["options"], r.get(c["fieldname"])) for r in rows for c in link_cols),
 		"columns": cols,
 		"rows": rows,
 		"total": total[0].total if total else 0,
@@ -205,6 +217,42 @@ def records(doctype, q=None, filters=None, order_by=None, start=0, page_length=2
 		"is_tree": bool(meta.is_tree),
 		"read_only": doctype in READ_ONLY,
 	}
+
+
+def _titled(doctype) -> str | None:
+	"""The title field of a master named by its code (results framework, allocations, periods)."""
+	if doctype not in masterdata.MASTERS:
+		return None
+	meta = frappe.get_meta(doctype)
+	return meta.title_field if meta.show_title_field_in_link and meta.title_field else None
+
+
+def link_titles(pairs) -> dict:
+	"""{doctype: {name: title}} for the code-named masters among (doctype, name) pairs, so a screen
+	shows "Children learn" where the record says OBJ-0003. Titles of master records only."""
+	wanted: dict[str, set] = {}
+	for doctype, name in pairs:
+		if name and _titled(doctype):
+			wanted.setdefault(doctype, set()).add(name)
+	out = {}
+	for doctype, names in wanted.items():
+		field = _titled(doctype)
+		out[doctype] = {r.name: r.get(field) for r in frappe.get_all(doctype, filters={"name": ["in", list(names)]}, fields=["name", field])}
+	return out
+
+
+def _link_pairs(meta, row):
+	for df in meta.get_link_fields():
+		if row.get(df.fieldname):
+			yield df.options, row.get(df.fieldname)
+
+
+def _doc_link_pairs(doc):
+	yield from _link_pairs(doc.meta, doc)
+	for df in doc.meta.get_table_fields():
+		child = frappe.get_meta(df.options)
+		for row in doc.get(df.fieldname) or []:
+			yield from _link_pairs(child, row)
 
 
 def _filters_for(doctype, raw):
@@ -271,15 +319,18 @@ def record(doctype, name=None):
 		perms["write"] = frappe.session.user == "Administrator" or any(
 			row.allow_edit in roles for row in get_workflow(doctype).states if row.state == workflow["state"]
 		)
+	used = [] if meta.issingle else usage(doctype, doc.name)
 	return {
 		"doctype": doctype,
 		"name": doc.name,
+		"title": doc.get(meta.title_field) if meta.title_field else None,
+		"link_titles": link_titles([*_doc_link_pairs(doc), *((u["doctype"], n) for u in used for n in u["sample"])]),
 		"doc": doc.as_dict(convert_dates_to_str=True),
 		"permissions": {k: bool(perms.get(k)) for k in ("read", "write", "create", "delete")},
 		"deletable": bool(perms.get("delete")) and doc.get("workflow_state") in (None, "", masterdata.DRAFT, masterdata.REJECTED),
 		"workflow": workflow,
 		"tree": _tree_context(doc) if meta.is_tree else None,
-		"usage": [] if meta.issingle else usage(doctype, doc.name),
+		"usage": used,
 		"timeline": {
 			"versions": [{"owner": v.get("owner"), "creation": v.get("creation"), "detail": _change(v.get("data"))} for v in docinfo.get("versions", [])],
 			"comments": [{"comment_type": c.get("comment_type"), "content": c.get("content"), "owner": c.get("owner"), "creation": c.get("creation")} for c in docinfo.get("comments", [])],

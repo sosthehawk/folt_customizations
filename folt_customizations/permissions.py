@@ -168,13 +168,17 @@ LINK_FIELD_PERMISSIONS = {
 }
 
 # Programs master data (masterdata.py, programs_portal.py) reuses ERPNext's records rather than
-# copying them: a programme names its company, department, manager, cost centre and project. The
+# copying them: a programme names its company, department, manager, cost centre and project; a
+# partner its supplier; a budget line its account; an allocation its fiscal year and budget. The
 # master-data roles need to pick those (`select`), and to read the departments the Master Data
 # section lists with the programmes that use them.
 _MASTER_DATA_ROLES = ("Master Data Administrator", "Master Data Approver", "Program Manager", "Program Officer", "M&E Officer")
 MASTER_DATA_PERMISSIONS = {
 	"Department": {role: ("read",) for role in (*_MASTER_DATA_ROLES, "Head of Programs")},
-	**{doctype: {role: ("select",) for role in _MASTER_DATA_ROLES} for doctype in ("Company", "Employee", "Cost Center", "Project")},
+	**{
+		doctype: {role: ("select",) for role in _MASTER_DATA_ROLES}
+		for doctype in ("Company", "Employee", "Cost Center", "Project", "Supplier", "Account", "Budget", "Fiscal Year", "Project Template")
+	},
 }
 
 

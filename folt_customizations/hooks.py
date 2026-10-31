@@ -227,7 +227,7 @@ after_migrate = [
 
 # Bulk submit from the list view runs twenty or more documents in a background job, out of
 # reach of finance_approvals.refuse_direct_submit's request check, so the door itself refuses
-# bulk submit of an approval-governed voucher. Every other bulk action passes straight through.
+# bulk submit or cancel of an approval-governed voucher. Every other bulk action passes through.
 override_whitelisted_methods = {
     "frappe.desk.doctype.bulk_update.bulk_update.submit_cancel_or_update_docs": "folt_customizations.finance_approvals.submit_cancel_or_update_docs",
 }
@@ -331,16 +331,19 @@ doc_events = {
     # finance_approvals.py for which doors it shuts and which generated vouchers it lets through.
     "Payment Entry": {
         "before_submit": "folt_customizations.finance_approvals.refuse_direct_submit",
+        "before_cancel": "folt_customizations.finance_approvals.refuse_direct_submit",
         "on_submit": "folt_customizations.float_lifecycle.sync_from_voucher",
         "on_cancel": "folt_customizations.float_lifecycle.sync_from_voucher",
     },
     "Journal Entry": {
         "before_submit": "folt_customizations.finance_approvals.refuse_direct_submit",
+        "before_cancel": "folt_customizations.finance_approvals.refuse_direct_submit",
         "on_submit": "folt_customizations.float_lifecycle.sync_from_voucher",
         "on_cancel": "folt_customizations.float_lifecycle.sync_from_voucher",
     },
     "Purchase Invoice": {
         "before_submit": "folt_customizations.finance_approvals.refuse_direct_submit",
+        "before_cancel": "folt_customizations.finance_approvals.refuse_direct_submit",
     },
     "Expense Claim": {
         "on_submit": "folt_customizations.float_lifecycle.sync_from_claim",

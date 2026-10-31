@@ -36,6 +36,12 @@ GOVERNED = ("Journal Entry", "Payment Entry", "Purchase Invoice")
 # The whitelisted methods that save or submit whatever document the caller hands them.
 _GENERIC_WRITES = {
 	"frappe.client.submit",
+	"frappe.client.cancel",
+	"frappe.desk.form.linked_with.cancel_all_linked_docs",
+	# The FoLT app's own document endpoints (finance_portal), which hand a person's request to
+	# the document as directly as frappe.client does.
+	"folt_customizations.finance_portal.save",
+	"folt_customizations.finance_portal.act",
 	"frappe.client.save",
 	"frappe.client.insert",
 	"frappe.client.insert_many",
@@ -47,7 +53,13 @@ _RESOURCE_PREFIXES = ("/api/resource/", "/api/v1/resource/", "/api/v2/document/"
 
 
 def refuse_direct_submit(doc, method=None):
-	"""before_submit on the governed doctypes: post only by an approval, never around one."""
+	"""before_submit and before_cancel on the governed doctypes: post or reverse a voucher only
+	by an approval step, never around one.
+
+	The move has to be one of the workflow's transitions AND one this person may make. The second
+	half matters for cancel: Frappe stamps Cancelled on a directly cancelled document itself, and
+	Approved -> Cancelled is a real transition -- just not one an Accounts User holds.
+	"""
 	if doc.doctype not in GOVERNED or not get_workflow_name(doc.doctype):
 		return
 	if not _is_a_person_acting(doc) or not _addressed_directly(doc.doctype):
@@ -58,13 +70,18 @@ def refuse_direct_submit(doc, method=None):
 	before = doc.get_doc_before_save()
 	from_state = (before.get(field) if before else None) or workflow.states[0].state
 	to_state = doc.get(field)
-	if from_state != to_state and any(t.state == from_state and t.next_state == to_state for t in workflow.transitions):
+	roles = set(frappe.get_roles())
+	if from_state != to_state and any(
+		t.state == from_state and t.next_state == to_state and t.allowed in roles for t in workflow.transitions
+	):
 		return
 
 	frappe.throw(
-		_("{0} {1} posts to the ledger only when it is approved. Submit it for approval instead.").format(
-			_(doc.doctype), frappe.bold(doc.name or _("(new)"))
-		),
+		(
+			_("{0} {1} posts to the ledger only when it is approved. Submit it for approval instead.")
+			if doc.docstatus == 1
+			else _("{0} {1} is reversed only through its approval workflow, by whoever may cancel it there.")
+		).format(_(doc.doctype), frappe.bold(doc.name or _("(new)"))),
 		frappe.PermissionError,
 		title=_("Needs approval"),
 	)
@@ -91,16 +108,16 @@ def _addressed_directly(doctype: str) -> bool:
 
 @frappe.whitelist()
 def submit_cancel_or_update_docs(doctype, docnames, action="submit", data=None, task_id=None):
-	"""The list view's bulk action, minus bulk submit of an approval-governed voucher.
+	"""The list view's bulk action, minus bulk submit or cancel of an approval-governed voucher.
 
 	Twenty or more documents are submitted in a background job, where there is no request for
 	refuse_direct_submit to look at, so the refusal has to happen here, at the door.
 	"""
 	from frappe.desk.doctype.bulk_update.bulk_update import submit_cancel_or_update_docs as bulk
 
-	if action == "submit" and doctype in GOVERNED and get_workflow_name(doctype):
+	if action in ("submit", "cancel") and doctype in GOVERNED and get_workflow_name(doctype):
 		frappe.throw(
-			_("{0} posts to the ledger only when it is approved, one document at a time.").format(_(doctype)),
+			_("{0} is posted and reversed only through its approval workflow, one document at a time.").format(_(doctype)),
 			frappe.PermissionError,
 			title=_("Needs approval"),
 		)

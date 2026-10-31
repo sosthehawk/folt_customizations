@@ -205,6 +205,19 @@ def run():
 	)
 	check("the resubmission cleared last time's reason", not posted.get(REJECTION_REASON_FIELD))
 
+	def preparer_cancels():
+		with method("frappe.client.cancel"):
+			fresh(draft).cancel()
+
+	expect_throw("the preparer cannot reverse a posted voucher directly", lambda: as_user(PREPARER, preparer_cancels), frappe.PermissionError)
+
+	def bulk_cancel():
+		with method("frappe.desk.doctype.bulk_update.bulk_update.submit_cancel_or_update_docs"):
+			submit_cancel_or_update_docs("Journal Entry", [draft.name], action="cancel")
+
+	expect_throw("bulk cancel refuses an approval-governed voucher", lambda: as_user(APPROVER, bulk_cancel), frappe.PermissionError)
+	check("it is still posted", frappe.db.get_value("Journal Entry", draft.name, "docstatus") == 1)
+
 	print("\n--- an approver cannot approve their own voucher ---")
 	own = as_user(APPROVER, make_voucher)
 	as_user(APPROVER, lambda: apply_workflow(fresh(own), "Submit for approval"))

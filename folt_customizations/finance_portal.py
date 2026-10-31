@@ -545,6 +545,18 @@ def act(doctype, name, action, transition=None, reason=None):
 	frappe.throw(_("Unknown action {0}.").format(action))
 
 
+@frappe.whitelist(methods=["POST"])
+def attach(doctype, docname):
+	"""Frappe's own upload_file, private, onto a Finance document; Frappe checks the write right."""
+	_only_finance()
+	_doctype(doctype)
+	frappe.form_dict.update({"doctype": doctype, "docname": docname, "is_private": 1})
+	from frappe.handler import upload_file
+
+	f = upload_file()
+	return {"name": f.name, "file_name": f.file_name, "file_url": f.file_url, "is_private": f.is_private}
+
+
 @frappe.whitelist()
 def copy(doctype, name):
 	"""An unsaved copy of a document, to start a new one from (Duplicate). Writes nothing."""
@@ -775,10 +787,19 @@ def dashboard(company, from_date, to_date, cost_center=None, project=None, finan
 		]
 
 	def party_rows(out):
-		rows = [r for r in (out or {}).get("result") or [] if isinstance(r, dict) and r.get("party")]
-		totals = {k: sum(flt(r.get(k)) for r in rows) for k in ("outstanding", "range0", "range1", "range2", "range3", "range4", "range5")}
+		if not out:
+			return None
+		rows = [r for r in out.get("result") or [] if isinstance(r, dict) and r.get("party")]
+		keys = ("outstanding", "range0", "range1", "range2", "range3", "range4", "range5")
+		totals = {k: sum(flt(r.get(k)) for r in rows) for k in keys}
+		# The ageing buckets as the report names them ("0-30", "31-60"…, "Not Due" where it has one).
+		labels = {c.get("fieldname"): _(c.get("label")) for c in out.get("columns") or [] if isinstance(c, dict) and c.get("fieldname") in keys}
 		top = sorted(rows, key=lambda r: -flt(r.get("outstanding")))[:8]
-		return {"totals": totals, "top": [{"party_type": r.get("party_type"), "party": r.get("party"), "party_name": r.get("party_name") or r.get("party"), "outstanding": flt(r.get("outstanding"))} for r in top]} if out else None
+		return {
+			"totals": totals,
+			"labels": labels,
+			"top": [{"party_type": r.get("party_type"), "party": r.get("party"), "party_name": r.get("party_name") or r.get("party"), "outstanding": flt(r.get("outstanding"))} for r in top],
+		}
 
 	cash_accounts = frappe.get_list("Account", filters={"company": company, "account_type": ["in", ["Bank", "Cash"]], "is_group": 0, "disabled": 0},
 	                                fields=["name", "account_name", "account_type", "account_currency"])
@@ -804,7 +825,8 @@ def dashboard(company, from_date, to_date, cost_center=None, project=None, finan
 		if isinstance(r, dict) and r.get("account"):
 			b = next((v for k, v in r.items() if k.startswith("budget_")), 0)
 			a = next((v for k, v in r.items() if k.startswith("actual_")), 0)
-			budget_rows.append({"budget_against": r.get("budget_against"), "account": r.get("account"), "budget": flt(b), "actual": flt(a)})
+			budget_rows.append({"budget_against": r.get("budget_against"), "account": r.get("account"), "budget": flt(b), "actual": flt(a),
+			                    "utilisation": flt(flt(a) / flt(b) * 100, 1) if flt(b) else None})
 
 	cc_rows = [
 		{"cost_center": r.get("account"), "label": r.get("account_name"), "income": flt(r.get("income")), "expense": flt(r.get("expense")), "net": flt(r.get("gross_profit_loss"))}
@@ -843,7 +865,9 @@ def dashboard(company, from_date, to_date, cost_center=None, project=None, finan
 		"receivables": party_rows(ar),
 		"payables": party_rows(ap),
 		"cash_and_bank": cash,
+		"cash_total": sum(a["balance"] for a in cash) if cash else None,
 		"tax_liabilities": taxes,
+		"tax_total": sum(a["balance"] for a in taxes) if taxes else None,
 		"budget": {"fiscal_year": fy, "rows": budget_rows} if budget is not None else None,
 		"cost_centers": cc_rows if by_cc else None,
 		"unavailable": unavailable,

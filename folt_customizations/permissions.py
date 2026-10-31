@@ -167,6 +167,16 @@ LINK_FIELD_PERMISSIONS = {
 	},
 }
 
+# Programs master data (masterdata.py, programs_portal.py) reuses ERPNext's records rather than
+# copying them: a programme names its company, department, manager, cost centre and project. The
+# master-data roles need to pick those (`select`), and to read the departments the Master Data
+# section lists with the programmes that use them.
+_MASTER_DATA_ROLES = ("Master Data Administrator", "Master Data Approver", "Program Manager", "Program Officer", "M&E Officer")
+MASTER_DATA_PERMISSIONS = {
+	"Department": {role: ("read",) for role in (*_MASTER_DATA_ROLES, "Head of Programs")},
+	**{doctype: {role: ("select",) for role in _MASTER_DATA_ROLES} for doctype in ("Company", "Employee", "Cost Center", "Project")},
+}
+
 
 # Check fields a fresh Custom DocPerm comes with already ticked.
 DEFAULT_ON_PTYPES = ("read", "export")
@@ -182,6 +192,7 @@ def apply_role_permissions():
 	for perm_map, permlevel in (
 		(WORKFLOW_PERMISSIONS, 0),
 		(LINK_FIELD_PERMISSIONS, 0),
+		(MASTER_DATA_PERMISSIONS, 0),
 		(PERMLEVEL_1_PERMISSIONS, 1),
 	):
 		for doctype, roles in perm_map.items():

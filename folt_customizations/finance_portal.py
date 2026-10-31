@@ -34,6 +34,11 @@ from frappe import _
 from frappe.model.workflow import apply_workflow, get_transitions, get_workflow, get_workflow_name
 from frappe.utils import cint, flt, getdate, nowdate
 
+from folt_customizations.portal_common import FILTER_OPS, STD_FIELDS
+from folt_customizations.portal_common import columns as _columns
+from folt_customizations.portal_common import filters as _filters
+from folt_customizations.portal_common import parse_json as _json
+from folt_customizations.portal_common import version_summary as _version_summary
 from folt_customizations.workflow_access import hold_rejection_reason, is_turn_down
 
 READERS = ("Accounts User", "Accounts Manager", "Auditor", "System Manager")
@@ -148,8 +153,8 @@ OPERATIONS = {
 	"frappe.core.doctype.communication.email.make",
 }
 
-_FILTER_OPS = {"=", "!=", ">", "<", ">=", "<=", "like", "not like", "in", "not in", "between", "is"}
-_STD_FIELDS = {"name", "owner", "creation", "modified", "modified_by", "docstatus", "amended_from"}
+_FILTER_OPS = FILTER_OPS
+_STD_FIELDS = STD_FIELDS
 
 
 # --- the edge -------------------------------------------------------------------------------
@@ -175,12 +180,6 @@ def _report(report: str) -> str:
 	if report not in REPORTS:
 		frappe.throw(_("{0} is not one of the Finance reports.").format(report), frappe.PermissionError)
 	return report
-
-
-def _json(value, default=None):
-	if value in (None, ""):
-		return default
-	return frappe.parse_json(value) if isinstance(value, str) else value
 
 
 # --- context ----------------------------------------------------------------------------------
@@ -246,29 +245,6 @@ def context():
 
 
 # --- lists and records ------------------------------------------------------------------------
-
-
-def _columns(doctype, wanted):
-	meta = frappe.get_meta(doctype)
-	out = []
-	for fieldname in wanted:
-		df = meta.get_field(fieldname)
-		if df:
-			out.append({"fieldname": fieldname, "label": _(df.label), "fieldtype": df.fieldtype, "options": df.options})
-	return out
-
-
-def _filters(doctype, raw):
-	meta = frappe.get_meta(doctype)
-	out = []
-	for row in _json(raw, []) or []:
-		if not isinstance(row, (list, tuple)) or len(row) != 3:
-			frappe.throw(_("A filter is [field, operator, value]."))
-		field, op, value = row
-		if op not in _FILTER_OPS or (field not in _STD_FIELDS and not meta.get_field(field)):
-			frappe.throw(_("Cannot filter {0} by {1} {2}.").format(doctype, field, op))
-		out.append([doctype, field, op, value])
-	return out
 
 
 @frappe.whitelist()
@@ -1032,22 +1008,6 @@ def audit(from_date=None, to_date=None, doctype=None, user=None, kind=None, star
 	events.sort(key=lambda e: str(e["when"]), reverse=True)
 	return {"events": events[start : start + page_length], "more": len(events) > start + page_length}
 
-
-def _version_summary(data):
-	try:
-		d = frappe.parse_json(data) or {}
-	except Exception:  # noqa: BLE001
-		return ""
-	parts = []
-	for field, old, new in (d.get("changed") or [])[:6]:
-		parts.append(f"{field}: {old if old not in (None, '') else '—'} → {new if new not in (None, '') else '—'}")
-	if d.get("added"):
-		parts.append(_("{0} row(s) added").format(len(d["added"])))
-	if d.get("removed"):
-		parts.append(_("{0} row(s) removed").format(len(d["removed"])))
-	if d.get("row_changed"):
-		parts.append(_("{0} row(s) changed").format(len(d["row_changed"])))
-	return "; ".join(parts) or _("created")
 
 
 # --- period closing ---------------------------------------------------------------------------

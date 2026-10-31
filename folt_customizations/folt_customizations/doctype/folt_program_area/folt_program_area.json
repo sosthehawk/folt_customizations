@@ -1,0 +1,41 @@
+{
+  "doctype": "DocType",
+  "name": "FoLT Program Area",
+  "module": "Folt Customizations",
+  "custom": 0,
+  "description": "A thematic area or area of intervention, nested under broader areas.",
+  "autoname": "field:area_name",
+  "naming_rule": "By fieldname",
+  "title_field": "area_name",
+  "search_fields": "area_code",
+  "is_tree": 1,
+  "nsm_parent_field": "parent_folt_program_area",
+  "track_changes": 1,
+  "sort_field": "modified",
+  "sort_order": "DESC",
+  "fields": [
+    { "fieldname": "area_name", "fieldtype": "Data", "label": "Program area", "reqd": 1, "unique": 1, "in_list_view": 1, "bold": 1 },
+    { "fieldname": "area_code", "fieldtype": "Data", "label": "Code", "unique": 1, "in_list_view": 1, "description": "Left blank, a code is generated from the prefix in Master Data Settings." },
+    { "fieldname": "parent_folt_program_area", "fieldtype": "Link", "options": "FoLT Program Area", "label": "Parent area", "in_standard_filter": 1 },
+    { "fieldname": "is_group", "fieldtype": "Check", "label": "Has children (group)" },
+    { "fieldname": "lft", "fieldtype": "Int", "label": "Left", "hidden": 1, "read_only": 1, "no_copy": 1, "search_index": 1 },
+    { "fieldname": "rgt", "fieldtype": "Int", "label": "Right", "hidden": 1, "read_only": 1, "no_copy": 1, "search_index": 1 },
+    { "fieldname": "old_parent", "fieldtype": "Link", "options": "FoLT Program Area", "label": "Old parent", "hidden": 1, "read_only": 1 },
+    { "fieldname": "description", "fieldtype": "Small Text", "label": "Description" },
+    { "fieldname": "lifecycle_section", "fieldtype": "Section Break", "label": "Lifecycle", "collapsible": 1 },
+    { "fieldname": "workflow_state", "fieldtype": "Link", "options": "Workflow State", "label": "Status", "read_only": 1, "no_copy": 1, "in_standard_filter": 1 },
+    { "fieldname": "is_active", "fieldtype": "Check", "label": "Active", "read_only": 1, "no_copy": 1, "default": "0", "in_standard_filter": 1 },
+    { "fieldname": "folt_rejection_reason", "fieldtype": "Small Text", "label": "Reason turned down", "read_only": 1, "no_copy": 1 }
+  ],
+  "permissions": [
+    { "role": "System Manager", "read": 1, "write": 1, "create": 1, "delete": 1, "report": 1, "export": 1, "print": 1, "share": 1, "import": 1 },
+    { "role": "Master Data Administrator", "read": 1, "write": 1, "create": 1, "delete": 1, "report": 1, "export": 1, "print": 1, "share": 1, "import": 1 },
+    { "role": "Master Data Approver", "read": 1, "write": 1, "report": 1, "export": 1, "print": 1 },
+    { "role": "Head of Programs", "read": 1, "write": 1, "create": 1, "report": 1, "export": 1, "print": 1, "share": 1 },
+    { "role": "Program Manager", "read": 1, "write": 1, "create": 1, "report": 1, "export": 1, "print": 1 },
+    { "role": "Program Officer", "read": 1, "write": 1, "create": 1, "report": 1, "print": 1 },
+    { "role": "M&E Officer", "read": 1, "write": 1, "create": 1, "report": 1, "export": 1, "print": 1 },
+    { "role": "Auditor", "read": 1, "report": 1, "export": 1, "print": 1 },
+    { "role": "Employee", "read": 1 }
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "doctype": "DocType",
+  "name": "FoLT Master Data Settings",
+  "module": "Folt Customizations",
+  "custom": 0,
+  "description": "How Programs master data is coded, checked and approved.",
+  "issingle": 1,
+  "track_changes": 1,
+  "sort_field": "modified",
+  "sort_order": "DESC",
+  "fields": [
+    { "fieldname": "records_section", "fieldtype": "Section Break", "label": "Records" },
+    { "fieldname": "duplicate_policy", "fieldtype": "Select", "label": "Similar names", "options": "Block\nWarn", "default": "Block", "description": "A name that differs from an existing one only by case, punctuation or a legal suffix (Ltd, Foundation)." },
+    { "fieldname": "default_program_category", "fieldtype": "Link", "label": "Default programme category", "options": "FoLT Program Category" },
+    { "fieldname": "default_program_status", "fieldtype": "Link", "label": "Default programme status", "options": "FoLT Program Status" },
+    { "fieldname": "records_column", "fieldtype": "Column Break" },
+    { "fieldname": "reminder_days", "fieldtype": "Int", "label": "Reporting reminder (days before deadline)", "default": "7" },
+    { "fieldname": "notify_role", "fieldtype": "Link", "label": "Also notify role", "options": "Role", "description": "Besides a period's responsible person: who hears about reporting deadlines." },
+    { "fieldname": "rules_section", "fieldtype": "Section Break", "label": "Each master record" },
+    { "fieldname": "rules", "fieldtype": "Table", "label": "Rules", "options": "FoLT Master Data Rule" }
+  ],
+  "permissions": [
+    { "role": "System Manager", "read": 1, "write": 1, "print": 1 },
+    { "role": "Master Data Administrator", "read": 1, "write": 1, "print": 1 },
+    { "role": "Head of Programs", "read": 1 },
+    { "role": "Master Data Approver", "read": 1 }
+  ]
+}

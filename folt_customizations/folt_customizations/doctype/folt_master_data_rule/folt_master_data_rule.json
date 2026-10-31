@@ -1,0 +1,16 @@
+{
+  "doctype": "DocType",
+  "name": "FoLT Master Data Rule",
+  "module": "Folt Customizations",
+  "custom": 0,
+  "istable": 1,
+  "sort_field": "modified",
+  "sort_order": "DESC",
+  "fields": [
+    { "fieldname": "master_doctype", "fieldtype": "Link", "label": "Master record", "options": "DocType", "reqd": 1, "read_only": 1, "in_list_view": 1, "columns": 3 },
+    { "fieldname": "code_prefix", "fieldtype": "Data", "label": "Code prefix", "in_list_view": 1, "columns": 2, "description": "Codes are the prefix and a running number: CAT-0001." },
+    { "fieldname": "requires_approval", "fieldtype": "Check", "label": "Needs approval", "default": "1", "in_list_view": 1, "columns": 2, "description": "Off: a preparer activates a record directly, without review." },
+    { "fieldname": "approver_role", "fieldtype": "Link", "label": "Approver role", "options": "Role", "in_list_view": 1, "columns": 3, "description": "Left blank: Master Data Approver and Head of Programs." }
+  ],
+  "permissions": []
+}

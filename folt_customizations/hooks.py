@@ -210,6 +210,7 @@ after_install = [
     "folt_customizations.supplier_portal.link_portal_users",
     "folt_customizations.leave_notifications.apply_leave_notification_templates",
     "folt_customizations.hr_accounts.apply_hr_accounts",
+    "folt_customizations.masterdata.apply_master_data",
 ]
 after_migrate = [
     "folt_customizations.branding.apply_branding",
@@ -223,6 +224,7 @@ after_migrate = [
     "folt_customizations.leave_notifications.apply_leave_notification_templates",
     # After the fixtures sync: their empty `accounts` tables would otherwise wipe the ledgers.
     "folt_customizations.hr_accounts.apply_hr_accounts",
+    "folt_customizations.masterdata.apply_master_data",
 ]
 
 # Bulk submit from the list view runs twenty or more documents in a background job, out of
@@ -426,6 +428,12 @@ FOLT_ROLES = [
     "Executive Director",
     "Finance Assistant",
     "Operations Support Officer",
+    # Programs master data (masterdata.py)
+    "Master Data Administrator",
+    "Master Data Approver",
+    "Program Manager",
+    "Program Officer",
+    "M&E Officer",
 ]
 
 # Workflows attached to the procurement / finance / payroll doctypes.

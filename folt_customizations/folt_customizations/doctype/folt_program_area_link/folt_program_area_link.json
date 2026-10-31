@@ -1,0 +1,13 @@
+{
+  "doctype": "DocType",
+  "name": "FoLT Program Area Link",
+  "module": "Folt Customizations",
+  "custom": 0,
+  "istable": 1,
+  "sort_field": "modified",
+  "sort_order": "DESC",
+  "fields": [
+    { "fieldname": "area", "fieldtype": "Link", "label": "Program area", "options": "FoLT Program Area", "reqd": 1, "in_list_view": 1 }
+  ],
+  "permissions": []
+}

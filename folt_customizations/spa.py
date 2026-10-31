@@ -100,6 +100,10 @@ def catalogue() -> list[dict]:
 	whether they can start one here. The Workflows screen and the state chips' tones."""
 	out = []
 	for doctype, guided in guide_map(only_permitted=True).items():
+		# Master records have workflows too (masterdata.py); they are Programs master data, not
+		# documents this app moves along a chain.
+		if doctype not in step_forms.SPA_DOCTYPES:
+			continue
 		state_field = guided["state_field"]
 		counts = {
 			row.get(state_field): row.get("COUNT(*)")

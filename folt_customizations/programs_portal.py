@@ -23,7 +23,7 @@ import io
 import frappe
 from frappe import _
 from frappe.model.workflow import apply_workflow, get_transitions, get_workflow, get_workflow_name, has_approval_access
-from frappe.utils import cint, nowdate
+from frappe.utils import cint, getdate, nowdate
 
 from folt_customizations import masterdata
 from folt_customizations.portal_common import STD_FIELDS, columns, filters, parse_json, version_summary
@@ -579,3 +579,273 @@ def export(doctype, q=None, filters=None, file_format="xlsx"):
 		frappe.response.filename = f"{filename}.xlsx"
 		frappe.response.filecontent = make_xlsx(table, doctype[:31]).getvalue()
 	frappe.response.type = "binary"
+
+
+# --- approvals and audit ------------------------------------------------------------------------
+
+
+def _lifecycle(doctype):
+	"""Who may do what in a master's lifecycle, as its workflow says."""
+	wf = get_workflow(doctype)
+	states, moves = {}, {}
+	for row in wf.states:
+		states.setdefault(row.state, []).append(row.allow_edit)
+	for t in wf.transitions:
+		key = (t.state, t.action, t.next_state)
+		m = moves.setdefault(key, {"from": t.state, "action": t.action, "to": t.next_state, "roles": [], "self_approval": bool(t.allow_self_approval)})
+		m["roles"].append(t.allowed)
+	return {
+		"doctype": doctype,
+		"workflow": wf.name,
+		"states": [{"state": s, "roles": r} for s, r in states.items()],
+		"transitions": list(moves.values()),
+	}
+
+
+@frappe.whitelist()
+def approvals():
+	"""What awaits this person's decision across the masters, what they have sent for review, and how
+	each master's lifecycle is set (its states' custodians and its moves' roles)."""
+	_only_readers()
+	user = frappe.session.user
+	waiting, mine, lifecycles = [], [], []
+	for dt in masterdata.MASTERS:
+		if not frappe.has_permission(dt, "read") or not get_workflow_name(dt):
+			continue
+		lifecycles.append(_lifecycle(dt))
+		title = _title_field(dt)
+		wf = get_workflow(dt)
+		for r in frappe.get_list(dt, filters={"workflow_state": masterdata.PENDING}, fields=["name", title, "owner", "modified"],
+		                         order_by="modified asc", limit_page_length=200):
+			row = {"doctype": dt, "name": r.name, "title": r.get(title), "state": masterdata.PENDING, "owner": r.owner, "since": r.modified}
+			if r.owner == user:
+				mine.append(row)
+			doc = frappe.get_doc(dt, r.name)
+			moves = [
+				{"action": t.action, "next_state": t.next_state, "needs_reason": is_turn_down(wf, masterdata.PENDING, t.next_state)}
+				for t in get_transitions(doc)
+				if has_approval_access(user, doc, t)
+			]
+			if moves:
+				waiting.append({**row, "moves": moves})
+		for r in frappe.get_list(dt, filters={"owner": user, "workflow_state": ["in", [masterdata.DRAFT, masterdata.REJECTED]]},
+		                         fields=["name", title, "owner", "modified", "workflow_state"], order_by="modified desc", limit_page_length=50):
+			mine.append({"doctype": dt, "name": r.name, "title": r.get(title), "state": r.workflow_state, "owner": r.owner, "since": r.modified})
+	mine.sort(key=lambda r: str(r["since"]), reverse=True)
+	return {"waiting": waiting, "mine": mine, "lifecycles": lifecycles}
+
+
+@frappe.whitelist()
+def audit(from_date=None, to_date=None, doctype=None, user=None, kind=None, start=0, page_length=100):
+	"""Master data's audit trail: every saved change (Version) and every lifecycle move or comment,
+	for the records this person may read. Nothing here is recorded by FoLT; it is the history the
+	records already keep."""
+	_only_readers()
+	doctypes = [dt for dt in ([doctype] if doctype else list(masterdata.MASTERS)) if _doctype(dt) and frappe.has_permission(dt, "read")]
+	if not doctypes:
+		return {"events": [], "more": False}
+	start, page_length = cint(start), min(cint(page_length) or 100, 500)
+	window = []
+	if from_date:
+		window.append(["creation", ">=", f"{getdate(from_date)} 00:00:00"])
+	if to_date:
+		window.append(["creation", "<=", f"{getdate(to_date)} 23:59:59"])
+	events = []
+	if kind in (None, "", "change"):
+		for v in frappe.get_all("Version", filters=[["ref_doctype", "in", doctypes], *window, *([["owner", "=", user]] if user else [])],
+		                        fields=["ref_doctype", "docname", "owner", "creation", "data"], order_by="creation desc",
+		                        limit_page_length=start + page_length):
+			events.append({"kind": "change", "doctype": v.ref_doctype, "name": v.docname, "user": v.owner, "when": v.creation, "detail": _change(v.data)})
+	if kind in (None, "", "workflow"):
+		for c in frappe.get_all("Comment", filters=[["reference_doctype", "in", doctypes], ["comment_type", "in", ["Workflow", "Comment", "Info"]], *window,
+		                                            *([["comment_email", "=", user]] if user else [])],
+		                        fields=["reference_doctype", "reference_name", "comment_email", "owner", "creation", "content", "comment_type"],
+		                        order_by="creation desc", limit_page_length=start + page_length):
+			events.append({"kind": "workflow" if c.comment_type == "Workflow" else "comment", "doctype": c.reference_doctype, "name": c.reference_name,
+			               "user": c.comment_email or c.owner, "when": c.creation, "detail": frappe.utils.strip_html(c.content or "")[:300]})
+	readable = {}
+
+	def can_read(dt, name):
+		if (dt, name) not in readable:
+			readable[(dt, name)] = bool(frappe.db.exists(dt, name)) and frappe.has_permission(dt, "read", name)
+		return readable[(dt, name)]
+
+	events = [e for e in events if can_read(e["doctype"], e["name"])]
+	events.sort(key=lambda e: str(e["when"]), reverse=True)
+	page = events[start : start + page_length]
+	return {"events": page, "more": len(events) > start + page_length,
+	        "link_titles": link_titles((e["doctype"], e["name"]) for e in page)}
+
+
+# --- import: Frappe's own Data Import, one master at a time --------------------------------------
+
+_NOT_IMPORTED = {"workflow_state", "is_active", "folt_rejection_reason", "lft", "rgt", "old_parent"}
+
+
+def _importable(doctype):
+	"""The fields a person fills in, in the doctype's order, by label (what Data Import reads)."""
+	from frappe.model import no_value_fields
+
+	meta = frappe.get_meta(doctype)
+	return [df for df in meta.fields if df.fieldtype not in no_value_fields and df.fieldtype not in ("Table", "Table MultiSelect", "Attach", "Attach Image")
+	        and not df.read_only and not df.hidden and df.fieldname not in _NOT_IMPORTED]
+
+
+def _importable_doctype(doctype):
+	_writable(doctype)
+	if doctype not in masterdata.MASTERS:
+		frappe.throw(_("{0} is not imported here.").format(_(doctype)), frappe.PermissionError)
+	if not frappe.has_permission(doctype, "import"):
+		frappe.throw(_("You may not import {0}.").format(_(doctype)), frappe.PermissionError)
+	return doctype
+
+
+@frappe.whitelist()
+def import_template(doctype):
+	"""A CSV with one column per field a person fills in, headed by its label; required ones marked."""
+	_only_readers()
+	_importable_doctype(doctype)
+	buf = io.StringIO()
+	csv.writer(buf).writerow([_(df.label) for df in _importable(doctype)])
+	frappe.response.filename = f"{doctype} import template.csv"
+	frappe.response.filecontent = buf.getvalue()
+	frappe.response.type = "binary"
+
+
+def _duplicates(doctype, preview):
+	"""Rows whose name matches an existing record, or another row, once normalised (masterdata)."""
+	_code, _prefix, title_field, dedupe = masterdata.MASTERS[doctype]
+	label = _(frappe.get_meta(doctype).get_label(title_field))
+	columns = preview.get("columns") or []
+	idx = next((i for i, c in enumerate(columns) if (c.get("header_title") or "") == label or (c.get("df") or {}).get("fieldname") == title_field), None)
+	if idx is None or not dedupe:
+		return []
+	existing = {masterdata.normalise(t): n for n, t in frappe.get_all(doctype, fields=["name", title_field], as_list=True)}
+	seen, out = {}, []
+	for row in preview.get("data") or []:
+		row_no, values = row[0], row[1:]
+		value = values[idx - 1] if idx and idx - 1 < len(values) else None
+		key = masterdata.normalise(value)
+		if not key:
+			continue
+		if key in existing:
+			out.append(_("Row {0}: {1} looks like the existing {2}.").format(row_no, value, existing[key]))
+		elif key in seen:
+			out.append(_("Row {0}: {1} repeats row {2}.").format(row_no, value, seen[key]))
+		else:
+			seen[key] = row_no
+	return out
+
+
+def _preview(di):
+	p = di.get_preview_from_template() or {}
+	cols = [{"header": c.get("header_title"), "field": (c.get("df") or {}).get("label") if isinstance(c.get("df"), dict) else None,
+	         "skipped": bool(c.get("skip_import"))} for c in p.get("columns") or []][1:]
+	warnings = []
+	for w in p.get("warnings") or []:
+		where = f"{_('Row')} {w['row']}: " if w.get("row") else ""
+		warnings.append(where + frappe.utils.strip_html(str(w.get("message") or "")))
+	return {
+		"name": di.name,
+		"doctype": di.reference_doctype,
+		"status": di.status,
+		"columns": cols,
+		"rows": [r[1:] for r in (p.get("data") or [])[:25]],
+		"total": len(p.get("data") or []),
+		"warnings": warnings,
+		"duplicates": _duplicates(di.reference_doctype, p),
+	}
+
+
+@frappe.whitelist(methods=["POST"])
+def import_upload(doctype):
+	"""Start an import: a Data Import for `doctype` (insert, as the person), the uploaded file attached
+	to it, and Frappe's preview of what it would import -- with its warnings and the rows that look
+	like records already there. Nothing is imported yet."""
+	_only_readers()
+	_importable_doctype(doctype)
+	di = frappe.get_doc({"doctype": "Data Import", "reference_doctype": doctype, "import_type": "Insert New Records"}).insert()
+	frappe.form_dict.update({"doctype": "Data Import", "docname": di.name, "fieldname": "import_file", "is_private": 1})
+	from frappe.handler import upload_file
+
+	f = upload_file()
+	di.reload()
+	di.import_file = f.file_url
+	di.save()
+	return _preview(di)
+
+
+@frappe.whitelist(methods=["POST"])
+def import_run(name):
+	"""Run a previewed import in the background. Each row is inserted as the person, through the
+	master's own validation: it arrives in Draft, and a row that fails is logged, not half-saved."""
+	_only_readers()
+	di = frappe.get_doc("Data Import", name)
+	_importable_doctype(di.reference_doctype)
+	di.check_permission("write")
+	return {"name": di.name, "started": bool(di.start_import())}
+
+
+@frappe.whitelist()
+def import_status(name):
+	"""How far an import has got, and why each failed row failed."""
+	_only_readers()
+	from frappe.core.doctype.data_import.data_import import get_import_logs, get_import_status
+
+	di = frappe.get_doc("Data Import", name)
+	_doctype(di.reference_doctype)
+	status = get_import_status(name)
+	failed = []
+	for log in get_import_logs(name, "failed"):
+		messages = []
+		for m in frappe.parse_json(log.messages or "[]") or []:
+			messages.append(frappe.utils.strip_html(m.get("message") if isinstance(m, dict) else str(m)))
+		failed.append({"rows": frappe.parse_json(log.row_indexes or "[]"), "messages": messages or [frappe.utils.strip_html((log.exception or "")[-300:])]})
+	return {
+		"name": name,
+		"doctype": di.reference_doctype,
+		"status": status.get("status"),
+		"total": cint(status.get("total_records")),
+		"imported": cint(status.get("success")),
+		"failed": cint(status.get("failed")),
+		"failures": failed,
+	}
+
+
+# --- reporting periods for a year ---------------------------------------------------------------
+
+_SPANS = {"Monthly": 1, "Quarterly": 3, "Semiannual": 6, "Annual": 12}
+
+
+@frappe.whitelist(methods=["POST"])
+def generate_periods(fiscal_year, frequency, program=None, donor=None, deadline_days=30, responsible=None):
+	"""Draft reporting periods covering a fiscal year at a frequency, each due `deadline_days` after
+	it ends. A period already there (same name) is left alone. They are drafts: approving them makes
+	them the reporting calendar."""
+	_only_readers()
+	from frappe.utils import add_days, add_months
+
+	if frequency not in _SPANS:
+		frappe.throw(_("Choose monthly, quarterly, semiannual or annual."))
+	if not frappe.has_permission("FoLT Reporting Period", "create"):
+		frappe.throw(_("You may not create reporting periods."), frappe.PermissionError)
+	start, end = frappe.db.get_value("Fiscal Year", fiscal_year, ["year_start_date", "year_end_date"]) or (None, None)
+	if not start:
+		frappe.throw(_("No fiscal year {0}.").format(fiscal_year))
+	span, n, created, kept = _SPANS[frequency], 0, [], []
+	whose = program or donor or ""
+	cur = getdate(start)
+	while cur <= getdate(end):
+		n += 1
+		last = min(add_days(add_months(cur, span), -1), getdate(end))
+		label = {"Monthly": cur.strftime("%b %Y"), "Quarterly": f"Q{n}", "Semiannual": f"H{n}", "Annual": ""}[frequency]
+		title = " ".join(x for x in (fiscal_year, label, f"— {whose}" if whose else "") if x)
+		if frappe.db.exists("FoLT Reporting Period", {"period_name": title}):
+			kept.append(title)
+		else:
+			doc = frappe.get_doc({"doctype": "FoLT Reporting Period", "period_name": title, "frequency": frequency, "program": program, "donor": donor,
+			                      "start_date": cur, "end_date": last, "deadline": add_days(last, cint(deadline_days)), "responsible": responsible})
+			doc.insert()
+			created.append(doc.name)
+		cur = add_days(last, 1)
+	return {"created": created, "kept": kept}

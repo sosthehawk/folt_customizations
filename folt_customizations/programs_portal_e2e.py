@@ -60,8 +60,13 @@ def teardown():
 	frappe.set_user("Administrator")
 	frappe.flags.in_test_teardown = True
 	try:
+		for name in frappe.get_all("Data Import", filters={"reference_doctype": "FoLT Program Category", "owner": ["in", [ADMIN, BOTH]]}, pluck="name"):
+			frappe.delete_doc("Data Import", name, force=True, ignore_permissions=True)
 		for name in frappe.get_all("Activity Requisition", filters={"activity_program": ["like", f"{MARK}%"]}, pluck="name"):
 			frappe.delete_doc("Activity Requisition", name, force=True, ignore_permissions=True)
+		# Generated periods are named by their year, not by MARK: found by their test donor.
+		for name in frappe.get_all("FoLT Reporting Period", filters={"donor": ["like", f"{MARK}%"]}, pluck="name"):
+			frappe.delete_doc("FoLT Reporting Period", name, force=True, ignore_permissions=True)
 		# Dependants first: what links to a master goes before it.
 		for dt in ("FoLT Funding Allocation", "FoLT Reporting Period", "FoLT Program", "FoLT Activity Template", "FoLT Indicator",
 		           "FoLT Output", "FoLT Outcome", "FoLT Objective", "FoLT Grant Project", "FoLT Donor", "FoLT Partner",
@@ -150,6 +155,70 @@ def phases_4_to_6():
 	req = as_user("requester.test@folt.test", lambda: requisition(program))
 	frappe.db.commit()
 	check("a requisition names an approved programme and budget line", frappe.db.get_value("Activity Requisition", req.name, ["program", "budget_classification"]) == (program, line))
+
+
+def phases_7_and_8():
+	import time
+
+	print("\n--- approvals: what awaits whom, and how each lifecycle is set ---")
+	pending = as_user(PREPARER, lambda: pp.save("FoLT Program Type", {"type_name": f"{MARK} Community-based"}))["name"]
+	as_user(PREPARER, lambda: pp.act("FoLT Program Type", pending, "transition", "Submit for Review"))
+	frappe.db.commit()
+	queue = as_user(APPROVER, pp.approvals)
+	mine = [w for w in queue["waiting"] if w["name"] == pending]
+	check("the approver's queue holds it, with Approve, Return and Reject", mine and {m["action"] for m in mine[0]["moves"]} == {"Approve", "Return for Revision", "Reject"}, mine)
+	check("the preparer sees it among what they sent", any(r["name"] == pending for r in as_user(PREPARER, pp.approvals)["mine"]))
+	check("the preparer has nothing of it to decide", not any(w["name"] == pending for w in as_user(PREPARER, pp.approvals)["waiting"]))
+	life = next(l for l in queue["lifecycles"] if l["doctype"] == "FoLT Program Type")
+	approve = next(t for t in life["transitions"] if t["action"] == "Approve")
+	check("a lifecycle says who approves, and that nobody approves their own", "Master Data Approver" in approve["roles"] and not approve["self_approval"], approve)
+	as_user(APPROVER, lambda: pp.act("FoLT Program Type", pending, "transition", "Approve"))
+	frappe.db.commit()
+
+	print("\n--- the audit trail ---")
+	trail = as_user(AUDITOR, lambda: pp.audit(doctype="FoLT Program Type"))["events"]
+	check("the auditor reads the type's changes and moves", any(e["name"] == pending and e["kind"] == "workflow" for e in trail)
+	      and any(e["name"] == pending and e["kind"] == "change" for e in trail), [(e["kind"], e["detail"]) for e in trail if e["name"] == pending][:4])
+
+	print("\n--- import, through Frappe's Data Import ---")
+	template = as_user(ADMIN, lambda: (pp.import_template("FoLT Program Category"), frappe.response.filecontent)[1])
+	check("the template is the fields a person fills in", template.strip().split(",")[:2] == ["Category", "Code"], template.strip())
+	rows = f"Category,Description\n{MARK} Imported Health,Clinics\n{MARK} Imported Water,Boreholes\n{MARK} imported health ltd,Repeats the first\n"
+
+	def upload():
+		di = frappe.get_doc({"doctype": "Data Import", "reference_doctype": "FoLT Program Category", "import_type": "Insert New Records"}).insert()
+		f = frappe.get_doc({"doctype": "File", "file_name": "categories.csv", "content": rows, "attached_to_doctype": "Data Import",
+		                    "attached_to_name": di.name, "attached_to_field": "import_file", "is_private": 1}).insert()
+		di.import_file = f.file_url
+		di.save()
+		return pp._preview(di)
+
+	preview = as_user(ADMIN, upload)
+	frappe.db.commit()
+	check("the preview reads three rows", preview["total"] == 3, preview["total"])
+	check("the preview names the row that repeats another", any("Row 4" in d and "repeats row 2" in d for d in preview["duplicates"]), preview["duplicates"])
+	as_user(ADMIN, lambda: pp.import_run(preview["name"]))
+	frappe.db.commit()
+	status = {}
+	for _ in range(60):
+		time.sleep(1)
+		frappe.db.rollback()  # a fresh snapshot: the import commits in a worker
+		status = as_user(ADMIN, lambda: pp.import_status(preview["name"]))
+		if status["status"] in ("Success", "Partial Success", "Error"):
+			break
+	check("two rows import and the repeat is refused", status["imported"] == 2 and status["failed"] == 1, {k: status.get(k) for k in ("status", "imported", "failed")})
+	check("the refusal says why", any("looks like" in m for f in status["failures"] for m in f["messages"]), status["failures"])
+	imported = frappe.db.get_value("FoLT Program Category", f"{MARK} Imported Water", ["workflow_state", "category_code"])
+	check("an imported record arrives in Draft, with a code", imported and imported[0] == masterdata.DRAFT and imported[1].startswith("CAT-"), imported)
+	expect_throw("a programme officer cannot import", lambda: as_user(PREPARER, lambda: pp.import_template("FoLT Program Category")), frappe.PermissionError)
+
+	print("\n--- a year of reporting periods ---")
+	fy = frappe.get_all("Fiscal Year", pluck="name", order_by="year_start_date desc")[0]
+	made = as_user(MANAGER, lambda: pp.generate_periods(fy, "Quarterly", donor=frappe.db.get_value("FoLT Donor", {"donor_name": f"{MARK} Lake Fund"}), deadline_days=30))
+	frappe.db.commit()
+	check("a quarterly year is four draft periods", len(made["created"]) == 4 and all(frappe.db.get_value("FoLT Reporting Period", n, "workflow_state") == masterdata.DRAFT for n in made["created"]), made)
+	again = as_user(MANAGER, lambda: pp.generate_periods(fy, "Quarterly", donor=frappe.db.get_value("FoLT Donor", {"donor_name": f"{MARK} Lake Fund"}), deadline_days=30))
+	check("generating again makes none twice", not again["created"] and len(again["kept"]) == 4, again)
 
 
 def run():
@@ -265,6 +334,7 @@ def run():
 	check("a location knows its ancestors", kakuma["ancestors"] == ["Kenya", "Turkana County", "Turkana West"], kakuma["ancestors"])
 
 	phases_4_to_6()
+	phases_7_and_8()
 
 	print("\n--- the auditor reads and changes nothing ---")
 	check("the auditor reads the dashboard", as_user(AUDITOR, pp.dashboard)["masters"])

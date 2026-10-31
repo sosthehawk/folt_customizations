@@ -173,7 +173,13 @@ LINK_FIELD_PERMISSIONS = {
 # master-data roles need to pick those (`select`), and to read the departments the Master Data
 # section lists with the programmes that use them.
 _MASTER_DATA_ROLES = ("Master Data Administrator", "Master Data Approver", "Program Manager", "Program Officer", "M&E Officer")
+# Bulk import goes through Frappe's own Data Import (programs_portal.import_*), which only the
+# System Manager may use by default. Those who import master data are given it; Data Import still
+# asks for `import` on the doctype being imported, which only they hold.
+_IMPORTERS = ("Master Data Administrator", "Head of Programs")
 MASTER_DATA_PERMISSIONS = {
+	"Data Import": {role: ("read", "write", "create") for role in _IMPORTERS},
+	"Data Import Log": {role: ("read",) for role in _IMPORTERS},
 	"Department": {role: ("read",) for role in (*_MASTER_DATA_ROLES, "Head of Programs")},
 	**{
 		doctype: {role: ("select",) for role in _MASTER_DATA_ROLES}

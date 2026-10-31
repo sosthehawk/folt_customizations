@@ -113,6 +113,20 @@ PERMLEVEL_1_PERMISSIONS = {
 		"Finance Officer": ("read", "write"),
 		"Executive Director": ("read", "write"),
 	},
+	# A user's roles are permlevel 1; the User Administrator reads them (ADMIN_PERMISSIONS).
+	"User": {
+		"FoLT User Administrator": ("read",),
+	},
+}
+
+# Delegated administration (admin_portal.py). READ only: the Settings screens list users and
+# roles as the person asking, and every write is made by admin_portal after its ceiling rules
+# pass -- so the Desk offers these roles nothing to change and nothing to step around.
+ADMIN_PERMISSIONS = {
+	"User": {"FoLT User Administrator": ("read",)},
+	"Role": {"FoLT User Administrator": ("read",)},
+	"Role Profile": {"FoLT User Administrator": ("read",)},
+	"Module Profile": {"FoLT User Administrator": ("read",)},
 }
 
 # `select` lets a role pick a record in a Link field without granting access to its list view
@@ -203,6 +217,7 @@ def apply_role_permissions():
 		(WORKFLOW_PERMISSIONS, 0),
 		(LINK_FIELD_PERMISSIONS, 0),
 		(MASTER_DATA_PERMISSIONS, 0),
+		(ADMIN_PERMISSIONS, 0),
 		(PERMLEVEL_1_PERMISSIONS, 1),
 	):
 		for doctype, roles in perm_map.items():

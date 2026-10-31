@@ -268,6 +268,11 @@ doc_events = {
     "Workspace": {
         "on_update": "folt_customizations.workspaces.record_visibility_intent",
     },
+    # Whatever saves a User -- the Desk, REST, a hook in another app, admin_portal -- may not
+    # leave the site without an enabled System Manager. See user_guard.py.
+    "User": {
+        "validate": "folt_customizations.user_guard.keep_a_system_manager",
+    },
     "Supplier": {
         "validate": "folt_customizations.supplier.validate",
     },
@@ -439,6 +444,9 @@ FOLT_ROLES = [
     "Program Manager",
     "Program Officer",
     "M&E Officer",
+    # Delegated administration (admin_portal.py): users below a ceiling, and security settings.
+    "FoLT User Administrator",
+    "FoLT Security Administrator",
 ]
 
 # Workflows attached to the procurement / finance / payroll doctypes.

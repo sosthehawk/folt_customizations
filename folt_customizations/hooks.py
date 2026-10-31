@@ -225,6 +225,13 @@ after_migrate = [
     "folt_customizations.hr_accounts.apply_hr_accounts",
 ]
 
+# Bulk submit from the list view runs twenty or more documents in a background job, out of
+# reach of finance_approvals.refuse_direct_submit's request check, so the door itself refuses
+# bulk submit of an approval-governed voucher. Every other bulk action passes straight through.
+override_whitelisted_methods = {
+    "frappe.desk.doctype.bulk_update.bulk_update.submit_cancel_or_update_docs": "folt_customizations.finance_approvals.submit_cancel_or_update_docs",
+}
+
 # A supplier pre-qualified for several FoLT categories carries the extras in the
 # `folt_additional_supplier_groups` Table MultiSelect (Custom Field fixture). The hook
 # keeps that table consistent with the primary `supplier_group` -- see supplier.py.
@@ -319,13 +326,21 @@ doc_events = {
     "Employee Advance": {
         "validate": "folt_customizations.float_lifecycle.set_retirement_deadline",
     },
+    # Journal Entry, Payment Entry and Purchase Invoice post to the ledger only through their
+    # approval workflow; Frappe leaves a direct submit open to anyone holding Submit. See
+    # finance_approvals.py for which doors it shuts and which generated vouchers it lets through.
     "Payment Entry": {
+        "before_submit": "folt_customizations.finance_approvals.refuse_direct_submit",
         "on_submit": "folt_customizations.float_lifecycle.sync_from_voucher",
         "on_cancel": "folt_customizations.float_lifecycle.sync_from_voucher",
     },
     "Journal Entry": {
+        "before_submit": "folt_customizations.finance_approvals.refuse_direct_submit",
         "on_submit": "folt_customizations.float_lifecycle.sync_from_voucher",
         "on_cancel": "folt_customizations.float_lifecycle.sync_from_voucher",
+    },
+    "Purchase Invoice": {
+        "before_submit": "folt_customizations.finance_approvals.refuse_direct_submit",
     },
     "Expense Claim": {
         "on_submit": "folt_customizations.float_lifecycle.sync_from_claim",
@@ -421,6 +436,9 @@ FOLT_WORKFLOWS = [
     "Activity Participant List Verification",
     "Participant Reimbursement List Verification",
     "FoLT Float Retirement Approval",
+    "FoLT Journal Entry Approval",
+    "FoLT Payment Entry Approval",
+    "FoLT Purchase Invoice Approval",
 ]
 
 # Workflow State / Action masters referenced by the workflows above. ERPNext 16 validates
@@ -436,6 +454,8 @@ FOLT_WORKFLOW_STATES = [
     # The float's life after the approval decision (float_lifecycle.py), and the retirement
     # claim's own settlement state.
     "Disbursed", "Overdue", "Accounted", "Closed", "Settled",
+    # The ledger vouchers' approval (finance_approvals.py) ends in Cancelled.
+    "Cancelled",
 ]
 FOLT_WORKFLOW_ACTIONS = [
     "Submit for Review", "Approve", "Reject", "Send to Committee",
@@ -445,6 +465,7 @@ FOLT_WORKFLOW_ACTIONS = [
     "Submit for Verification", "Verify", "Return for Correction",
     "Mark Paid", "Mark Partly Paid", "Raise Dispute", "Resolve Dispute",
     "Record Disbursement", "Mark Accounted", "Flag Overdue", "Close Float", "Mark Settled",
+    "Cancel",
 ]
 
 # Kenyan statutory payroll salary components (NSSF, SHIF, Housing Levy, PAYE + helpers).

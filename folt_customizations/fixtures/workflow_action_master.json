@@ -180,5 +180,12 @@
   "modified": "2026-08-22 09:00:00.000000",
   "name": "Mark Settled",
   "workflow_action_name": "Mark Settled"
+ },
+ {
+  "docstatus": 0,
+  "doctype": "Workflow Action Master",
+  "modified": "2026-10-31 09:00:00.000000",
+  "name": "Cancel",
+  "workflow_action_name": "Cancel"
  }
 ]

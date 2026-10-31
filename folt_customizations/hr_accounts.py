@@ -32,6 +32,10 @@ statistical components: they never post, so they get no account.
 
 Idempotent: an account that exists is reused, a mapping that is already right is left alone, and
 an account somebody chose by hand for a component is never overwritten.
+
+A choice made on the FoLT app's Payroll accounts page (payroll_accounts.py) is stored apart from
+the component and wins over everything here: it is put back first, after the fixtures sync, so a
+migrate can never undo a setting somebody made on purpose.
 """
 
 import frappe
@@ -65,16 +69,25 @@ def apply_hr_accounts():
 			current = account and frappe.db.get_value("Account", account, "account_type")
 			if account and (not current or current in KNOWN_WRONG.get(field, ())):
 				frappe.db.set_value("Account", account, "account_type", account_type)
+		# Settings made on the Payroll accounts page come first, and are never second-guessed.
+		from folt_customizations.payroll_accounts import apply_choice, stored_account
+
+		chosen = set()
+		for component in frappe.get_all("Salary Component", pluck="name"):
+			account = stored_account(company, component)
+			if account and frappe.db.exists("Account", account):
+				apply_choice(company, component, account)
+				chosen.add(component)
 		parent = _duties_and_taxes(company)
 		if not parent:
 			continue
 		for component, account_name in PAYABLES.items():
-			if frappe.db.exists("Salary Component", component):
+			if component not in chosen and frappe.db.exists("Salary Component", component):
 				_map(component, company, _ensure_account(company, parent, account_name))
 		salary = frappe.db.get_value(
 			"Account", {"company": company, "account_name": EARNING_ACCOUNT, "is_group": 0}, "name"
 		)
-		if salary and frappe.db.exists("Salary Component", "Basic Salary"):
+		if salary and "Basic Salary" not in chosen and frappe.db.exists("Salary Component", "Basic Salary"):
 			_map("Basic Salary", company, salary)
 
 

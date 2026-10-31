@@ -83,13 +83,14 @@ def _entry_defaults(company):
 		["default_payroll_payable_account", "cost_center", "default_currency", "default_bank_account", "default_cash_account"],
 		as_dict=True,
 	)
+	from folt_customizations.payroll_accounts import payment_account
+
 	return {
 		"payroll_payable_account": values.default_payroll_payable_account,
 		"cost_center": values.cost_center,
 		"currency": values.default_currency,
-		"payment_account": values.default_bank_account
-		or values.default_cash_account
-		or frappe.db.get_value("Account", {"company": company, "account_type": "Cash", "is_group": 0}),
+		# The Payroll accounts setting, else the company's bank, else its cash account.
+		"payment_account": payment_account(company),
 	}
 
 

@@ -12,7 +12,7 @@ be pointed at a salary slip, a payroll entry or an employee's bank details. Payr
 (hr_portal); Finance sees its accounting entries in the ledger and nothing else of it.
 
 *Who.* Every call requires one of ERPNext's accounting roles (READERS). The Finance staff hold
-them alongside FoLT's own roles -- preparers Accounts User, approvers Accounts Manager, the
+them alongside FoLT's own roles -- preparers Accounts User, approvers Accounts Manager on top of it, the
 Executive Director Auditor -- see seed_test_users.py. Frappe then checks the document or report
 permission itself, so the role gate is a floor, never the whole decision.
 
@@ -448,12 +448,30 @@ def save(doctype, doc, name=None):
 		if target.docstatus == 2:
 			frappe.throw(_("{0} is cancelled. Amend it to make a new version.").format(name))
 		target.update(values)
+		_template_taxes(target, m)
 		target.save()
 	else:
 		values.pop("name", None)
 		target = frappe.get_doc({"doctype": doctype, **values})
+		_template_taxes(target, m)
 		target.insert()
 	return {"name": target.name}
+
+
+def _template_taxes(doc, m):
+	"""A tax template chosen with no tax rows gets the template's rows, as the Desk's form does.
+
+	ERPNext's controllers do not copy a template's rows on save; the Desk does it in the browser
+	when the template is picked. Doing it here keeps an invoice saved from the app from quietly
+	going out without its VAT.
+	"""
+	df = m.get_field("taxes_and_charges")
+	if not df or not doc.get("taxes_and_charges") or doc.get("taxes"):
+		return
+	from erpnext.controllers.accounts_controller import get_taxes_and_charges
+
+	for row in get_taxes_and_charges(df.options, doc.taxes_and_charges) or []:
+		doc.append("taxes", row)
 
 
 # The setters each controller's own validate() runs, in its order, minus the checks: what turns a
@@ -489,8 +507,10 @@ def preview(doctype, doc):
 			continue
 		try:
 			fn()
-		except frappe.ValidationError:
-			# A half-filled form is normal while somebody types; the save will say what is missing.
+		except Exception:  # noqa: BLE001
+			# A half-filled form is normal while somebody types -- a party not chosen yet, an item
+			# half typed -- and the controllers do not all raise ValidationError for it. The
+			# preview is advice; the save validates for real and says what is missing.
 			frappe.clear_last_message()
 	return draft.as_dict(convert_dates_to_str=True)
 
@@ -916,7 +936,7 @@ def _summarise(doctype, name):
 def approvals():
 	"""What waits on this person in the finance workflows, and what they have sent and is waiting."""
 	_only_finance()
-	governed = [dt for dt in DOCTYPES if get_workflow_name(dt)]
+	governed = [dt for dt in DOCTYPES if get_workflow_name(dt) and frappe.has_permission(dt, "read")]
 	actions = frappe.get_list(
 		"Workflow Action",
 		filters={"status": "Open", "reference_doctype": ["in", governed or [""]]},
@@ -960,9 +980,10 @@ def audit(from_date=None, to_date=None, doctype=None, user=None, kind=None, star
 	person may read. Nothing here is recorded by FoLT; it is the history the documents already keep.
 	"""
 	_only_finance()
-	doctypes = [doctype] if doctype else list(_AUDITED)
-	for dt in doctypes:
-		_doctype(dt)
+	# Only the doctypes this person may read: an Auditor reads the ledger, not every master.
+	doctypes = [dt for dt in ([doctype] if doctype else list(_AUDITED)) if _doctype(dt) and frappe.has_permission(dt, "read")]
+	if not doctypes:
+		return {"events": [], "more": False}
 	start, page_length = cint(start), min(cint(page_length) or 100, 500)
 	window = []
 	if from_date:

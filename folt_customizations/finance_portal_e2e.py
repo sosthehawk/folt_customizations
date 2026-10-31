@@ -153,6 +153,9 @@ def run():
 	print("\n--- the auditor reads and changes nothing ---")
 	expect_throw("the auditor cannot save a voucher", lambda: as_user(AUDITOR, lambda: fp.save("Journal Entry", voucher())), frappe.PermissionError)
 	expect_throw("the auditor cannot cancel one", lambda: as_user(AUDITOR, lambda: fp.act("Journal Entry", name, "cancel")), frappe.PermissionError)
+	whole = as_user(AUDITOR, fp.audit)
+	check("the auditor's whole trail leaves out what they may not read", isinstance(whole["events"], list) and all(frappe.has_permission(e["doctype"], "read", user=AUDITOR) for e in whole["events"]))
+	check("the auditor's approvals list answers too", isinstance(as_user(AUDITOR, fp.approvals)["waiting"], list))
 	trail = as_user(AUDITOR, lambda: fp.audit(doctype="Journal Entry"))
 	check("the audit trail shows the voucher's workflow moves", any(e["name"] == name and e["kind"] == "workflow" for e in trail["events"]), len(trail["events"]))
 
@@ -191,6 +194,19 @@ def run():
 	check("the chart of accounts has balances", any(a["name"] == cash and a["balance"] for a in tree["accounts"]))
 	review = as_user(APPROVER, lambda: fp.closing_review(COMPANY, fy))
 	check("the closing review counts and checks the trial balance", review["trial_balance"]["balanced"] and len(review["checks"]) >= 6)
+
+	print("\n--- an invoice keeps its tax template's rows ---")
+	template = frappe.db.get_value("Sales Taxes and Charges Template", {"company": COMPANY, "disabled": 0})
+	item = frappe.db.get_value("Item", {"is_sales_item": 1, "disabled": 0, "is_stock_item": 0})
+	customer = frappe.db.get_value("Customer", {"disabled": 0})
+	if template and item and customer:
+		inv = as_user(PREPARER, lambda: fp.save("Sales Invoice", {"company": COMPANY, "customer": customer, "items": [{"item_code": item, "qty": 1, "rate": 1000}],
+		                                                           "taxes_and_charges": template, "remarks": MARK}))["name"]
+		taxes = frappe.get_all("Sales Taxes and Charges", filters={"parent": inv}, pluck="account_head")
+		check("a sales invoice saved with a template and no rows gets the template's rows", len(taxes) > 0, taxes)
+		frappe.delete_doc("Sales Invoice", inv, force=True, ignore_permissions=True)
+	else:
+		print("  SKIP  no template, sales item or customer on this site")
 
 	print("\n--- lookups are ERPNext's own helpers ---")
 	bal = as_user(PREPARER, lambda: fp.lookup("erpnext.accounts.utils.get_balance_on", {"account": cash, "date": add_days(nowdate(), 1)}))

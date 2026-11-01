@@ -100,6 +100,7 @@ def run():
 	try:
 		_run(since)
 		_run_phase2()
+		_run_phase3()
 		check("the run committed nothing (delete_session's commit was held back)", len(commits) <= 1, f"{len(commits)} commit attempts")
 	finally:
 		frappe.db.commit = real_commit
@@ -332,3 +333,97 @@ def _run_phase2():
 	check("a session signed out by handle", r.get("revoked") == 1 and not frappe.db.exists("Sessions", {"sid": "e2e-sid-1"}), r)
 	check("a privileged user's sessions are a System Manager's", refused(as_user(SECURITY_ADMIN, ap.revoke_sessions, None, "Administrator"), "protected_user"))
 	check("phase 2 left no messages", not frappe.local.message_log, frappe.local.message_log)
+
+
+def _run_phase3():
+	print("\n— System Settings by who asks")
+	ss = frappe.get_doc("System Settings")
+	r = as_user(SECURITY_ADMIN, ap.update_settings, {"minimum_password_score": "3", "allow_login_after_fail": 120})
+	check("Security Administrator changes security settings", r.get("changed") == ["allow_login_after_fail", "minimum_password_score"] and quiet(), r)
+	check("...and the value is saved", frappe.db.get_single_value("System Settings", "minimum_password_score") == "3")
+	check("...not regional ones", refused(as_user(SECURITY_ADMIN, ap.update_settings, {"date_format": "yyyy-mm-dd"}), "privileged_field"))
+	check("...nor unlisted ones", refused(as_user(SECURITY_ADMIN, ap.update_settings, {"encryption_key": "x"}), "setting_not_allowed"))
+	check("User Administrator refused settings", thrown(lambda: as_user(USER_ADMIN, ap.update_settings, {"session_expiry": "10:00"})) == "PermissionError")
+	r = ap.update_settings({"date_format": "yyyy-mm-dd", "time_zone": "Africa/Nairobi", "currency_precision": "2"})
+	check("System Manager changes regional settings", r.get("changed") == ["currency_precision", "date_format", "time_zone"], r)
+	check("unknown time zone refused", refused(ap.update_settings({"time_zone": "Mars/Base"}), "invalid_setting"))
+	check("unknown choice refused", refused(ap.update_settings({"date_format": "mm/yy"}), "invalid_setting"))
+	check("unknown country refused", refused(ap.update_settings({"country": "Atlantis"}), "invalid_setting"))
+	check("stale modified refused", refused(ap.update_settings({"backup_limit": 3}, "2000-01-01 00:00:00"), "stale"))
+	if not ap._other_sign_in():
+		check("passwords stay on when nothing else can sign anyone in", refused(ap.update_settings({"disable_user_pass_login": 1}), "no_other_sign_in"))
+	meta = as_user(SECURITY_ADMIN, ap.settings_meta)
+	check("Security Administrator reads the settings meta", any(f["fieldname"] == "session_expiry" for f in meta))
+	check("settings audited", frappe.db.exists("Activity Log", {"subject": ap.AUDIT_PREFIX + "settings changed", "user": SECURITY_ADMIN}))
+	del ss
+
+	print("\n— two-factor and sign-in restrictions")
+	r = as_user(SECURITY_ADMIN, ap.set_role_two_factor, "Purchase User", 1)
+	check("Security Administrator requires 2FA of a role", r.get("two_factor_auth") is True, r)
+	check("not of Guest", refused(ap.set_role_two_factor("Guest", 1), "standard_role"))
+	rows = as_user(SECURITY_ADMIN, ap.role_two_factor)
+	check("Security Administrator lists roles' two-factor", any(r["name"] == "Purchase User" and r["two_factor_auth"] for r in rows) and not any(r["name"] == "Guest" for r in rows))
+	email = PREFIX + "sec@folt.test"
+	ap.create_user({"email": email, "first_name": "Sec", "roles": ["Purchase User"], "send_welcome_email": 0})
+	v = as_user(SECURITY_ADMIN, ap.user_security, email)
+	check("user security reads", v.get("can_change") and "Purchase User" in v["two_factor_roles"], v)
+	r = as_user(SECURITY_ADMIN, ap.update_user_security, email, {"restrict_ip": "10.0.0.0, 192.168.1.", "login_after": 6, "login_before": 20})
+	check("IP and hours restricted", r.get("restrict_ip") == "10.0.0.0,192.168.1." and r["login_after"] == 6, r)
+	check("bad hour refused", refused(ap.update_user_security(email, {"login_before": 25}), "invalid_setting"))
+	check("bad IP refused", refused(ap.update_user_security(email, {"restrict_ip": "not an ip;"}), "invalid_setting"))
+	check("nobody restricts themselves", refused(as_user(SECURITY_ADMIN, ap.update_user_security, SECURITY_ADMIN, {"login_after": 6}), "self_security"))
+	sm = frappe.db.sql("""select u.name from tabUser u join `tabHas Role` r on r.parent=u.name and r.parenttype='User'
+		where r.role='System Manager' and u.enabled=1 and u.name not in ('Administrator','Guest') limit 1""", pluck=True)
+	if sm:
+		check("a System Manager is a System Manager's to restrict", refused(as_user(SECURITY_ADMIN, ap.update_user_security, sm[0], {"login_after": 6}), "privileged_user"))
+	frappe.db.set_single_value("System Settings", "enable_two_factor_auth", 1)
+	from frappe.twofactor import set_default as set_2fa_default
+
+	set_2fa_default(email + "_otpsecret", "x")
+	r = as_user(SECURITY_ADMIN, ap.reset_user_otp, email)
+	check("authenticator reset by a Security Administrator", r.get("authenticator_set") is False, r)
+
+	print("\n— the organisation")
+	check("the organisation is a System Manager's", thrown(lambda: as_user(SECURITY_ADMIN, ap.organisation)) == "PermissionError")
+	org = ap.organisation()
+	check("organisation reads", org["companies"] and org["departments"] and org["countries"], {k: len(v) for k, v in org.items()})
+	company = org["companies"][0]
+	r = ap.update_company(company["name"], {"tax_id": "P051234567Z", "website": "https://folt.example"})
+	check("company details saved", next(c for c in r["companies"] if c["name"] == company["name"])["tax_id"] == "P051234567Z")
+	check("company name not changed here", refused(ap.update_company(company["name"], {"company_name": "X"}), "field_not_allowed"))
+	if company["currency_locked"]:
+		other = next((c for c in org["currencies"] if c != company["default_currency"]), None)
+		if other:
+			check("currency locked once ledger entries exist", refused(ap.update_company(company["name"], {"default_currency": other}), "currency_locked"))
+	r = ap.save_org_record("Designation", {"designation_name": "E2E Designation", "description": "test"})
+	check("designation created", any(d["name"] == "E2E Designation" for d in r["designations"]))
+	r = ap.save_org_record("Designation", {"description": "changed"}, "E2E Designation")
+	check("designation edited", next(d for d in r["designations"] if d["name"] == "E2E Designation")["description"] == "changed")
+	check("a designation is not renamed", refused(ap.save_org_record("Designation", {"designation_name": "Other"}, "E2E Designation"), "field_not_allowed"))
+	r = ap.save_org_record("Branch", {"branch": "E2E Branch"})
+	check("branch created", any(b["name"] == "E2E Branch" for b in r["branches"]))
+	check("duplicate branch refused", refused(ap.save_org_record("Branch", {"branch": "E2E Branch"}), "duplicate"))
+	r = ap.delete_org_record("Branch", "E2E Branch")
+	check("unused branch deleted", not any(b["name"] == "E2E Branch" for b in r["branches"]))
+	used = next((d for d in org["designations"] if d["employees"]), None)
+	if used:
+		check("designation in use kept", refused(ap.delete_org_record("Designation", used["name"]), "in_use"))
+	r = ap.save_org_record("Department", {"department_name": "E2E Dept", "company": company["name"], "parent_department": "All Departments"})
+	dept = next((d for d in r["departments"] if d["label"] == "E2E Dept"), None)
+	check("department created", dept is not None)
+	if dept:
+		r = ap.save_org_record("Department", {"disabled": 1}, dept["name"])
+		check("department disabled", next(d for d in r["departments"] if d["name"] == dept["name"])["disabled"])
+	r = ap.create_fiscal_year("E2E 2099", "2099-01-01", "2099-12-31", [company["name"]])
+	check("fiscal year created", any(y["name"] == "E2E 2099" for y in r["fiscal_years"]))
+	check("overlapping fiscal year refused by Frappe", thrown(lambda: ap.create_fiscal_year("E2E 2099b", "2099-06-01", "2100-05-31", [company["name"]])) is not None)
+	frappe.local.message_log = []
+
+	print("\n— my preferences")
+	p = as_user(REQUESTER, ap.my_preferences)
+	check("anyone reads their own preferences", p.get("user") == REQUESTER and "notifications" in p and p["time_zones"])
+	r = as_user(REQUESTER, ap.save_my_preferences, {"desk_theme": "Dark", "notifications": {"enable_email_mention": 0}})
+	check("own theme and e-mails saved", r.get("desk_theme") == "Dark" and r["notifications"]["enable_email_mention"] is False, r)
+	check("nothing else is changed here", refused(as_user(REQUESTER, ap.save_my_preferences, {"roles": ["System Manager"]}), "field_not_allowed"))
+	check("a bad time zone refused", refused(as_user(REQUESTER, ap.save_my_preferences, {"time_zone": "Mars/Base"}), "invalid_setting"))
+	check("phase 3 left no messages", not frappe.local.message_log, frappe.local.message_log)

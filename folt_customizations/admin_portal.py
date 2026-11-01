@@ -1239,3 +1239,516 @@ def revoke_sessions(handle=None, user=None):
 		delete_session(r["_sid"], target, reason="Signed out by an administrator")
 	_record("sessions revoked", "User", target, {}, {"sessions signed out": len(rows)})
 	return {"user": target, "revoked": len(rows), "sessions": _public(_session_rows())}
+
+
+# =================================================================================================
+# Phase 3: System Settings, per-role and per-user security, the organisation, my preferences.
+# =================================================================================================
+
+SECURITY_ADMINS = (SYSTEM_MANAGER, SECURITY_ADMIN)
+
+# System Settings the app changes, by who may change them. Security settings are the Security
+# Administrator's too; the rest (regional, site-wide behaviour) a System Manager's alone.
+# kind: bool | int | str; for str an optional set of allowed values.
+SECURITY_SETTINGS = {
+	"enable_two_factor_auth": ("bool", None),
+	"two_factor_method": ("str", ("OTP App", "SMS", "Email")),
+	"lifespan_qrcode_image": ("int", None),
+	"otp_issuer_name": ("str", None),
+	"bypass_2fa_for_retricted_ip_users": ("bool", None),
+	"bypass_restrict_ip_check_if_2fa_enabled": ("bool", None),
+	"allow_consecutive_login_attempts": ("int", None),
+	"allow_login_after_fail": ("int", None),
+	"session_expiry": ("str", None),
+	"deny_multiple_sessions": ("bool", None),
+	"login_with_email_link": ("bool", None),
+	"login_with_email_link_expiry": ("int", None),
+	"rate_limit_email_link_login": ("int", None),
+	"allow_login_using_user_name": ("bool", None),
+	"allow_login_using_mobile_number": ("bool", None),
+	"enable_password_policy": ("bool", None),
+	"minimum_password_score": ("str", ("1", "2", "3", "4")),
+	"password_reset_limit": ("int", None),
+	"force_user_to_reset_password": ("int", None),
+	"logout_on_password_reset": ("bool", None),
+	"reset_password_link_expiry_duration": ("int", None),
+}
+SYSTEM_SETTINGS_FIELDS = {
+	"disable_user_pass_login": ("bool", None),
+	"apply_strict_user_permissions": ("bool", None),
+	"backup_limit": ("int", None),
+	"country": ("link", "Country"),
+	"language": ("link", "Language"),
+	"currency": ("link", "Currency"),
+	"time_zone": ("str", None),
+	"date_format": ("select", None),
+	"time_format": ("select", None),
+	"number_format": ("select", None),
+	"first_day_of_the_week": ("select", None),
+	"float_precision": ("select", None),
+	"currency_precision": ("select", None),
+}
+
+
+def _select_options(fieldname):
+	df = frappe.get_meta("System Settings").get_field(fieldname)
+	return [o for o in (df.options or "").split("\n")] if df else []
+
+
+@frappe.whitelist(methods=["GET"])
+def settings_meta():
+	"""System Settings' fields as the settings screen needs them (labels, types, options). Meta,
+	not values: nothing here is secret, and the Security Administrator has no DocType read."""
+	_only(SECURITY_ADMIN)
+	return [
+		{"fieldname": f.fieldname, "label": f.label, "fieldtype": f.fieldtype, "options": f.options, "description": f.description}
+		for f in frappe.get_meta("System Settings").fields
+		if f.fieldname
+	]
+
+
+@frappe.whitelist(methods=["POST"])
+def update_settings(values, modified=None):
+	"""Change System Settings fields from the allow-lists above; Frappe's own validation runs on
+	save. A Security Administrator may change only SECURITY_SETTINGS."""
+	_only(SECURITY_ADMIN)
+	values = _json(values, {}) or {}
+	if not isinstance(values, dict) or not values:
+		return _refuse("invalid_setting", _("Nothing to change."))
+	sm = _is_system_manager()
+	allowed = dict(SECURITY_SETTINGS, **(SYSTEM_SETTINGS_FIELDS if sm else {}))
+	extra = sorted(set(values) - set(allowed))
+	if extra:
+		if not sm and set(extra) <= set(SYSTEM_SETTINGS_FIELDS):
+			return _refuse("privileged_field", _("Only a System Manager changes {0}.").format(", ".join(extra)))
+		return _refuse("setting_not_allowed", _("These cannot be changed here: {0}.").format(", ".join(extra)))
+	doc = frappe.get_doc("System Settings")
+	if modified and cstr(modified) != cstr(doc.modified):
+		return _refuse("stale", _("Someone else changed the settings since you opened them. Reload and try again."))
+	clean = {}
+	for field, value in values.items():
+		kind, extra_rule = allowed[field]
+		if kind == "bool":
+			clean[field] = 1 if value else 0
+		elif kind == "int":
+			if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+				return _refuse("invalid_setting", _("{0} is a whole number.").format(field))
+			clean[field] = value
+		else:
+			value = cstr(value).strip()
+			if kind == "link" and value and not frappe.db.exists(extra_rule, value):
+				return _refuse("invalid_setting", _("There is no {0} {1}.").format(extra_rule, value))
+			if kind == "select" and value not in _select_options(field):
+				return _refuse("invalid_setting", _("{0} is not one of the choices for {1}.").format(value, field))
+			if kind == "str" and extra_rule and value not in extra_rule:
+				return _refuse("invalid_setting", _("{0} is one of {1}.").format(field, ", ".join(extra_rule)))
+			if field == "time_zone":
+				from frappe.core.doctype.user.user import get_timezones
+
+				if value not in get_timezones()["timezones"]:
+					return _refuse("invalid_setting", _("{0} is not a time zone.").format(value))
+			if len(value) > 140:
+				return _refuse("invalid_setting", _("{0} is too long.").format(field))
+			clean[field] = value
+	if clean.get("disable_user_pass_login") and not _other_sign_in():
+		return _refuse("no_other_sign_in", _("Nobody could sign in: no social login or LDAP is set up, so passwords stay on."))
+	before = {f: doc.get(f) for f in clean}
+	doc.update(clean)
+	doc.flags.ignore_permissions = True
+	doc.save()
+	_record("settings changed", "System Settings", "System Settings", before, {f: doc.get(f) for f in clean})
+	return {"modified": cstr(doc.modified), "changed": sorted(clean)}
+
+
+def _other_sign_in():
+	return bool(
+		frappe.db.exists("Social Login Key", {"enable_social_login": 1})
+		or frappe.db.get_single_value("LDAP Settings", "enabled")
+	)
+
+
+# --- per-role two-factor ------------------------------------------------------------------------
+
+
+@frappe.whitelist(methods=["GET"])
+def role_two_factor():
+	"""Every enabled role but Guest with whether it requires two-factor sign-in and how many enabled
+	users hold it -- what the Security Administrator switches, without reading users."""
+	_only(SECURITY_ADMIN)
+	counts = dict(
+		frappe.db.sql(
+			"""select r.role, count(distinct u.name) from `tabHas Role` r join tabUser u on u.name = r.parent
+			where r.parenttype = 'User' and u.enabled = 1 and u.name not in ('Administrator', 'Guest') group by r.role"""
+		)
+	)
+	return [
+		{"name": r.name, "two_factor_auth": bool(r.two_factor_auth), "users": counts.get(r.name, 0)}
+		for r in frappe.get_all("Role", filters={"disabled": 0, "name": ["!=", "Guest"]}, fields=["name", "two_factor_auth"], order_by="name asc")
+	]
+
+
+@frappe.whitelist(methods=["POST"])
+def set_role_two_factor(role, enabled):
+	"""Require two-factor sign-in of everyone holding a role (Role.two_factor_auth), any role but
+	Guest. It bites only while two-factor is on for the site."""
+	_only(SECURITY_ADMIN)
+	name = frappe.db.get_value("Role", cstr(role).strip(), "name")
+	if not name:
+		return _refuse("not_found", _("There is no role {0}.").format(role))
+	if name == "Guest":
+		return _refuse("standard_role", _("Guest signs in with nothing, so it cannot require two-factor."))
+	before = cint(frappe.db.get_value("Role", name, "two_factor_auth"))
+	if before != cint(enabled):
+		frappe.db.set_value("Role", name, "two_factor_auth", cint(enabled))
+		frappe.clear_cache()
+		_record("role two-factor " + ("required" if cint(enabled) else "not required"), "Role", name, {"two_factor_auth": before}, {"two_factor_auth": cint(enabled)})
+	return _role_view(name)
+
+
+# --- per-user security -------------------------------------------------------------------------
+
+USER_SECURITY_FIELDS = ("restrict_ip", "login_after", "login_before", "bypass_restrict_ip_check_if_2fa_enabled")
+
+
+def _user_security_view(doc):
+	from frappe.twofactor import get_default
+
+	roles = [r.role for r in doc.roles]
+	two_factor_roles = frappe.get_all("Role", filters={"name": ["in", roles + ["All"]], "two_factor_auth": 1}, pluck="name")
+	return {
+		"user": doc.name,
+		"restrict_ip": doc.restrict_ip or None,
+		"login_after": cint(doc.login_after) or None,
+		"login_before": cint(doc.login_before) or None,
+		"bypass_restrict_ip_check_if_2fa_enabled": bool(doc.bypass_restrict_ip_check_if_2fa_enabled),
+		"two_factor_site": bool(cint(frappe.db.get_single_value("System Settings", "enable_two_factor_auth"))),
+		"two_factor_roles": sorted(two_factor_roles),
+		"authenticator_set": bool(get_default(doc.name + "_otpsecret")),
+		"can_change": _ceiling(doc) is None and not _same(doc.name, frappe.session.user),
+		"modified": cstr(doc.modified),
+	}
+
+
+@frappe.whitelist(methods=["GET"])
+def user_security(user):
+	_only(SECURITY_ADMIN)
+	doc, refused = _target(user)
+	if refused:
+		return refused
+	return _user_security_view(doc)
+
+
+@frappe.whitelist(methods=["POST"])
+def update_user_security(user, values, modified=None):
+	"""Where (IP prefixes) and when (hours) a user may sign in. Never yourself -- a wrong address
+	would lock you out with nobody watching -- and a privileged user only by a System Manager."""
+	_only(SECURITY_ADMIN)
+	doc, refused = _target(user)
+	if refused:
+		return refused
+	if _same(doc.name, frappe.session.user):
+		return _refuse("self_security", _("You cannot restrict your own sign-in; ask another administrator."))
+	refused = _ceiling(doc) or _stale(doc, modified)
+	if refused:
+		return refused
+	values = _json(values, {}) or {}
+	extra = sorted(set(values) - set(USER_SECURITY_FIELDS))
+	if not values or extra:
+		return _refuse("field_not_allowed", _("Only restrict_ip, login_after, login_before and the 2FA bypass are changed here."))
+	clean = {}
+	for field, value in values.items():
+		if field == "restrict_ip":
+			ips = [p.strip() for p in cstr(value).replace("\n", ",").split(",") if p.strip()]
+			if any(not all(ch.isdigit() or ch in ".:abcdefABCDEF/" for ch in p) for p in ips):
+				return _refuse("invalid_setting", _("restrict_ip is a list of IP addresses or prefixes."))
+			clean[field] = ",".join(ips) or None  # as User.validate_ip_addr writes it
+		elif field in ("login_after", "login_before"):
+			if value in (None, ""):
+				clean[field] = 0
+			elif not isinstance(value, int) or isinstance(value, bool) or not 0 <= value <= 24:
+				return _refuse("invalid_setting", _("{0} is an hour from 0 to 24.").format(field))
+			else:
+				clean[field] = value
+		else:
+			clean[field] = 1 if value else 0
+	before = {f: doc.get(f) for f in clean}
+	doc.update(clean)
+	doc.flags.ignore_permissions = True
+	doc.save()
+	_record("sign-in restrictions changed", "User", doc.name, before, {f: doc.get(f) for f in clean})
+	return _user_security_view(doc)
+
+
+@frappe.whitelist(methods=["POST"])
+def reset_user_otp(user):
+	"""Forget a user's authenticator (they set one up again at next sign-in), and tell them by
+	e-mail -- what Frappe's reset_otp_secret does, which only a System Manager may call."""
+	_only(SECURITY_ADMIN)
+	from frappe.twofactor import clear_default
+
+	doc, refused = _target(user)
+	if refused:
+		return refused
+	refused = _ceiling(doc)
+	if refused:
+		return refused
+	settings = frappe.get_cached_doc("System Settings")
+	if not settings.enable_two_factor_auth:
+		return _refuse("two_factor_off", _("Two-factor sign-in is off for the site, so there is nothing to reset."))
+	clear_default(doc.name + "_otplogin")
+	clear_default(doc.name + "_otpsecret")
+	issuer = settings.otp_issuer_name or "FoLT ERP"
+	if doc.email:
+		frappe.sendmail(
+			recipients=doc.email,
+			subject=_("OTP Secret Reset - {0}").format(issuer),
+			message=_("<p>Your authenticator for {0} has been reset by an administrator. You will set it up again at your next sign-in. If you did not ask for this, tell your administrator now.</p>").format(issuer),
+			delayed=False,
+		)
+	_record("authenticator reset", "User", doc.name)
+	return _user_security_view(doc)
+
+
+# --- the organisation ---------------------------------------------------------------------------
+
+COMPANY_FIELDS = ("tax_id", "country", "phone_no", "fax", "email", "website", "date_of_establishment", "registration_details", "default_currency")
+ORG_DOCTYPES = ("Department", "Designation", "Branch")
+
+
+def _company_has_transactions(company):
+	return bool(frappe.db.exists("GL Entry", {"company": company}))
+
+
+def _organisation():
+	employees = lambda field: dict(frappe.db.sql(f"select `{field}`, count(*) from tabEmployee where `{field}` is not null group by `{field}`"))  # noqa: E731
+	by_dept, by_desig, by_branch = employees("department"), employees("designation"), employees("branch")
+	companies = []
+	for c in frappe.get_all("Company", fields=["name", "company_name", "abbr", "country", "default_currency", "tax_id", "phone_no", "fax", "email", "website", "date_of_establishment", "registration_details", "modified"], order_by="name asc"):
+		c = dict(c)
+		c["date_of_establishment"] = cstr(c["date_of_establishment"]) or None
+		c["modified"] = cstr(c["modified"])
+		c["currency_locked"] = _company_has_transactions(c["name"])
+		companies.append(c)
+	years = []
+	for y in frappe.get_all("Fiscal Year", fields=["name", "year_start_date", "year_end_date", "disabled"], order_by="year_start_date desc"):
+		years.append(
+			{
+				"name": y.name,
+				"year_start_date": cstr(y.year_start_date),
+				"year_end_date": cstr(y.year_end_date),
+				"disabled": bool(y.disabled),
+				"companies": frappe.get_all("Fiscal Year Company", filters={"parent": y.name}, pluck="company"),
+			}
+		)
+	return {
+		"companies": companies,
+		"departments": [
+			{"name": d.name, "label": d.department_name, "parent": d.parent_department, "company": d.company, "is_group": bool(d.is_group), "disabled": bool(d.disabled), "employees": by_dept.get(d.name, 0)}
+			for d in frappe.get_all("Department", fields=["name", "department_name", "parent_department", "company", "is_group", "disabled"], order_by="lft asc")
+		],
+		"designations": [
+			{"name": d.name, "description": d.description, "employees": by_desig.get(d.name, 0)}
+			for d in frappe.get_all("Designation", fields=["name", "description"], order_by="name asc")
+		],
+		"branches": [{"name": b, "employees": by_branch.get(b, 0)} for b in frappe.get_all("Branch", pluck="name", order_by="name asc")],
+		"fiscal_years": years,
+		"countries": frappe.get_all("Country", pluck="name", order_by="name asc"),
+		"currencies": frappe.get_all("Currency", filters={"enabled": 1}, pluck="name", order_by="name asc"),
+	}
+
+
+@frappe.whitelist(methods=["GET"])
+def organisation():
+	"""Companies, departments, designations, branches and fiscal years, with how many employees
+	use each record (a record in use is not deleted)."""
+	_only()
+	return _organisation()
+
+
+@frappe.whitelist(methods=["POST"])
+def update_company(company, values, modified=None):
+	"""Contact, tax and registration details of a company. Its name and abbreviation stay (they
+	are in every account's name); its currency stays once it has ledger entries."""
+	_only()
+	name = frappe.db.get_value("Company", cstr(company), "name")
+	if not name:
+		return _refuse("not_found", _("There is no company {0}.").format(company))
+	doc = frappe.get_doc("Company", name)
+	if modified and cstr(modified) != cstr(doc.modified):
+		return _refuse("stale", _("Someone else changed this company since you opened it. Reload and try again."))
+	values = _json(values, {}) or {}
+	extra = sorted(set(values) - set(COMPANY_FIELDS))
+	if not values or extra:
+		return _refuse("field_not_allowed", _("These cannot be changed here: {0}.").format(", ".join(extra) or _("nothing")))
+	if "default_currency" in values and values["default_currency"] != doc.default_currency and _company_has_transactions(name):
+		return _refuse("currency_locked", _("{0} already has ledger entries in {1}, so its currency stays.").format(name, doc.default_currency))
+	before = {f: doc.get(f) for f in values}
+	doc.update({f: (v if v not in ("",) else None) for f, v in values.items()})
+	doc.flags.ignore_permissions = True
+	doc.save()
+	_record("company edited", "Company", name, before, {f: doc.get(f) for f in values})
+	return _organisation()
+
+
+@frappe.whitelist(methods=["POST"])
+def save_org_record(doctype, values, name=None):
+	"""Create a department, designation or branch, or change one. A department's name is fixed
+	once made (Frappe names it "<name> - <abbr>"); its parent, group flag and disabled change."""
+	_only()
+	if doctype not in ORG_DOCTYPES:
+		return _refuse("invalid_setting", _("Only {0} are kept here.").format(", ".join(ORG_DOCTYPES)))
+	values = _json(values, {}) or {}
+	allowed = {
+		"Department": ("department_name", "parent_department", "company", "is_group", "disabled"),
+		"Designation": ("designation_name", "description"),
+		"Branch": ("branch",),
+	}[doctype]
+	extra = sorted(set(values) - set(allowed))
+	if extra:
+		return _refuse("field_not_allowed", _("These cannot be set here: {0}.").format(", ".join(extra)))
+	if name:
+		if not frappe.db.exists(doctype, name):
+			return _refuse("not_found", _("There is no {0} {1}.").format(doctype, name))
+		doc = frappe.get_doc(doctype, name)
+		fixed = {"Department": ("department_name", "company"), "Designation": ("designation_name",), "Branch": ("branch",)}[doctype]
+		if any(f in values and cstr(values[f]) != cstr(doc.get(f)) for f in fixed):
+			return _refuse("field_not_allowed", _("A {0}'s name is fixed once made.").format(doctype.lower()))
+		before = {f: doc.get(f) for f in values}
+	else:
+		key = allowed[0]
+		if not cstr(values.get(key)).strip():
+			return _refuse("invalid_setting", _("A name is required."))
+		if doctype != "Department" and frappe.db.exists(doctype, cstr(values[key]).strip()):
+			return _refuse("duplicate", _("There is already a {0} {1}.").format(doctype.lower(), values[key]))
+		doc = frappe.new_doc(doctype)
+		before = {}
+	for f, v in values.items():
+		doc.set(f, (1 if v else 0) if f in ("is_group", "disabled") else (cstr(v).strip() or None))
+	doc.flags.ignore_permissions = True
+	doc.save()
+	_record(f"{doctype.lower()} saved", doctype, doc.name, before, {f: doc.get(f) for f in values})
+	return _organisation()
+
+
+@frappe.whitelist(methods=["POST"])
+def delete_org_record(doctype, name):
+	"""Delete a department, designation or branch nobody uses; anything in use is kept."""
+	_only()
+	if doctype not in ORG_DOCTYPES or not frappe.db.exists(doctype, cstr(name)):
+		return _refuse("not_found", _("There is no {0} {1}.").format(doctype, name))
+	field = {"Department": "department", "Designation": "designation", "Branch": "branch"}[doctype]
+	if frappe.db.exists("Employee", {field: name}) or (doctype == "Department" and frappe.db.exists("Department", {"parent_department": name})):
+		return _refuse("in_use", _("{0} is in use (employees or sub-departments), so it is kept. Disable it instead, where that applies.").format(name))
+	try:
+		frappe.db.savepoint("org_delete")
+		frappe.delete_doc(doctype, name, ignore_permissions=True)
+	except frappe.LinkExistsError:
+		frappe.db.rollback(save_point="org_delete")
+		frappe.clear_messages()
+		return _refuse("in_use", _("{0} is linked from other records, so it is kept.").format(name))
+	_record(f"{doctype.lower()} deleted", None, None, {"deleted": f"{doctype} {name}"}, {})
+	return _organisation()
+
+
+@frappe.whitelist(methods=["POST"])
+def create_fiscal_year(year, year_start_date, year_end_date, companies=None):
+	"""A new fiscal year, for every company or the ones named. Frappe refuses overlaps."""
+	_only()
+	companies = _dedupe(_json(companies, []) or [])
+	unknown = [c for c in companies if not frappe.db.exists("Company", c)]
+	if unknown:
+		return _refuse("not_found", _("No company {0}.").format(", ".join(unknown)))
+	if not cstr(year).strip():
+		return _refuse("invalid_setting", _("A fiscal year needs a name, e.g. 2027."))
+	if frappe.db.exists("Fiscal Year", cstr(year).strip()):
+		return _refuse("duplicate", _("There is already a fiscal year {0}.").format(year))
+	doc = frappe.get_doc(
+		{
+			"doctype": "Fiscal Year",
+			"year": cstr(year).strip(),
+			"year_start_date": year_start_date,
+			"year_end_date": year_end_date,
+			"companies": [{"company": c} for c in companies],
+		}
+	)
+	doc.flags.ignore_permissions = True
+	doc.insert()
+	_record("fiscal year created", "Fiscal Year", doc.name, {}, {"from": year_start_date, "to": year_end_date, "companies": companies})
+	return _organisation()
+
+
+# --- my preferences (every signed-in staff user, about themselves only) ----------------------------
+
+MY_USER_FIELDS = ("language", "time_zone", "desk_theme")
+MY_NOTIFICATION_FIELDS = (
+	"enabled",
+	"enable_email_notifications",
+	"enable_email_mention",
+	"enable_email_assignment",
+	"enable_email_share",
+	"enable_email_event_reminders",
+	"enable_email_threads_on_assigned_document",
+)
+
+
+def _my_preferences():
+	from frappe.core.doctype.user.user import get_timezones
+	from frappe.desk.doctype.notification_settings.notification_settings import create_notification_settings
+
+	user = frappe.session.user
+	if not frappe.db.exists("Notification Settings", user):
+		create_notification_settings(user)
+	u = frappe.db.get_value("User", user, list(MY_USER_FIELDS), as_dict=True)
+	ns = frappe.db.get_value("Notification Settings", user, list(MY_NOTIFICATION_FIELDS), as_dict=True)
+	return {
+		"user": user,
+		"language": u.language or None,
+		"time_zone": u.time_zone or None,
+		"desk_theme": u.desk_theme or "Light",
+		"notifications": {f: bool(ns.get(f)) for f in MY_NOTIFICATION_FIELDS},
+		"languages": frappe.get_all("Language", filters={"enabled": 1}, fields=["name as value", "language_name as label"], order_by="language_name asc"),
+		"time_zones": get_timezones()["timezones"],
+		"themes": ["Light", "Dark", "Automatic"],
+	}
+
+
+def _staff():
+	if frappe.session.user == "Guest" or frappe.get_cached_value("User", frappe.session.user, "user_type") != "System User":
+		frappe.throw(_("Sign in as a staff user."), frappe.PermissionError)
+
+
+@frappe.whitelist(methods=["GET"])
+def my_preferences():
+	_staff()
+	return _my_preferences()
+
+
+@frappe.whitelist(methods=["POST"])
+def save_my_preferences(values):
+	"""Your own language, time zone, Desk theme and which e-mails you get. Never anybody else's."""
+	_staff()
+	from frappe.core.doctype.user.user import get_timezones
+
+	values = _json(values, {}) or {}
+	notifications = values.pop("notifications", None) or {}
+	extra = sorted(set(values) - set(MY_USER_FIELDS)) + sorted(set(notifications) - set(MY_NOTIFICATION_FIELDS))
+	if extra:
+		return _refuse("field_not_allowed", _("These cannot be changed here: {0}.").format(", ".join(extra)))
+	if values.get("language") and not frappe.db.exists("Language", {"name": values["language"], "enabled": 1}):
+		return _refuse("invalid_setting", _("Not a language: {0}.").format(values["language"]))
+	if values.get("time_zone") and values["time_zone"] not in get_timezones()["timezones"]:
+		return _refuse("invalid_setting", _("Not a time zone: {0}.").format(values["time_zone"]))
+	if values.get("desk_theme") and values["desk_theme"] not in ("Light", "Dark", "Automatic"):
+		return _refuse("invalid_setting", _("Theme is Light, Dark or Automatic."))
+	user = frappe.session.user
+	if values:
+		doc = frappe.get_doc("User", user)
+		doc.update({f: (v or None) for f, v in values.items()})
+		doc.flags.ignore_permissions = True
+		doc.save()
+	if notifications:
+		ns = frappe.get_doc("Notification Settings", user)
+		ns.update({f: 1 if v else 0 for f, v in notifications.items()})
+		ns.flags.ignore_permissions = True
+		ns.save()
+	return _my_preferences()

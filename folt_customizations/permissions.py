@@ -129,6 +129,8 @@ ADMIN_PERMISSIONS = {
 	"Role": {"FoLT User Administrator": ("read",)},
 	"Role Profile": {"FoLT User Administrator": ("read",)},
 	"Module Profile": {"FoLT User Administrator": ("read",)},
+	# The Security Administrator reads the settings it changes (admin_portal.update_settings).
+	"System Settings": {"FoLT Security Administrator": ("read",)},
 }
 
 # `select` lets a role pick a record in a Link field without granting access to its list view

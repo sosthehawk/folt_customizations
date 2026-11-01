@@ -1,3 +1,5 @@
+import json
+
 import frappe
 from frappe.permissions import add_permission, update_permission_property
 
@@ -206,30 +208,77 @@ MASTER_DATA_PERMISSIONS = {
 DEFAULT_ON_PTYPES = ("read", "export")
 
 
-def apply_role_permissions():
-	"""Grant FoLT's custom roles the permissions their workflow steps need.
-
-	Idempotent and safe to run on every migrate: a role that already has the permission is
-	left alone, so this is a no-op once applied.
-	"""
-	changed = False
-	for perm_map, permlevel in (
+def _maps():
+	return (
 		(WORKFLOW_PERMISSIONS, 0),
 		(LINK_FIELD_PERMISSIONS, 0),
 		(MASTER_DATA_PERMISSIONS, 0),
 		(ADMIN_PERMISSIONS, 0),
 		(PERMLEVEL_1_PERMISSIONS, 1),
-	):
+	)
+
+
+def apply_role_permissions():
+	"""Grant FoLT's custom roles the permissions their workflow steps need.
+
+	Idempotent and safe to run on every migrate: a role that already has the permission is
+	left alone, so this is a no-op once applied. A permission an administrator took away in the
+	Settings module (the overrides store below) is not granted again.
+	"""
+	changed = False
+	for perm_map, permlevel in _maps():
 		for doctype, roles in perm_map.items():
 			if not frappe.db.exists("DocType", doctype):
 				continue
 			for role, ptypes in roles.items():
 				if not frappe.db.exists("Role", role):
 					continue
-				if _grant(doctype, role, ptypes, permlevel):
+				ptypes = [p for p in ptypes if not revoked(doctype, role, permlevel, p)]
+				if ptypes and _grant(doctype, role, ptypes, permlevel):
 					changed = True
 	if changed:
 		frappe.clear_cache()
+
+
+# --- an administrator's decisions, kept where migrate respects them ------------------------
+#
+# The Settings module edits Custom DocPerm through admin_portal. A grant made there stays (migrate
+# never deletes Custom DocPerm rows), but a permission taken away that the maps above grant would
+# come straight back on the next migrate. So every edit is also recorded here, and
+# apply_role_permissions skips a cell recorded as 0. Same pattern as workspaces.folt_hidden_workspaces:
+# a global in tabDefaultValue, which migrate does not touch, never a fixture -- the decision is the
+# site's, not the repo's. Shape: {doctype: {role: {permlevel: {ptype: 0 | 1}}}}.
+OVERRIDES_KEY = "folt_permission_overrides"
+
+
+def permission_overrides():
+	stored = frappe.db.get_global(OVERRIDES_KEY)
+	return json.loads(stored) if stored else {}
+
+
+def revoked(doctype, role, permlevel, ptype):
+	return permission_overrides().get(doctype, {}).get(role, {}).get(str(permlevel), {}).get(ptype) == 0
+
+
+def record_override(doctype, role, permlevel, ptype, value):
+	store = permission_overrides()
+	store.setdefault(doctype, {}).setdefault(role, {}).setdefault(str(permlevel), {})[ptype] = 1 if value else 0
+	frappe.db.set_global(OVERRIDES_KEY, json.dumps(store, sort_keys=True))
+
+
+def clear_overrides(doctype):
+	store = permission_overrides()
+	if store.pop(doctype, None) is not None:
+		frappe.db.set_global(OVERRIDES_KEY, json.dumps(store, sort_keys=True))
+
+
+def code_grants(doctype):
+	"""{(role, permlevel): {ptypes}} that the maps above grant on doctype."""
+	out = {}
+	for perm_map, permlevel in _maps():
+		for role, ptypes in perm_map.get(doctype, {}).items():
+			out.setdefault((role, permlevel), set()).update(ptypes)
+	return out
 
 
 def _grant(doctype, role, ptypes, permlevel=0):

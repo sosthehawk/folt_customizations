@@ -36,6 +36,8 @@ HEAD_OF_FINANCE = "hof.test@folt.test"
 REQUESTER = "requester.test@folt.test"  # linked to an Employee
 PURCHASER = "purchaser.test@folt.test"
 PREFIX = "e2e-admin-"
+# Documents whose save locks them and queues work after commit (RoleProfile / ModuleProfile).
+LOCKED_BY_RUN = (("Role Profile", "E2E Profile"), ("Role Profile", "E2E SM Profile"), ("Module Profile", "E2E Modules"))
 
 PASS, FAIL = [], []
 
@@ -90,11 +92,28 @@ def run():
 	frappe.flags.mute_emails = True
 	frappe.set_user("Administrator")
 	since = frappe.utils.now_datetime()
+	# Nothing here may reach the database for good: some Frappe calls commit on their own
+	# (frappe.sessions.delete_session does), which once committed a whole run's fixtures. So
+	# commit is a no-op for the run, and every attempt is reported.
+	real_commit, commits = frappe.db.commit, []
+	frappe.db.commit = lambda *a, **k: commits.append(1)
 	try:
 		_run(since)
+		_run_phase2()
+		check("the run committed nothing (delete_session's commit was held back)", len(commits) <= 1, f"{len(commits)} commit attempts")
 	finally:
+		frappe.db.commit = real_commit
 		frappe.db.rollback()
+		# Saving a role or module profile locks it and queues the users' rebuild after commit; with
+		# no commit the job never runs, so the run releases the locks it took itself.
+		from frappe.utils.file_lock import delete_lock, release_document_locks
+
+		release_document_locks()
+		for doctype, name in LOCKED_BY_RUN:
+			delete_lock(frappe.get_doc({"doctype": doctype, "name": name}).get_signature())
 		frappe.set_user("Administrator")
+		# set_global goes through the defaults cache: a rolled-back store must not linger in Redis.
+		frappe.clear_cache()
 	print(f"\n{len(PASS)} passed, {len(FAIL)} failed")
 	if FAIL:
 		print("FAILED:", *FAIL, sep="\n  ")
@@ -232,3 +251,84 @@ def _run(since):
 	check("every write on the user recorded", len(rows) >= 6, [r.subject for r in rows])
 	check("no secret in any record", not any("update-password" in (r.content or "") or "api_secret" in (r.content or "") for r in rows))
 	check("delete recorded", frappe.db.exists("Activity Log", {"subject": f"{ap.AUDIT_PREFIX}user deleted ({fresh})", "user": USER_ADMIN}))
+
+
+def _run_phase2():
+	from folt_customizations import permissions as perms
+
+	print("\n— roles")
+	check("only a System Manager creates roles", thrown(lambda: as_user(USER_ADMIN, ap.create_role, {"role_name": "E2E Role"})) == "PermissionError")
+	r = ap.create_role({"role_name": "E2E Role", "desk_access": 1})
+	check("custom role created, granting nothing", r.get("custom") and r["editable"] and not r["permissions"], r)
+	check("duplicate role refused", refused(ap.create_role({"role_name": "E2E Role"}), "duplicate"))
+	r = ap.update_role("E2E Role", {"two_factor_auth": 1})
+	check("custom role edited", r.get("two_factor_auth"), r)
+	check("standard role not edited", refused(ap.update_role("Purchase User", {"disabled": 1}), "standard_role"))
+	check("privileged custom role not edited", refused(ap.update_role("FoLT User Administrator", {"disabled": 1}), "standard_role"))
+	d = as_user(USER_ADMIN, ap.role_detail, "Purchase User")
+	check("User Administrator reads a role with its users", isinstance(d.get("users"), list) and not d["editable"], d.get("editable"))
+
+	print("\n— role profiles")
+	p = ap.save_role_profile("E2E Profile", ["Purchase User", "Employee"], 1)
+	check("role profile created", p.get("roles") == ["Employee", "Purchase User"], p)
+	check("privileged role profile marked", ap.save_role_profile("E2E SM Profile", [SYSTEM_MANAGER], 1).get("privileged"))
+	email = PREFIX + "prof@folt.test"
+	ap.create_user({"email": email, "first_name": "Prof", "send_welcome_email": 0})
+	r = as_user(USER_ADMIN, ap.set_user_role_profiles, email, ["E2E Profile"])
+	check("User Administrator gives an ordinary profile", r.get("changed") and "Purchase User" in ap._user_roles(email), r)
+	check("...not a privileged one", refused(as_user(USER_ADMIN, ap.set_user_role_profiles, email, ["E2E SM Profile"]), "privileged_role"))
+
+	print("\n— the permission matrix")
+	check("only a System Manager edits permissions", thrown(lambda: as_user(USER_ADMIN, ap.set_permission, "Note", "Purchase User", 0, "read", 1)) == "PermissionError")
+	r = ap.set_permission("Purchase Order", "Finance Manager", 0, "submit", 0)
+	check("a code-managed right revoked", r.get("changed"), r)
+	perms.apply_role_permissions()
+	row = next(x for x in frappe.get_meta("Purchase Order").permissions if x.role == "Finance Manager" and x.permlevel == 0)
+	check("...and the migrate re-apply leaves it revoked", not row.submit)
+	src = ap.permission_sources(["Purchase Order"])["Purchase Order"]
+	check("the revoke shows as an override", {"role": "Finance Manager", "permlevel": 0, "ptype": "submit", "source": "revoked"} in src, src)
+	r = ap.set_permission("Note", "E2E Role", 0, "read", 1)
+	check("a new rule granted with read only", r.get("changed") and not next(x for x in frappe.get_meta("Note").permissions if x.role == "E2E Role").export)
+	check("System Manager keeps User read", refused(ap.set_permission("User", SYSTEM_MANAGER, 0, "read", 0), "protected_permission"))
+	check("no write on User for another role", refused(ap.set_permission("User", "E2E Role", 0, "write", 1), "protected_permission"))
+	check("no write for Guest", refused(ap.set_permission("Note", "Guest", 0, "write", 1), "protected_permission"))
+	check("no submit on a non-submittable doctype", refused(ap.set_permission("Note", "E2E Role", 0, "submit", 1), "not_submittable"))
+	check("child tables refused", refused(ap.set_permission("Has Role", "E2E Role", 0, "read", 1), "child_table"))
+	ap.reset_permissions("Purchase Order")
+	row = next(x for x in frappe.get_meta("Purchase Order").permissions if x.role == "Finance Manager" and x.permlevel == 0)
+	check("reset restores FoLT's grants and drops the override", row.submit and "Purchase Order" not in perms.permission_overrides())
+	check("matrix edits audited", frappe.db.exists("Activity Log", {"subject": ap.AUDIT_PREFIX + "permission changed", "reference_name": "Purchase Order"}))
+
+	print("\n— user permissions")
+	company = frappe.get_all("Company", pluck="name", limit=1)[0]
+	r = as_user(USER_ADMIN, ap.add_user_permission, email, "Company", company)
+	check("User Administrator restricts a user to a company", len(r.get("rows", [])) == 1, r)
+	check("duplicate refused", refused(ap.add_user_permission(email, "Company", company), "duplicate"))
+	check("unlisted doctype refused", refused(ap.add_user_permission(email, "Salary Slip", "x"), "invalid_permission"))
+	r = as_user(USER_ADMIN, ap.remove_user_permission, r["rows"][0]["name"])
+	check("restriction removed", r.get("rows") == [], r)
+
+	print("\n— Desk access")
+	check("Desk access is a System Manager's", thrown(lambda: as_user(USER_ADMIN, ap.desk_access)) == "PermissionError")
+	ws = next(w for w in ap.desk_access()["workspaces"] if not w["hidden"])
+	ap.set_workspace_visibility(ws["name"], 1)
+	from folt_customizations.workspaces import hidden_workspaces
+
+	check("hiding a workspace records it where migrate keeps it", ws["name"] in hidden_workspaces())
+	ap.set_workspace_visibility(ws["name"], 0)
+	check("showing it drops it from the store", ws["name"] not in hidden_workspaces())
+	mods = [m["value"] for m in ap.desk_access()["modules"]][:2]
+	r = ap.save_module_profile("E2E Modules", mods, 1)
+	check("module profile saved", any(p["name"] == "E2E Modules" and p["blocked"] == sorted(mods) for p in r["module_profiles"]))
+
+	print("\n— sessions")
+	s = as_user(SECURITY_ADMIN, ap.sessions)
+	check("Security Administrator lists sessions", isinstance(s.get("sessions"), list))
+	check("no sid or csrf token leaves", "csrf" not in frappe.as_json(s) and "_sid" not in frappe.as_json(s))
+	check("others refused", thrown(lambda: as_user(HEAD_OF_FINANCE, ap.sessions)) == "PermissionError")
+	frappe.db.sql("insert into `tabSessions` (user, sid, sessiondata, lastupdate, status) values (%s, 'e2e-sid-1', '{}', now(), 'Active')", email)
+	handle = next(x["handle"] for x in ap.sessions(email)["sessions"])
+	r = as_user(USER_ADMIN, ap.revoke_sessions, handle)
+	check("a session signed out by handle", r.get("revoked") == 1 and not frappe.db.exists("Sessions", {"sid": "e2e-sid-1"}), r)
+	check("a privileged user's sessions are a System Manager's", refused(as_user(SECURITY_ADMIN, ap.revoke_sessions, None, "Administrator"), "protected_user"))
+	check("phase 2 left no messages", not frappe.local.message_log, frappe.local.message_log)

@@ -673,3 +673,569 @@ def user_activity(user, kind="logins", start=0, limit=20):
 	else:
 		return _refuse("invalid_user", _("kind is logins or changes."))
 	return {"user": doc.name, "kind": kind, "items": items, "more": len(rows) > limit}
+
+
+# =================================================================================================
+# Phase 2: roles, role profiles, the permission matrix, user permissions, Desk access, sessions.
+# =================================================================================================
+
+ROLE_FLAGS = ("desk_access", "two_factor_auth", "disabled")
+
+
+def _role_view(name):
+	r = frappe.db.get_value("Role", name, ["name", "desk_access", "two_factor_auth", "disabled", "is_custom", "creation", "modified"], as_dict=True)
+	users = frappe.db.sql(
+		"""select u.name, u.full_name, u.enabled from `tabHas Role` r join `tabUser` u on u.name = r.parent
+		where r.parenttype = 'User' and r.role = %s and u.name not in ('Administrator', 'Guest') order by u.enabled desc, u.full_name""",
+		name,
+		as_dict=True,
+	)
+	perms = {}
+	for p in frappe.get_all("Custom DocPerm", filters={"role": name, "permlevel": 0}, fields=["parent", "read", "write", "create", "submit", "delete"]):
+		perms[p.parent] = p
+	for p in frappe.get_all("DocPerm", filters={"role": name, "permlevel": 0}, fields=["parent", "read", "write", "create", "submit", "delete"]):
+		# DocPerm counts only where the doctype has no Custom DocPerm (which then replaces it).
+		if p.parent not in perms and not frappe.db.exists("Custom DocPerm", {"parent": p.parent}):
+			perms[p.parent] = p
+	summary = [
+		{"doctype": d, "read": bool(p.read), "write": bool(p.write), "create": bool(p.create), "submit": bool(p.submit), "delete": bool(p.delete)}
+		for d, p in sorted(perms.items())
+	]
+	return {
+		"name": r.name,
+		"desk_access": bool(r.desk_access),
+		"two_factor_auth": bool(r.two_factor_auth),
+		"disabled": bool(r.disabled),
+		"custom": bool(r.is_custom),
+		"privileged": r.name in PRIVILEGED_ROLES,
+		"automatic": r.name in AUTOMATIC_ROLES,
+		"editable": bool(r.is_custom) and r.name not in PRIVILEGED_ROLES and _is_system_manager(),
+		"created": cstr(r.creation),
+		"modified": cstr(r.modified),
+		"users": [{"user": u.name, "full_name": u.full_name, "enabled": bool(u.enabled)} for u in users],
+		"permissions": summary,
+	}
+
+
+@frappe.whitelist(methods=["GET"])
+def role_detail(role):
+	_only(USER_ADMIN)
+	name = frappe.db.get_value("Role", cstr(role).strip(), "name")
+	if not name:
+		return _refuse("not_found", _("There is no role {0}.").format(role))
+	return _role_view(name)
+
+
+@frappe.whitelist(methods=["POST"])
+def create_role(role):
+	"""A custom role: name, desk access, two-factor. It grants nothing until permissions are given."""
+	_only()
+	data = _json(role, {}) or {}
+	name = cstr(data.get("role_name")).strip()
+	if not name or len(name) > 140:
+		return _refuse("invalid_role", _("A role needs a name of at most 140 characters."))
+	if frappe.db.exists("Role", name):
+		return _refuse("duplicate", _("There is already a role {0}.").format(name))
+	doc = frappe.get_doc(
+		{
+			"doctype": "Role",
+			"role_name": name,
+			"is_custom": 1,
+			"desk_access": 1 if data.get("desk_access", True) else 0,
+			"two_factor_auth": 1 if data.get("two_factor_auth") else 0,
+		}
+	).insert(ignore_permissions=True)
+	_record("role created", "Role", doc.name, {}, {f: doc.get(f) for f in ROLE_FLAGS})
+	return _role_view(doc.name)
+
+
+@frappe.whitelist(methods=["POST"])
+def update_role(role, values, modified=None):
+	"""Desk access, two-factor and disabled, on a custom role that is not privileged. Standard roles
+	belong to their apps (a migrate would put them back); privileged ones are the ceiling's."""
+	_only()
+	name = frappe.db.get_value("Role", cstr(role).strip(), "name")
+	if not name:
+		return _refuse("not_found", _("There is no role {0}.").format(role))
+	doc = frappe.get_doc("Role", name)
+	if not doc.is_custom or name in PRIVILEGED_ROLES or name in AUTOMATIC_ROLES:
+		return _refuse("standard_role", _("{0} is not a custom role, so it is not changed here.").format(name))
+	values = _json(values, {}) or {}
+	extra = sorted(set(values) - set(ROLE_FLAGS))
+	if not values or extra:
+		return _refuse("field_not_allowed", _("Only desk access, two-factor and disabled are changed here."))
+	if modified and cstr(modified) != cstr(doc.modified):
+		return _refuse("stale", _("Someone else changed this role since you opened it. Reload and try again."))
+	before = {f: doc.get(f) for f in values}
+	doc.update({f: 1 if v else 0 for f, v in values.items()})
+	doc.flags.ignore_permissions = True
+	doc.save()
+	_record("role edited", "Role", name, before, {f: doc.get(f) for f in values})
+	return _role_view(name)
+
+
+# --- role profiles ------------------------------------------------------------------------------
+
+
+def _profile_view(name):
+	roles = frappe.get_all("Has Role", filters={"parenttype": "Role Profile", "parent": name}, pluck="role", order_by="role asc")
+	users = frappe.get_all("User Role Profile", filters={"parenttype": "User", "role_profile": name}, pluck="parent")
+	return {"name": name, "roles": roles, "users": sorted(set(users)) if users else [], "privileged": bool(PRIVILEGED_ROLES.intersection(roles))}
+
+
+@frappe.whitelist(methods=["GET"])
+def role_profiles():
+	_only(USER_ADMIN)
+	return {"profiles": [_profile_view(n) for n in frappe.get_all("Role Profile", pluck="name", order_by="name asc")]}
+
+
+@frappe.whitelist(methods=["POST"])
+def save_role_profile(name, roles, new=0):
+	"""Create a role profile or replace its roles. Frappe then rebuilds the roles of every user who
+	holds the profile (RoleProfile.on_update), so this is a System Manager's change."""
+	_only()
+	name = cstr(name).strip()
+	roles = _dedupe(_json(roles, []) or [])
+	if not name or len(name) > 140:
+		return _refuse("invalid_role", _("A role profile needs a name of at most 140 characters."))
+	refused = _check_new_roles(roles)
+	if refused:
+		return refused
+	exists = frappe.db.exists("Role Profile", name)
+	if cint(new) and exists:
+		return _refuse("duplicate", _("There is already a role profile {0}.").format(name))
+	if not cint(new) and not exists:
+		return _refuse("not_found", _("There is no role profile {0}.").format(name))
+	before = _profile_view(name)["roles"] if exists else []
+	doc = frappe.get_doc("Role Profile", name) if exists else frappe.new_doc("Role Profile")
+	if not exists:
+		doc.role_profile = name
+	doc.set("roles", [{"role": r} for r in roles])
+	doc.flags.ignore_permissions = True
+	doc.save()
+	_record("role profile saved", "Role Profile", doc.name, {"roles": before}, {"roles": roles})
+	return _profile_view(doc.name)
+
+
+@frappe.whitelist(methods=["POST"])
+def set_user_role_profiles(user, profiles, modified=None):
+	"""The role profiles a user holds; Frappe rebuilds their roles from them on save. A delegated
+	administrator may give only profiles without privileged roles, to users below the ceiling."""
+	_only(USER_ADMIN)
+	doc, refused = _target(user)
+	if refused:
+		return refused
+	profiles = _dedupe(_json(profiles, []) or [])
+	unknown = [p for p in profiles if not frappe.db.exists("Role Profile", p)]
+	if unknown:
+		return _refuse("not_found", _("No role profile {0}.").format(", ".join(unknown)))
+	sm = _is_system_manager()
+	if not sm:
+		if _same(doc.name, frappe.session.user):
+			return _refuse("self_roles", _("You cannot change your own roles; ask another administrator."))
+		if any(_profile_view(p)["privileged"] for p in profiles):
+			return _refuse("privileged_role", _("Only a System Manager can give a profile with a privileged role."))
+	refused = _ceiling(doc) or _stale(doc, modified)
+	if refused:
+		return refused
+	before = [r.role_profile for r in doc.get("role_profiles") or []]
+	if before == profiles:
+		return {"user": doc.name, "changed": False}
+	doc.set("role_profiles", [{"role_profile": p} for p in profiles])
+	doc.flags.ignore_permissions = True
+	doc.save()
+	_record("role profiles changed", "User", doc.name, {"role_profiles": before}, {"role_profiles": profiles})
+	return {"user": doc.name, "changed": True}
+
+
+# --- the permission matrix -------------------------------------------------------------------------
+
+PTYPES = ("select", "read", "write", "create", "delete", "submit", "cancel", "amend", "print", "email", "report", "import", "export", "share", "mask", "impersonate")
+SUBMIT_PTYPES = ("submit", "cancel", "amend")
+# Write-like rights: on these doctypes they decide who administers the site, so only System
+# Manager holds them; granting one to another role through the matrix would step past the ceiling.
+SECURITY_DOCTYPES = (
+	"User", "Role", "Role Profile", "Module Profile", "Has Role", "Custom DocPerm", "DocPerm", "DocType", "User Permission",
+	"System Settings", "Custom Field", "Property Setter", "Server Script", "Client Script", "Workflow", "OAuth Client",
+	"Webhook", "Email Account", "Workspace",
+)
+WRITE_PTYPES = ("write", "create", "delete", "submit", "cancel", "amend", "import", "share", "impersonate")
+BROAD_ROLES = ("Guest", "All", "Desk User")
+
+
+def _readers(doctype, permlevel=0):
+	return {p.role for p in frappe.get_meta(doctype).permissions if cint(p.permlevel) == permlevel and p.read}
+
+
+@frappe.whitelist(methods=["GET"])
+def permission_sources(doctypes):
+	"""Which ticks FoLT's code grants (re-applied on every migrate) and which an administrator set
+	here (kept by the overrides store): {doctype: [{role, permlevel, ptype, source}]}."""
+	_only()
+	from folt_customizations import permissions as perms
+
+	names = _json(doctypes, []) or []
+	if not isinstance(names, list) or len(names) > 50:
+		frappe.throw(_("doctypes is a list of at most 50 names."))
+	store = perms.permission_overrides()
+	out = {}
+	for dt in names:
+		rows = []
+		for (role, level), ptypes in perms.code_grants(dt).items():
+			for p in sorted(ptypes):
+				if not perms.revoked(dt, role, level, p):
+					rows.append({"role": role, "permlevel": level, "ptype": p, "source": "code"})
+		for role, levels in store.get(dt, {}).items():
+			for level, ptypes in levels.items():
+				for p, v in ptypes.items():
+					rows.append({"role": role, "permlevel": int(level), "ptype": p, "source": "granted" if v else "revoked"})
+		out[dt] = rows
+	return out
+
+
+@frappe.whitelist(methods=["POST"])
+def set_permission(doctype, role, permlevel, ptype, value):
+	"""Tick or untick one right of one role on one doctype, as the Role Permissions Manager does,
+	and record it so a migrate does not undo it."""
+	_only()
+	from folt_customizations import permissions as perms
+
+	doctype, role, ptype, permlevel, value = cstr(doctype), cstr(role), cstr(ptype), cint(permlevel), cint(value)
+	meta = frappe.db.get_value("DocType", doctype, ["name", "istable", "is_submittable"], as_dict=True)
+	if not meta:
+		return _refuse("not_found", _("There is no doctype {0}.").format(doctype))
+	doctype = meta.name  # canonical: the BFF uses it as a path segment
+	if meta.istable:
+		return _refuse("child_table", _("{0} is a child table; it follows its parent's permissions.").format(doctype))
+	if not frappe.db.exists("Role", role) or role == "Administrator":
+		return _refuse("unknown_role", _("Not a role that takes permissions here: {0}.").format(role))
+	if ptype not in PTYPES or not 0 <= permlevel <= 9:
+		return _refuse("invalid_permission", _("Not a permission: {0} at level {1}.").format(ptype, permlevel))
+	if ptype in SUBMIT_PTYPES and not meta.is_submittable:
+		return _refuse("not_submittable", _("{0} is not submittable, so it has no {1}.").format(doctype, ptype))
+	if value:
+		if doctype in SECURITY_DOCTYPES and ptype in WRITE_PTYPES and role != SYSTEM_MANAGER:
+			return _refuse("protected_permission", _("Only System Manager may hold {0} on {1}: it administers the site.").format(ptype, doctype))
+		if role in BROAD_ROLES and ptype in WRITE_PTYPES:
+			return _refuse("protected_permission", _("{0} is held by every login, so it is never given {1}.").format(role, ptype))
+	else:
+		if role == SYSTEM_MANAGER and doctype in SECURITY_DOCTYPES and ptype in ("read", "write"):
+			return _refuse("protected_permission", _("System Manager keeps {0} on {1}, or nobody could administer it.").format(ptype, doctype))
+		if ptype == "read" and _readers(doctype, permlevel) == {role}:
+			return _refuse("last_reader", _("{0} is the only role that reads {1}; give another role read first.").format(role, doctype))
+
+	current = next((p for p in frappe.get_meta(doctype).permissions if p.role == role and cint(p.permlevel) == permlevel and not p.if_owner), None)
+	old = cint(current.get(ptype)) if current else 0
+	if old == value:
+		return {"doctype": doctype, "changed": False}
+	if value and not current:
+		perms._grant(doctype, role, [ptype], permlevel)
+	else:
+		update_permission_property(doctype, role, permlevel, ptype, value)
+	frappe.clear_cache(doctype=doctype)
+	perms.record_override(doctype, role, permlevel, ptype, value)
+	_record("permission changed", "DocType", doctype, {f"{role} L{permlevel} {ptype}": old}, {f"{role} L{permlevel} {ptype}": value})
+	return {"doctype": doctype, "changed": True}
+
+
+def update_permission_property(doctype, role, permlevel, ptype, value):
+	from frappe.permissions import update_permission_property as _update
+
+	_update(doctype, role, permlevel, ptype, value)
+
+
+@frappe.whitelist(methods=["POST"])
+def reset_permissions(doctype):
+	"""Back to the doctype's shipped permissions plus what FoLT's code grants; the administrator's
+	recorded changes for it are dropped."""
+	_only()
+	from frappe.permissions import reset_perms
+
+	from folt_customizations import permissions as perms
+
+	name = frappe.db.get_value("DocType", cstr(doctype), "name")
+	if not name:
+		return _refuse("not_found", _("There is no doctype {0}.").format(doctype))
+	doctype = name
+	reset_perms(doctype)
+	perms.clear_overrides(doctype)
+	perms.apply_role_permissions()
+	frappe.clear_cache(doctype=doctype)
+	_record("permissions reset", "DocType", doctype)
+	return {"doctype": doctype, "changed": True}
+
+
+@frappe.whitelist(methods=["GET"])
+def doctype_readers(doctypes):
+	"""{doctype: [roles that read it]} -- what decides who sees a document's shortcut in the app."""
+	_only(USER_ADMIN)
+	names = _json(doctypes, []) or []
+	if not isinstance(names, list) or len(names) > 50:
+		frappe.throw(_("doctypes is a list of at most 50 names."))
+	return {dt: sorted(_readers(dt)) for dt in names if frappe.db.exists("DocType", dt)}
+
+
+# --- user permissions (record-level restrictions) --------------------------------------------------
+
+USER_PERMISSION_DOCTYPES = ("Company", "Department", "Branch", "Cost Center", "Project")
+
+
+def _user_permission_rows(user):
+	return [
+		{
+			"name": r.name,
+			"allow": r.allow,
+			"for_value": r.for_value,
+			"apply_to_all_doctypes": bool(r.apply_to_all_doctypes),
+			"applicable_for": r.applicable_for,
+			"is_default": bool(r.is_default),
+		}
+		for r in frappe.get_all(
+			"User Permission",
+			filters={"user": user},
+			fields=["name", "allow", "for_value", "apply_to_all_doctypes", "applicable_for", "is_default"],
+			order_by="allow asc, for_value asc",
+		)
+	]
+
+
+@frappe.whitelist(methods=["GET"])
+def user_permissions(user):
+	"""The records a user is restricted to, and the choices for adding one."""
+	_only(USER_ADMIN)
+	doc, refused = _target(user)
+	if refused:
+		return refused
+	return {
+		"user": doc.name,
+		"rows": _user_permission_rows(doc.name),
+		"allow": list(USER_PERMISSION_DOCTYPES),
+		"can_change": _ceiling(doc) is None,
+	}
+
+
+@frappe.whitelist(methods=["GET"])
+def user_permission_values(allow, q=None):
+	"""Records of an allowed doctype to restrict a user to (first 50 matching q)."""
+	_only(USER_ADMIN)
+	if allow not in USER_PERMISSION_DOCTYPES:
+		return _refuse("invalid_permission", _("Users are restricted here by {0} only.").format(", ".join(USER_PERMISSION_DOCTYPES)))
+	filters = {"name": ["like", f"%{cstr(q).strip()}%"]} if q else None
+	return {"allow": allow, "values": frappe.get_all(allow, filters=filters, pluck="name", order_by="name asc", limit=50)}
+
+
+@frappe.whitelist(methods=["POST"])
+def add_user_permission(user, allow, for_value, applicable_for=None, is_default=0):
+	_only(USER_ADMIN)
+	doc, refused = _target(user)
+	if refused:
+		return refused
+	refused = _ceiling(doc)
+	if refused:
+		return refused
+	if allow not in USER_PERMISSION_DOCTYPES:
+		return _refuse("invalid_permission", _("Users are restricted here by {0} only.").format(", ".join(USER_PERMISSION_DOCTYPES)))
+	if not frappe.db.exists(allow, for_value):
+		return _refuse("not_found", _("There is no {0} {1}.").format(allow, for_value))
+	if applicable_for and not frappe.db.exists("DocType", applicable_for):
+		return _refuse("not_found", _("There is no doctype {0}.").format(applicable_for))
+	filters = {"user": doc.name, "allow": allow, "for_value": for_value, "applicable_for": applicable_for or ["is", "not set"]}
+	if frappe.db.exists("User Permission", filters):
+		return _refuse("duplicate", _("{0} is already restricted to {1} {2}.").format(doc.name, allow, for_value))
+	frappe.get_doc(
+		{
+			"doctype": "User Permission",
+			"user": doc.name,
+			"allow": allow,
+			"for_value": for_value,
+			"apply_to_all_doctypes": 0 if applicable_for else 1,
+			"applicable_for": applicable_for or None,
+			"is_default": cint(is_default),
+		}
+	).insert(ignore_permissions=True)
+	_record("user permission added", "User", doc.name, {}, {"restricted to": f"{allow} {for_value}" + (f" for {applicable_for}" if applicable_for else "")})
+	return {"user": doc.name, "rows": _user_permission_rows(doc.name), "allow": list(USER_PERMISSION_DOCTYPES), "can_change": True}
+
+
+@frappe.whitelist(methods=["POST"])
+def remove_user_permission(name):
+	_only(USER_ADMIN)
+	row = frappe.db.get_value("User Permission", cstr(name), ["name", "user", "allow", "for_value"], as_dict=True)
+	if not row:
+		return _refuse("not_found", _("That restriction no longer exists."))
+	doc, refused = _target(row.user)
+	if refused:
+		return refused
+	refused = _ceiling(doc)
+	if refused:
+		return refused
+	frappe.delete_doc("User Permission", row.name, ignore_permissions=True)
+	_record("user permission removed", "User", doc.name, {"restricted to": f"{row.allow} {row.for_value}"}, {})
+	return {"user": doc.name, "rows": _user_permission_rows(doc.name), "allow": list(USER_PERMISSION_DOCTYPES), "can_change": True}
+
+
+# --- Desk access: workspaces and module profiles -----------------------------------------------------
+
+
+@frappe.whitelist(methods=["GET"])
+def desk_access():
+	"""What the Desk shows: its workspaces (hidden or not, and to which roles) and the module
+	profiles that block Desk modules per user. The app's own modules follow roles (BFF)."""
+	_only()
+	from folt_customizations.workspaces import hidden_workspaces
+
+	hidden = hidden_workspaces()
+	roles = {}
+	for r in frappe.get_all("Has Role", filters={"parenttype": "Workspace"}, fields=["parent", "role"]):
+		roles.setdefault(r.parent, []).append(r.role)
+	workspaces = [
+		{"name": w.name, "label": w.label or w.name, "module": w.module, "hidden": bool(w.is_hidden or not w.public) or w.name in hidden, "roles": sorted(roles.get(w.name, []))}
+		for w in frappe.get_all("Workspace", filters={"for_user": ["in", ["", None]]}, fields=["name", "label", "module", "public", "is_hidden"], order_by="name asc")
+	]
+	profiles = []
+	for name in frappe.get_all("Module Profile", pluck="name", order_by="name asc"):
+		blocked = frappe.get_all("Block Module", filters={"parenttype": "Module Profile", "parent": name}, pluck="module", order_by="module asc")
+		users = frappe.get_all("User", filters={"module_profile": name}, pluck="name")
+		profiles.append({"name": name, "blocked": blocked, "users": users})
+	modules = [{"value": m.name, "label": m.name, "app": m.app_name} for m in frappe.get_all("Module Def", fields=["name", "app_name"], order_by="app_name asc, name asc")]
+	return {"workspaces": workspaces, "module_profiles": profiles, "modules": modules}
+
+
+@frappe.whitelist(methods=["POST"])
+def set_workspace_visibility(name, hidden):
+	"""Hide a Desk workspace or show it again, as ticking Public does in the Desk:
+	workspaces.record_visibility_intent records the decision where migrate keeps it and re-gates
+	the module's icon."""
+	_only()
+	if not frappe.db.exists("Workspace", cstr(name)):
+		return _refuse("not_found", _("There is no workspace {0}.").format(name))
+	doc = frappe.get_doc("Workspace", name)
+	if doc.for_user:
+		return _refuse("not_found", _("{0} is somebody's own workspace.").format(name))
+	want = 0 if cint(hidden) else 1
+	if doc.public == want and bool(doc.is_hidden) == (not want):
+		return {"name": doc.name, "hidden": not want, "changed": False}
+	before = {"hidden": bool(doc.is_hidden or not doc.public)}
+	doc.public = want
+	doc.flags.ignore_permissions = True
+	doc.save()
+	_record("workspace hidden" if not want else "workspace shown", "Workspace", doc.name, before, {"hidden": not want})
+	return {"name": doc.name, "hidden": not want, "changed": True}
+
+
+@frappe.whitelist(methods=["POST"])
+def save_module_profile(name, blocked, new=0):
+	"""Create a module profile or replace the Desk modules it blocks."""
+	_only()
+	name = cstr(name).strip()
+	blocked = _dedupe(_json(blocked, []) or [])
+	if not name or len(name) > 140:
+		return _refuse("invalid_role", _("A module profile needs a name of at most 140 characters."))
+	unknown = [m for m in blocked if not frappe.db.exists("Module Def", m)]
+	if unknown:
+		return _refuse("not_found", _("No module {0}.").format(", ".join(unknown)))
+	exists = frappe.db.exists("Module Profile", name)
+	if cint(new) and exists:
+		return _refuse("duplicate", _("There is already a module profile {0}.").format(name))
+	if not cint(new) and not exists:
+		return _refuse("not_found", _("There is no module profile {0}.").format(name))
+	doc = frappe.get_doc("Module Profile", name) if exists else frappe.new_doc("Module Profile")
+	before = [b.module for b in doc.get("block_modules") or []]
+	if not exists:
+		doc.module_profile_name = name
+	doc.set("block_modules", [{"module": m} for m in blocked])
+	doc.flags.ignore_permissions = True
+	doc.save()
+	_record("module profile saved", "Module Profile", doc.name, {"blocked": before}, {"blocked": blocked})
+	return desk_access()
+
+
+# --- sessions --------------------------------------------------------------------------------------
+
+SESSION_READERS = (USER_ADMIN, SECURITY_ADMIN)
+
+
+def _session_handle(sid):
+	"""An opaque, stable handle for a session: the sid itself never leaves the server."""
+	import hashlib
+	import hmac
+
+	key = (frappe.local.conf.get("encryption_key") or frappe.local.conf.get("secret_key") or frappe.local.site).encode()
+	return hmac.new(key, cstr(sid).encode(), hashlib.sha256).hexdigest()[:32]
+
+
+def _session_rows(user=None):
+	filters = "where user not in ('Guest')" + (" and user = %(user)s" if user else "")
+	rows = frappe.db.sql(f"select user, sid, ipaddress, lastupdate, sessiondata from `tabSessions` {filters} order by lastupdate desc", {"user": user}, as_dict=True)
+	names = {u.name: u.full_name for u in frappe.get_all("User", filters={"name": ["in", list({r.user for r in rows}) or [""]]}, fields=["name", "full_name"])}
+	out = []
+	for r in rows:
+		try:
+			data = frappe.parse_json(r.sessiondata or "{}") or {}
+		except Exception:  # noqa: BLE001 -- a malformed row still lists
+			data = {}
+		out.append(
+			{
+				"handle": _session_handle(r.sid),
+				"user": r.user,
+				"full_name": names.get(r.user),
+				"ip": r.ipaddress or data.get("session_ip"),
+				"started": cstr(data.get("creation")) or None,
+				"last_active": cstr(r.lastupdate) or None,
+				"agent": data.get("user_agent"),
+				"current": r.sid == frappe.session.sid,
+				"_sid": r.sid,
+			}
+		)
+	return out
+
+
+def _public(rows):
+	return [{k: v for k, v in r.items() if k != "_sid"} for r in rows]
+
+
+@frappe.whitelist(methods=["GET"])
+def sessions(user=None):
+	"""Signed-in sessions, newest activity first: who, from which IP and client, since when. The
+	session id and its CSRF token are never returned -- each row has an opaque handle instead."""
+	_only(*SESSION_READERS)
+	if user:
+		doc, refused = _target(user)
+		if refused:
+			return refused
+		user = doc.name
+	return {"sessions": _public(_session_rows(user))}
+
+
+@frappe.whitelist(methods=["POST"])
+def revoke_sessions(handle=None, user=None):
+	"""Sign out one session (by handle) or every session of a user. Never your own current session
+	-- that is what Sign out is for -- and, for anyone but a System Manager, never a privileged user's."""
+	_only(*SESSION_READERS)
+	from frappe.sessions import delete_session
+
+	if bool(handle) == bool(user):
+		return _refuse("invalid_session", _("Name one session or one user."))
+	if handle:
+		rows = [r for r in _session_rows() if r["handle"] == cstr(handle)]
+		if not rows:
+			return _refuse("not_found", _("That session has already ended."))
+		if rows[0]["current"]:
+			return _refuse("own_session", _("This is your own session; sign out instead."))
+		target = rows[0]["user"]
+	else:
+		doc, refused = _target(user)
+		if refused:
+			return refused
+		target = doc.name
+		rows = [r for r in _session_rows(target) if not r["current"]]
+	if target in STANDARD_USERS:
+		return _refuse("protected_user", _("Administrator and Guest are never changed here."))
+	doc = frappe.get_doc("User", target)
+	refused = _ceiling(doc)
+	if refused:
+		return refused
+	for r in rows:
+		delete_session(r["_sid"], target, reason="Signed out by an administrator")
+	_record("sessions revoked", "User", target, {}, {"sessions signed out": len(rows)})
+	return {"user": target, "revoked": len(rows), "sessions": _public(_session_rows())}

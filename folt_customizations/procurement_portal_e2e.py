@@ -34,6 +34,7 @@ HOF = "hof.test@folt.test"  # Head of Finance + Accounts User + Accounts Manager
 MARK = "E2E procurement requisition"
 BIDDERS = ("E2E Bidder Alpha", "E2E Bidder Beta")
 RFQ_SUBJECT = "E2E procurement RFQ"
+BIDDER_USER = "e2e.bidder.portal@example.com"
 
 PASS, FAIL = [], []
 
@@ -77,6 +78,13 @@ def teardown():
 	rfqs = frappe.get_all("Request for Quotation", filters={"subject": RFQ_SUBJECT}, pluck="name")
 	for ev in frappe.get_all("Procurement Committee Evaluation", filters={"request_for_quotation": ["in", rfqs or [""]]}, pluck="name"):
 		_drop("Procurement Committee Evaluation", ev)
+	for po in frappe.get_all("Purchase Order", filters={"supplier": ["in", BIDDERS]}, pluck="name", order_by="creation desc"):
+		_drop("Purchase Order", po)
+	sqs = frappe.get_all("Supplier Quotation", filters={"supplier": ["in", BIDDERS]}, pluck="name")
+	for wv in frappe.get_all("Derogation Waiver Request", filters={"supplier_quotation": ["in", sqs or [""]]}, pluck="name"):
+		_drop("Derogation Waiver Request", wv)
+	if frappe.db.exists("User", BIDDER_USER):
+		frappe.delete_doc("User", BIDDER_USER, force=True, ignore_permissions=True)
 	for sq in frappe.get_all("Supplier Quotation", filters={"supplier": ["in", BIDDERS]}, pluck="name"):
 		_drop("Supplier Quotation", sq)
 	for rfq in rfqs:
@@ -115,7 +123,7 @@ def run():
 	teardown()
 	try:
 		_run()
-		_sourcing(_requisitions())
+		_ordering(*_sourcing(_requisitions()))
 	finally:
 		teardown()
 	print(f"\n  {len(PASS)} passed, {len(FAIL)} failed")
@@ -347,3 +355,86 @@ def _sourcing(mr):
 	expect_throw("a second evaluation for the same competition is refused", lambda: as_user(BUYER, lambda: pp.handoff("Supplier Quotation", quotes[BIDDERS[0]], "Procurement Committee Evaluation")))
 	expect_throw("a hand-off the chain does not declare is refused", lambda: as_user(BUYER, lambda: pp.handoff("Supplier Quotation", quotes[BIDDERS[0]], "Purchase Order")))
 	check("the comparison names the evaluation", as_user(BUYER, lambda: pp.compare(rfq))["evaluation"]["name"] == ev["name"])
+	return mr, quotes
+
+
+def _ordering(mr, quotes):
+	print("\n--- a purchase order, by the waiver route ---")
+	from frappe.model.workflow import apply_workflow
+
+	from folt_customizations import procurement_chain
+	from folt_customizations.procurement_chain_e2e import authorise
+
+	frappe.set_user("Administrator")
+	raised = procurement_chain.make_waiver_request(quotes[BIDDERS[0]])
+	waiver = authorise(frappe.get_doc("Derogation Waiver Request", raised["name"]))
+	check("the waiver is authorised", waiver.workflow_state == "Approved", waiver.workflow_state)
+	po = as_user(BUYER, lambda: pp.handoff("Derogation Waiver Request", waiver.name, "Purchase Order"))
+	check("the order is raised from the authorised waiver", po["doctype"] == "Purchase Order" and frappe.db.exists("Purchase Order", po["name"]), po)
+	order = po["name"]
+	f = as_user(BUYER, lambda: pp.flow("Derogation Waiver Request", waiver.name))
+	check("the waiver's next step names its order", any(order in h["existing"] for h in f["handoffs"]), f["handoffs"])
+	made = as_user(BUYER, lambda: pp.lookup("erpnext.stock.doctype.material_request.material_request.make_purchase_order", {"source_name": mr}))
+	check("ERPNext also makes an order straight from a requisition, unsaved", made["items"][0]["material_request"] == mr and not frappe.db.exists("Purchase Order", made.get("name") or "x"))
+
+	print("\n--- the threshold ---")
+	settings = frappe.get_single("FoLT Procurement Settings")
+	before = settings.po_ed_threshold
+	try:
+		settings.po_ed_threshold = 1000
+		settings.save(ignore_permissions=True)
+		as_user(BUYER, lambda: pp.save("Purchase Order", {"modified": str(frappe.db.get_value("Purchase Order", order, "modified"))}, order))
+		check("an order above the threshold needs the Executive Director", frappe.db.get_value("Purchase Order", order, "folt_approval_tier") == "Executive")
+		as_user(BUYER, lambda: pp.act("Purchase Order", order, "transition", "Submit for approval"))
+		moves = as_user(FIN_MANAGER, lambda: pp.record("Purchase Order", order))["workflow"]["transitions"]
+		check("the Finance Manager is offered one Approve, onward to the Executive Director",
+		      [(m["action"], m["next_state"]) for m in moves if m["action"] == "Approve"] == [("Approve", "Pending Executive Director Approval")], moves)
+		as_user(FIN_MANAGER, lambda: pp.act("Purchase Order", order, "transition", "Approve"))
+		check("it waits on the Executive Director", frappe.db.get_value("Purchase Order", order, "workflow_state") == "Pending Executive Director Approval")
+		expect_throw("the Finance Manager cannot approve it a second time", lambda: as_user(FIN_MANAGER, lambda: pp.act("Purchase Order", order, "transition", "Approve")))
+		as_user(AUDITOR, lambda: pp.act("Purchase Order", order, "transition", "Approve"))
+		check("the Executive Director's approval submits it", frappe.db.get_value("Purchase Order", order, ["workflow_state", "docstatus"]) == ("Approved", 1))
+		settings.po_ed_threshold = 10_000_000
+		settings.save(ignore_permissions=True)
+		small = frappe.get_doc("Purchase Order", order)
+		from folt_customizations.purchase_order import approval_tier
+		approval_tier(small)
+		check("below the threshold the Finance Manager's approval is enough", small.folt_approval_tier == "Standard")
+	finally:
+		settings.po_ed_threshold = before
+		settings.save(ignore_permissions=True)
+
+	print("\n--- the supplier ---")
+	expect_throw("email is for the procurement roles", lambda: as_user(REQUESTER, lambda: pp.operate("frappe.core.doctype.communication.email.make", {})), frappe.PermissionError)
+	as_user(MANAGER, lambda: pp.operate("frappe.core.doctype.communication.email.make", {"doctype": "Purchase Order", "name": order, "recipients": "orders@example.com",
+	                                                                                    "subject": f"Purchase order {order}", "content": "Please deliver.", "send_email": 0}))
+	check("the email is recorded on the order", frappe.db.exists("Communication", {"reference_doctype": "Purchase Order", "reference_name": order, "communication_type": "Communication"}))
+	from folt_customizations import supplier_portal
+
+	if not frappe.db.exists("User", BIDDER_USER):
+		u = frappe.get_doc({"doctype": "User", "email": BIDDER_USER, "first_name": "E2E Bidder", "user_type": "Website User", "send_welcome_email": 0})
+		u.append("roles", {"role": "Supplier"})
+		u.insert(ignore_permissions=True)
+	sup = frappe.get_doc("Supplier", BIDDERS[0])
+	if not any(p.user == BIDDER_USER for p in sup.portal_users):
+		sup.append("portal_users", {"user": BIDDER_USER})
+		sup.save(ignore_permissions=True)
+	other = frappe.get_doc("Supplier", BIDDERS[1])
+	expect_throw("nobody else's supplier can acknowledge it", lambda: as_user(REQUESTER, lambda: supplier_portal.acknowledge_order(order)), frappe.PermissionError)
+	ack = as_user(BIDDER_USER, lambda: supplier_portal.acknowledge_order(order))
+	check("the supplier acknowledges it on the portal", frappe.db.get_value("Purchase Order", order, "folt_supplier_acknowledged_by") == BIDDER_USER, ack)
+	again = as_user(BIDDER_USER, lambda: supplier_portal.acknowledge_order(order))
+	check("the first acknowledgement is the one kept", again["acknowledged_on"] == ack["acknowledged_on"])
+	view = as_user(BIDDER_USER, supplier_portal.portal_overview)
+	check("the portal shows it acknowledged", any(o["name"] == order and o["acknowledged_on"] for o in view["orders"]))
+	del other
+
+	print("\n--- delivery, cancel and amend ---")
+	lines = as_user(BUYER, lambda: pp.flow("Purchase Order", order))["lines"]
+	check("the order's lines carry ERPNext's received and billed figures", lines and lines[0]["received_qty"] == 0 and "billed_amt" in lines[0] and lines[0]["overdue"] is False, lines)
+	expect_throw("a purchase user cannot cancel an approved order", lambda: as_user(BUYER, lambda: pp.act("Purchase Order", order, "transition", "Cancel")))
+	as_user(MANAGER, lambda: pp.act("Purchase Order", order, "transition", "Cancel"))
+	check("the purchase manager cancels it through the workflow", frappe.db.get_value("Purchase Order", order, ["workflow_state", "docstatus"]) == ("Cancelled", 2))
+	amended = as_user(MANAGER, lambda: pp.act("Purchase Order", order, "amend"))["name"]
+	check("a cancelled order is amended into a new draft", frappe.db.get_value("Purchase Order", amended, ["amended_from", "docstatus", "workflow_state"]) == (order, 0, "Draft"),
+	      frappe.db.get_value("Purchase Order", amended, ["amended_from", "docstatus", "workflow_state"]))

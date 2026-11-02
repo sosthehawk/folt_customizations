@@ -332,6 +332,15 @@ def act_on(doctype, name, action, transition=None, reason=None):
 		new = frappe.copy_doc(doc)
 		new.amended_from = doc.name
 		new.docstatus = 0
+		if get_workflow_name(doctype):
+			# An amendment starts its approval over: at the workflow's first state, not the
+			# cancelled document's (which Frappe would read as a transition out of Draft).
+			from frappe.model.workflow import get_workflow
+
+			wf = get_workflow(doctype)
+			new.set(wf.workflow_state_field, wf.states[0].state)
+			if new.meta.has_field("folt_rejection_reason"):
+				new.folt_rejection_reason = None
 		new.insert()
 		return {"name": new.name}
 	if action == "delete":

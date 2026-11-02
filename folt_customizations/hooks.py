@@ -211,6 +211,8 @@ after_install = [
     "folt_customizations.leave_notifications.apply_leave_notification_templates",
     "folt_customizations.hr_accounts.apply_hr_accounts",
     "folt_customizations.masterdata.apply_master_data",
+    # The purchase order's Executive Director threshold, on a site that has never set one (ADR-008).
+    "folt_customizations.purchase_order.ensure_procurement_settings",
 ]
 after_migrate = [
     "folt_customizations.branding.apply_branding",

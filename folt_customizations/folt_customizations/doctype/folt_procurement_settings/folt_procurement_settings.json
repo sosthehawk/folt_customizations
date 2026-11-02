@@ -1,0 +1,67 @@
+{
+ "actions": [],
+ "creation": "2026-11-02 17:00:00.000000",
+ "custom": 0,
+ "description": "How procurement is approved and checked at FoLT (ADR-008).",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "approval_section",
+  "po_ed_threshold"
+ ],
+ "fields": [
+  {
+   "fieldname": "approval_section",
+   "fieldtype": "Section Break",
+   "label": "Purchase order approval"
+  },
+  {
+   "default": "1000000",
+   "description": "A purchase order whose total (in company currency) is above this is approved by the Finance Manager and then the Executive Director. At or below it, the Finance Manager's approval is enough. Zero sends every order to the Finance Manager only.",
+   "fieldname": "po_ed_threshold",
+   "fieldtype": "Currency",
+   "label": "Executive Director approves orders above",
+   "non_negative": 1
+  }
+ ],
+ "issingle": 1,
+ "modified": "2026-11-02 17:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Folt Customizations",
+ "name": "FoLT Procurement Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "write": 1,
+   "print": 1
+  },
+  {
+   "role": "Purchase Manager",
+   "read": 1,
+   "write": 1,
+   "print": 1
+  },
+  {
+   "role": "Purchase User",
+   "read": 1
+  },
+  {
+   "role": "Finance Manager",
+   "read": 1
+  },
+  {
+   "role": "Executive Director",
+   "read": 1
+  },
+  {
+   "role": "Accounts Manager",
+   "read": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

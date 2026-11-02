@@ -472,7 +472,7 @@ def portal_overview() -> dict:
 	orders = frappe.get_all(
 		"Purchase Order",
 		filters={"supplier": ["in", mine], "docstatus": 1},
-		fields=["name", "supplier", "status", "grand_total", "currency", "transaction_date", "schedule_date", "per_received", "per_billed"],
+		fields=["name", "supplier", "status", "grand_total", "currency", "transaction_date", "schedule_date", "per_received", "per_billed", "folt_supplier_acknowledged_on"],
 		order_by="transaction_date desc, name desc",
 		limit=ORDERS_LIMIT,
 	)
@@ -507,6 +507,7 @@ def portal_overview() -> dict:
 				"schedule_date": str(o.schedule_date) if o.schedule_date else None,
 				"per_received": flt(o.per_received),
 				"per_billed": flt(o.per_billed),
+				"acknowledged_on": str(o.folt_supplier_acknowledged_on) if o.folt_supplier_acknowledged_on else None,
 				"items": lines.get(o.name, []),
 			}
 		)
@@ -572,3 +573,23 @@ def portal_rfq(name: str) -> dict:
 		"items": items,
 	}
 
+
+
+@frappe.whitelist(methods=["POST"])
+def acknowledge_order(name: str) -> dict:
+	"""The supplier says they have the order (ADR-008). Only a portal user of the order's supplier,
+	only on a submitted order, once: the first acknowledgement is the one kept. Written on the
+	submitted order's allow-on-submit fields as the system, the way save_quotation writes bids --
+	a portal user holds no write on Purchase Order -- and noted in the order's timeline."""
+	order = frappe.db.get_value("Purchase Order", name, ["supplier", "docstatus", "folt_supplier_acknowledged_on"], as_dict=True)
+	if not order or order.docstatus != 1 or order.supplier not in my_suppliers():
+		frappe.throw(_("That is not one of your orders."), frappe.PermissionError)
+	if order.folt_supplier_acknowledged_on:
+		return {"name": name, "acknowledged_on": str(order.folt_supplier_acknowledged_on)}
+	from frappe.utils import now_datetime
+
+	when = now_datetime()
+	user = frappe.session.user
+	frappe.db.set_value("Purchase Order", name, {"folt_supplier_acknowledged_on": when, "folt_supplier_acknowledged_by": user}, update_modified=False)
+	frappe.get_doc("Purchase Order", name).add_comment("Info", _("Acknowledged by the supplier ({0}) on the supplier portal.").format(user))
+	return {"name": name, "acknowledged_on": str(when)}

@@ -48,6 +48,7 @@ def validate(doc, method=None):
          registration expired, which is a filing problem, not grounds to void the award.
     """
     require_award_authority(doc)
+    approval_tier(doc)
 
     if not doc.supplier:
         return  # core mandatory validation reports this
@@ -213,3 +214,29 @@ def _being_prepared(doc) -> bool:
     state = doc.get(workflow.workflow_state_field)
 
     return not state or state == workflow.states[0].state
+
+
+def approval_tier(doc, method=None):
+    """Which approval the order needs, from its total (ADR-008). Above FoLT Procurement Settings'
+    threshold the Executive Director approves after the Finance Manager; the workflow's two
+    Approve transitions out of Pending Approval read this field (their conditions). Set on every
+    save, so an order edited while it waits is weighed again at its new total."""
+    if not doc.meta.has_field("folt_approval_tier"):
+        return
+    threshold = frappe.db.get_single_value("FoLT Procurement Settings", "po_ed_threshold") if frappe.db.exists("DocType", "FoLT Procurement Settings") else 0
+    total = doc.get("base_grand_total") or doc.get("grand_total") or 0
+    doc.folt_approval_tier = "Executive" if threshold and total > threshold else "Standard"
+
+
+def ensure_procurement_settings():
+    """after_migrate: give FoLT Procurement Settings its threshold on a site that has never set
+    one. Frappe does not apply a single doctype's field defaults when the doctype is created, and
+    an empty threshold would read as zero -- every order approved by the Finance Manager alone.
+    A value somebody has set, including zero, is never touched."""
+    if not frappe.db.exists("DocType", "FoLT Procurement Settings"):
+        return
+    stored = frappe.db.sql("select value from `tabSingles` where doctype=%s and field=%s", ("FoLT Procurement Settings", "po_ed_threshold"))
+    if stored and stored[0][0] not in (None, ""):
+        return
+    default = frappe.get_meta("FoLT Procurement Settings").get_field("po_ed_threshold").default
+    frappe.db.set_single_value("FoLT Procurement Settings", "po_ed_threshold", float(default or 0))

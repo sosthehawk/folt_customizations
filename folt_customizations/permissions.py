@@ -34,6 +34,9 @@ from frappe.permissions import add_permission, update_permission_property
 WORKFLOW_PERMISSIONS = {
 	"Purchase Order": {
 		"Finance Manager": ("read", "write", "submit"),
+		# Above FoLT Procurement Settings' threshold the Executive Director approves after the
+		# Finance Manager, and that Approve is what submits the order (ADR-008).
+		"Executive Director": ("read", "write", "submit"),
 	},
 	# Not decoration on the grant above -- its prerequisites. ERPNext re-derives party, item and
 	# account details on every Purchase Order save, and several of those reads are
@@ -57,15 +60,21 @@ WORKFLOW_PERMISSIONS = {
 	# reproduce it the same way rather than guessing.
 	"Supplier": {
 		"Finance Manager": ("read",),
+		"Executive Director": ("read",),
 	},
 	"Address": {
 		"Finance Manager": ("read",),
+		"Executive Director": ("read",),
 	},
 	"Item": {
 		"Finance Manager": ("read",),
+		"Executive Director": ("read",),
 	},
 	"Account": {
 		"Finance Manager": ("select",),
+		"Executive Director": ("select",),
+		# A Purchase Manager amending a cancelled order re-saves it from scratch (ADR-008).
+		"Purchase Manager": ("select",),
 	},
 	# The float's life after approval is now tracked on the advance itself -- Disbursed,
 	# Overdue, Accounted, Closed -- and every one of those is a transition on an already
@@ -213,8 +222,9 @@ MASTER_DATA_PERMISSIONS = {
 PROCUREMENT_PERMISSIONS = {
 	# Read, not select: ERPNext's get_item_details checks read on the Item (get_item_details.py:87)
 	# on every save of a requisition, so select alone fails the requester's own draft. The item
-	# master names what FoLT buys; nothing on it is confidential.
-	"Item": {role: ("read",) for role in ("Employee", "Head of Programs", "Head of Finance")},
+	# master names what FoLT buys; nothing on it is confidential. ERPNext gives it to the Purchase
+	# User but not the Purchase Manager, whose saves of an order (an amendment) need it as much.
+	"Item": {role: ("read",) for role in ("Employee", "Head of Programs", "Head of Finance", "Purchase Manager")},
 	# Supplier evaluation is ERPNext's Supplier Scorecard, which ships for the System Manager
 	# alone. The people who keep suppliers keep their scorecards; buyers read them.
 	"Supplier Scorecard": {

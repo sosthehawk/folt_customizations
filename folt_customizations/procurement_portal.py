@@ -103,7 +103,11 @@ LOOKUPS = {
 	# RFQ for one supplier. They write nothing; the form saves what the person reviewed.
 	"erpnext.stock.doctype.material_request.material_request.make_request_for_quotation",
 	"erpnext.buying.doctype.request_for_quotation.request_for_quotation.make_supplier_quotation_from_rfq",
+	"erpnext.stock.doctype.material_request.material_request.make_purchase_order",
 }
+
+# ERPNext's writing helpers a procurement screen uses: sending a document by email, with its print.
+OPERATIONS = {"frappe.core.doctype.communication.email.make"}
 # What an Employee with no procurement role may look up: the requisition's own helpers.
 REQUESTER_LOOKUPS = {"folt_customizations.material_request.activity_defaults", "erpnext.stock.get_item_details.get_item_details"}
 
@@ -336,6 +340,8 @@ def preview(doctype, doc):
 	after = None
 	if doctype == "Material Request":
 		from folt_customizations.material_request import preview as after
+	elif doctype == "Purchase Order":
+		from folt_customizations.purchase_order import approval_tier as after
 	return _common.preview_doc(doctype, doc, _PREVIEW.get(doctype, ("set_missing_values",)), after)
 
 
@@ -781,6 +787,21 @@ def approvals():
 
 
 @frappe.whitelist(methods=["POST"])
+def operate(method, args=None):
+	"""One of the writing helpers a procurement screen uses (OPERATIONS): sending a document by
+	email with its print attached, recorded in its timeline as the sender."""
+	_only_procurement()
+	if not _is_staff():
+		frappe.throw(_("{0} is for the procurement roles.").format(method), frappe.PermissionError)
+	values = _json(args, {}) or {}
+	if values.get("doctype") and values.get("doctype") not in DOCTYPES:
+		frappe.throw(_("{0} is not part of Procurement.").format(values.get("doctype")), frappe.PermissionError)
+	if values.get("doctype") and values.get("name"):
+		frappe.get_doc(values["doctype"], values["name"]).check_permission("email")
+	return _common.call_allowed(method, values, OPERATIONS, _("{0} is not available from Procurement."))
+
+
+@frappe.whitelist(methods=["POST"])
 def act_many(items, transition):
 	"""The same workflow step on several documents at once (the approvals inbox's bulk Approve).
 
@@ -919,6 +940,14 @@ def flow(doctype, name):
 		for r in rows:
 			documents.append({"doctype": dt, **r, "current": dt == doctype and r.name == name})
 	lines = []
+	if doctype == "Purchase Order":
+		# Delivery and billing per line: ERPNext's own received_qty and billed_amt.
+		lines = frappe.get_all("Purchase Order Item", filters={"parent": name, "parenttype": "Purchase Order"},
+		                       fields=["item_code", "item_name", "qty", "uom", "stock_qty", "received_qty", "rate", "amount", "billed_amt", "schedule_date"],
+		                       order_by="idx asc")
+		today = getdate(nowdate())
+		for l in lines:
+			l["overdue"] = bool(l.schedule_date and getdate(l.schedule_date) < today and flt(l.received_qty) < flt(l.stock_qty or l.qty))
 	if doctype == "Material Request":
 		lines = frappe.get_all("Material Request Item", filters={"parent": name, "parenttype": "Material Request"},
 		                       fields=["item_code", "item_name", "qty", "uom", "stock_qty", "ordered_qty", "received_qty", "folt_estimated_rate", "folt_estimated_amount", "schedule_date"],

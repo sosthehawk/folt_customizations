@@ -32,6 +32,8 @@ AUDITOR = "ed.test@folt.test"  # Executive Director + Auditor
 HOP = "hop.test@folt.test"  # Head of Programs
 HOF = "hof.test@folt.test"  # Head of Finance + Accounts User + Accounts Manager
 MARK = "E2E procurement requisition"
+BIDDERS = ("E2E Bidder Alpha", "E2E Bidder Beta")
+RFQ_SUBJECT = "E2E procurement RFQ"
 
 PASS, FAIL = [], []
 
@@ -62,8 +64,26 @@ def as_user(user, fn):
 		frappe.set_user(previous)
 
 
+def _drop(doctype, name):
+	doc = frappe.get_doc(doctype, name)
+	if doc.docstatus == 1:
+		doc.flags.ignore_permissions = True
+		doc.cancel()
+	frappe.delete_doc(doctype, name, force=True, ignore_permissions=True)
+
+
 def teardown():
 	frappe.set_user("Administrator")
+	rfqs = frappe.get_all("Request for Quotation", filters={"subject": RFQ_SUBJECT}, pluck="name")
+	for ev in frappe.get_all("Procurement Committee Evaluation", filters={"request_for_quotation": ["in", rfqs or [""]]}, pluck="name"):
+		_drop("Procurement Committee Evaluation", ev)
+	for sq in frappe.get_all("Supplier Quotation", filters={"supplier": ["in", BIDDERS]}, pluck="name"):
+		_drop("Supplier Quotation", sq)
+	for rfq in rfqs:
+		_drop("Request for Quotation", rfq)
+	for b in BIDDERS:
+		if frappe.db.exists("Supplier", b):
+			frappe.delete_doc("Supplier", b, force=True, ignore_permissions=True)
 	for name in frappe.get_all("Material Request", filters={"title": ["like", f"{MARK}%"]}, pluck="name", order_by="creation desc"):
 		doc = frappe.get_doc("Material Request", name)
 		if doc.docstatus == 1:
@@ -95,7 +115,7 @@ def run():
 	teardown()
 	try:
 		_run()
-		_requisitions()
+		_sourcing(_requisitions())
 	finally:
 		teardown()
 	print(f"\n  {len(PASS)} passed, {len(FAIL)} failed")
@@ -261,6 +281,7 @@ def _requisitions():
 		expect_throw("another employee cannot open somebody else's requisition", lambda: as_user(other, lambda: pp.record("Material Request", name)), frappe.PermissionError)
 	else:
 		print("  SKIP  another employee cannot open somebody else's requisition -- no second Employee-only test login")
+	return name
 
 
 def _other_employee():
@@ -269,3 +290,60 @@ def _other_employee():
 		if user != REQUESTER and not set(frappe.get_roles(user)) & staff:
 			return user
 	return None
+
+
+def _sourcing(mr):
+	print("\n--- an RFQ from the requisition ---")
+	from frappe.utils import add_to_date, now_datetime
+
+	group = frappe.db.get_value("Supplier Group", {"is_group": 0}, "name")
+	for b in BIDDERS:
+		if not frappe.db.exists("Supplier", b):
+			frappe.get_doc({"doctype": "Supplier", "supplier_name": b, "supplier_group": group, "country": "Kenya"}).insert(ignore_permissions=True)
+	expect_throw("a requester cannot use the buyer's makers",
+	             lambda: as_user(REQUESTER, lambda: pp.lookup("erpnext.stock.doctype.material_request.material_request.make_request_for_quotation", {"source_name": mr})), frappe.PermissionError)
+	made = as_user(BUYER, lambda: pp.lookup("erpnext.stock.doctype.material_request.material_request.make_request_for_quotation", {"source_name": mr}))
+	check("ERPNext makes the RFQ from the approved requisition, unsaved", not made.get("name") or str(made.get("name")).startswith("new-") or made.get("__islocal"), made.get("name"))
+	check("the RFQ's lines name the requisition", made["items"][0]["material_request"] == mr)
+	deadline = str(add_to_date(now_datetime(), days=3))
+	rfq_doc = {k: v for k, v in made.items() if k not in ("name", "__islocal", "__unsaved", "docstatus", "owner", "creation", "modified")}
+	rfq_doc["items"] = [{k: v for k, v in r.items() if k not in ("name", "parent", "parenttype", "parentfield", "docstatus", "idx")} for r in made["items"]]
+	rfq_doc.update({"subject": RFQ_SUBJECT, "message_for_supplier": "Please quote.", "company": COMPANY, "transaction_date": nowdate(),
+	                "suppliers": [{"supplier": b, "send_email": 0} for b in BIDDERS]})
+	expect_throw("a deadline before the RFQ's own date is refused", lambda: as_user(BUYER, lambda: pp.save("Request for Quotation", {**rfq_doc, "folt_quotation_deadline": str(add_to_date(now_datetime(), days=-2))})))
+	rfq = as_user(BUYER, lambda: pp.save("Request for Quotation", {**rfq_doc, "folt_quotation_deadline": deadline}))["name"]
+	expect_throw("a purchase user cannot send it", lambda: as_user(BUYER, lambda: pp.act("Request for Quotation", rfq, "submit")))
+	as_user(MANAGER, lambda: pp.act("Request for Quotation", rfq, "submit"))
+	check("the purchase manager sends it", frappe.db.get_value("Request for Quotation", rfq, "docstatus") == 1)
+
+	print("\n--- bids, and comparing them ---")
+	quotes = {}
+	for bidder, rate, lead in ((BIDDERS[0], 4000, 5), (BIDDERS[1], 3500, 10)):
+		got = as_user(BUYER, lambda: pp.lookup("erpnext.buying.doctype.request_for_quotation.request_for_quotation.make_supplier_quotation_from_rfq", {"source_name": rfq, "for_supplier": bidder}))
+		bid = {k: v for k, v in got.items() if k not in ("name", "__islocal", "__unsaved", "docstatus", "owner", "creation", "modified")}
+		bid["items"] = [{**{k: v for k, v in r.items() if k not in ("name", "parent", "parenttype", "parentfield", "docstatus", "idx")}, "rate": rate, "lead_time_days": lead} for r in got["items"]]
+		bid.update({"transaction_date": nowdate(), "valid_till": add_days(nowdate(), 30)})
+		name = as_user(BUYER, lambda: pp.save("Supplier Quotation", bid))["name"]
+		as_user(BUYER, lambda: pp.act("Supplier Quotation", name, "submit"))
+		quotes[bidder] = name
+	late = {**bid, "supplier": BIDDERS[0], "transaction_date": add_days(nowdate(), 5)}
+	expect_throw("a bid dated after the deadline is refused as late", lambda: as_user(BUYER, lambda: pp.save("Supplier Quotation", late)))
+	expect_throw("a requester cannot compare bids", lambda: as_user(REQUESTER, lambda: pp.compare(rfq)), frappe.PermissionError)
+	cmp = as_user(BUYER, lambda: pp.compare(rfq))
+	check("both bids are compared", {q["name"] for q in cmp["quotations"]} == set(quotes.values()), [q["name"] for q in cmp["quotations"]])
+	check("the lowest total is the cheaper bid", cmp["lowest"]["total"] == quotes[BIDDERS[1]], cmp["lowest"])
+	line = cmp["lines"][0]["rfq_item"]
+	check("the lowest per line is marked", cmp["lowest"]["lines"][line] == quotes[BIDDERS[1]])
+	check("each bid answers every line", all(q["complete"] for q in cmp["quotations"]))
+	check("lead times are the bids' own", {q["lead_time_days"] for q in cmp["quotations"]} == {5, 10})
+	check("both invited suppliers are listed with their bid", {s["supplier"]: s["quotation"] for s in cmp["suppliers"]} == quotes)
+	check("the routes out of a bid are offered", any(h["target"] == "Procurement Committee Evaluation" and h["ready"] for h in cmp["routes"][quotes[BIDDERS[1]]]), cmp["routes"])
+	f = as_user(BUYER, lambda: pp.flow("Material Request", mr))
+	check("the requisition's chain now holds its RFQ and both bids", {"Request for Quotation", "Supplier Quotation"} <= {d["doctype"] for d in f["documents"]})
+
+	print("\n--- into the committee ---")
+	ev = as_user(BUYER, lambda: pp.handoff("Supplier Quotation", quotes[BIDDERS[1]], "Procurement Committee Evaluation"))
+	check("a committee evaluation is raised from a bid", ev["doctype"] == "Procurement Committee Evaluation" and frappe.db.exists(ev["doctype"], ev["name"]), ev)
+	expect_throw("a second evaluation for the same competition is refused", lambda: as_user(BUYER, lambda: pp.handoff("Supplier Quotation", quotes[BIDDERS[0]], "Procurement Committee Evaluation")))
+	expect_throw("a hand-off the chain does not declare is refused", lambda: as_user(BUYER, lambda: pp.handoff("Supplier Quotation", quotes[BIDDERS[0]], "Purchase Order")))
+	check("the comparison names the evaluation", as_user(BUYER, lambda: pp.compare(rfq))["evaluation"]["name"] == ev["name"])

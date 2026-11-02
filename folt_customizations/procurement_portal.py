@@ -99,7 +99,13 @@ LOOKUPS = {
 	"erpnext.controllers.accounts_controller.get_default_taxes_and_charges",
 	"erpnext.controllers.accounts_controller.get_payment_terms",
 	"folt_customizations.material_request.activity_defaults",
+	# ERPNext's own makers: an unsaved RFQ from an approved requisition, an unsaved bid from a sent
+	# RFQ for one supplier. They write nothing; the form saves what the person reviewed.
+	"erpnext.stock.doctype.material_request.material_request.make_request_for_quotation",
+	"erpnext.buying.doctype.request_for_quotation.request_for_quotation.make_supplier_quotation_from_rfq",
 }
+# What an Employee with no procurement role may look up: the requisition's own helpers.
+REQUESTER_LOOKUPS = {"folt_customizations.material_request.activity_defaults", "erpnext.stock.get_item_details.get_item_details"}
 
 # The setters each controller's own validate() runs, in its order, minus the checks.
 _PREVIEW = {
@@ -372,7 +378,11 @@ def link_search(doctype, txt="", filters=None, page_length=20):
 def lookup(method, args=None):
 	"""One of ERPNext's read-only helpers a buying form uses (LOOKUPS)."""
 	_only_procurement()
-	return _common.call_allowed(method, args, LOOKUPS, _("{0} is not available from Procurement."))
+	if not _is_staff() and method not in REQUESTER_LOOKUPS:
+		frappe.throw(_("{0} is for the procurement roles.").format(method), frappe.PermissionError)
+	out = _common.call_allowed(method, args, LOOKUPS, _("{0} is not available from Procurement."))
+	# A maker answers an unsaved Document: the form takes it as plain values, dates as strings.
+	return out.as_dict(convert_dates_to_str=True) if hasattr(out, "as_dict") else out
 
 
 # --- suppliers --------------------------------------------------------------------------------
@@ -913,4 +923,140 @@ def flow(doctype, name):
 		lines = frappe.get_all("Material Request Item", filters={"parent": name, "parenttype": "Material Request"},
 		                       fields=["item_code", "item_name", "qty", "uom", "stock_qty", "ordered_qty", "received_qty", "folt_estimated_rate", "folt_estimated_amount", "schedule_date"],
 		                       order_by="idx asc")
-	return {"documents": documents, "hidden": hidden, "lines": lines}
+	from folt_customizations import procurement_chain
+
+	doc = frappe.get_doc(doctype, name)
+	return {"documents": documents, "hidden": hidden, "lines": lines,
+	        "note": procurement_chain.route_note(doc) if doctype in procurement_chain.HANDOFFS else None,
+	        "handoffs": [_plain_handoff(h) for h in procurement_chain.handoffs_for(doc)]}
+
+
+def _plain_handoff(h):
+	return {"label": h["label"], "target": h["target"], "description": h["description"], "ready": bool(h["ready"]),
+	        "ready_at": h["ready_at"], "existing": list(h["existing"] or []),
+	        # Whether the reader may make it at all: the routes belong to different people (a buyer
+	        # raises the evaluation, the Operations Support Officer the waiver).
+	        "may_create": bool(frappe.has_permission(h["target"], "create"))}
+
+
+@frappe.whitelist(methods=["POST"])
+def handoff(doctype, name, target):
+	"""The next document on the procurement chain, made by procurement_chain's own makers -- a
+	committee evaluation or a waiver from a bid, the purchase order from an approved evaluation or
+	waiver. Only the routes procurement_chain declares; each keeps its own rules (ready state,
+	one per authority, what is copied)."""
+	from folt_customizations import procurement_chain
+
+	_doctype(doctype)
+	if not _is_staff():
+		frappe.throw(_("Only the procurement roles move a document along the chain."), frappe.PermissionError)
+	row = next((h for h in procurement_chain.HANDOFFS.get(doctype, []) if h.target == target), None)
+	if not row:
+		frappe.throw(_("{0} does not lead to a {1}.").format(_(doctype), _(target)))
+	frappe.get_doc(doctype, name).check_permission("read")
+	frappe.has_permission(target, "create", throw=True)
+	result = getattr(procurement_chain, row.method)(**{row.arg: name})
+	new_name = result if isinstance(result, str) else (result or {}).get("name")
+	return {"doctype": target, "name": new_name}
+
+
+# --- comparing the bids against one RFQ --------------------------------------------------------
+
+
+@frappe.whitelist()
+def compare(name):
+	"""The bids against one RFQ side by side: per line the unit price and lead time each supplier
+	quoted, per bid its totals, taxes, validity, payment terms and how much of the RFQ it answers,
+	per supplier its invitation, qualification and scorecard. Lowest figures are marked among the
+	submitted bids, in company currency. Which bid wins is the committee's or the waiver's
+	decision, never this one's: the existing evaluation and waivers are named, not made."""
+	_doctype("Request for Quotation")
+	if not _is_staff():
+		frappe.throw(_("Comparing bids is for the procurement roles."), frappe.PermissionError)
+	rfq = frappe.get_doc("Request for Quotation", name)
+	rfq.check_permission("read")
+	deadline = rfq.get("folt_quotation_deadline")
+	from frappe.utils import get_datetime, now_datetime
+
+	lines = [{"rfq_item": r.name, "item_code": r.item_code, "item_name": r.item_name, "qty": flt(r.qty), "uom": r.uom,
+	          "schedule_date": str(r.schedule_date) if r.schedule_date else None} for r in rfq.items]
+	by_code = {}
+	for l in lines:
+		by_code.setdefault(l["item_code"], l["rfq_item"])
+
+	sq_names = frappe.get_all("Supplier Quotation Item", filters={"request_for_quotation": name, "parenttype": "Supplier Quotation"}, pluck="parent", distinct=True)
+	quotations = []
+	if sq_names and _may("Supplier Quotation"):
+		heads = frappe.get_list("Supplier Quotation", filters={"name": ["in", sq_names], "docstatus": ["<", 2]},
+		                        fields=["name", "supplier", "supplier_name", "docstatus", "status", "transaction_date", "valid_till", "currency",
+		                                "net_total", "total_taxes_and_charges", "grand_total", "base_grand_total", "base_net_total", "payment_terms_template", "quotation_number"],
+		                        order_by="base_grand_total asc")
+		items = frappe.get_all("Supplier Quotation Item", filters={"parent": ["in", [h.name for h in heads] or [""]]},
+		                       fields=["parent", "request_for_quotation_item", "item_code", "rate", "base_rate", "amount", "lead_time_days", "expected_delivery_date", "description"])
+		per = {}
+		for it in items:
+			key = it.request_for_quotation_item or by_code.get(it.item_code)
+			if key:
+				per.setdefault(it.parent, {})[key] = {"rate": flt(it.rate), "base_rate": flt(it.base_rate), "amount": flt(it.amount),
+				                                      "lead_time_days": it.lead_time_days, "expected_delivery_date": str(it.expected_delivery_date) if it.expected_delivery_date else None}
+		for h in heads:
+			got = per.get(h.name, {})
+			quoted = sum(1 for l in lines if l["rfq_item"] in got and got[l["rfq_item"]]["rate"] > 0)
+			leads = [v["lead_time_days"] for v in got.values() if v.get("lead_time_days")]
+			quotations.append({**{k: (str(v) if k in ("transaction_date", "valid_till") and v else v) for k, v in h.items()},
+			                   "lines": got, "quoted": quoted, "complete": quoted == len(lines),
+			                   "lead_time_days": max(leads) if leads else None,
+			                   "late": bool(deadline and h.transaction_date and getdate(h.transaction_date) > get_datetime(deadline).date()),
+			                   "expired": bool(h.valid_till and getdate(h.valid_till) < getdate(nowdate()))})
+
+	submitted = [q for q in quotations if q["docstatus"] == 1]
+	lowest = {"total": min(submitted, key=lambda q: flt(q["base_grand_total"]))["name"] if submitted else None, "lines": {}}
+	for l in lines:
+		priced = [(q["lines"][l["rfq_item"]]["base_rate"], q["name"]) for q in submitted if l["rfq_item"] in q["lines"] and q["lines"][l["rfq_item"]]["rate"] > 0]
+		lowest["lines"][l["rfq_item"]] = min(priced)[1] if priced else None
+
+	invited = []
+	scores = {}
+	if _may("Supplier Scorecard"):
+		scores = {r.name: r for r in frappe.get_list("Supplier Scorecard", filters={"name": ["in", [r.supplier for r in rfq.suppliers] or [""]]}, fields=["name", "supplier_score", "status"])}
+	for r in rfq.suppliers:
+		sup = frappe.db.get_value("Supplier", r.supplier, ["supplier_name", "folt_qualified_until", "disabled", "on_hold"], as_dict=True) or {}
+		sc = scores.get(r.supplier)
+		invited.append({"supplier": r.supplier, "supplier_name": sup.get("supplier_name") or r.supplier_name, "email_id": r.email_id,
+		                "send_email": cint(r.send_email), "email_sent": cint(r.email_sent), "quote_status": r.quote_status,
+		                "qualified_until": str(sup.get("folt_qualified_until")) if sup.get("folt_qualified_until") else None,
+		                "qualified": (getdate(sup["folt_qualified_until"]) >= getdate(nowdate())) if sup.get("folt_qualified_until") else None,
+		                "blocked": bool(sup.get("on_hold") or sup.get("disabled")),
+		                "score": flt(sc.supplier_score) if sc else None, "standing": sc.status if sc else None,
+		                "quotation": next((q["name"] for q in quotations if q["supplier"] == r.supplier), None)})
+
+	evaluation = None
+	if _may("Procurement Committee Evaluation"):
+		ev = frappe.get_list("Procurement Committee Evaluation", filters={"request_for_quotation": name, "docstatus": ["<", 2]},
+		                     fields=["name", "workflow_state", "recommended_supplier", "recommended_supplier_quotation"], limit_page_length=1)
+		evaluation = ev[0] if ev else None
+	waivers = []
+	if _may("Derogation Waiver Request") and quotations:
+		waivers = frappe.get_list("Derogation Waiver Request", filters={"supplier_quotation": ["in", [q["name"] for q in quotations]]},
+		                          fields=["name", "supplier_quotation", "supplier", "workflow_state"])
+
+	from folt_customizations import procurement_chain
+
+	routes = {}
+	for q in submitted:
+		routes[q["name"]] = [_plain_handoff(h) for h in procurement_chain.handoffs_for(frappe.get_doc("Supplier Quotation", q["name"]))]
+
+	return {
+		"rfq": {"name": rfq.name, "docstatus": rfq.docstatus, "status": rfq.status, "transaction_date": str(rfq.transaction_date),
+		        "schedule_date": str(rfq.schedule_date) if rfq.schedule_date else None, "deadline": str(deadline) if deadline else None,
+		        "deadline_passed": bool(deadline and now_datetime() > get_datetime(deadline)), "company": rfq.company,
+		        "currency": frappe.get_cached_value("Company", rfq.company, "default_currency")},
+		"lines": lines,
+		"suppliers": invited,
+		"quotations": quotations,
+		"lowest": lowest,
+		"evaluation": evaluation,
+		"waivers": waivers,
+		"routes": routes,
+	}
+

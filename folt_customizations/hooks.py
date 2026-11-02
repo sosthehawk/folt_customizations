@@ -325,7 +325,12 @@ doc_events = {
     # it runs validate(), so a cancelled quotation left in the grid would freeze the evaluation
     # outright -- see procurement.withdraw_cancelled_quotation.
     "Supplier Quotation": {
+        "validate": "folt_customizations.sourcing.validate_quotation",
         "on_cancel": "folt_customizations.procurement.withdraw_cancelled_quotation",
+    },
+    # An RFQ's quotation deadline, and the bids dated after it (sourcing.py).
+    "Request for Quotation": {
+        "validate": "folt_customizations.sourcing.validate_rfq",
     },
     # Notify the role that can make the next move whenever a document enters a state that
     # waits on somebody. Frappe writes one Workflow Action per transition, so hooking its

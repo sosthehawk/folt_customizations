@@ -29,6 +29,9 @@ MANAGER = "procmanager.test@folt.test"  # Purchase Manager
 FIN_MANAGER = "finmanager.test@folt.test"  # Finance Manager + Accounts User + Accounts Manager
 FIN_OFFICER = "finofficer.test@folt.test"  # Finance Officer + Accounts User
 AUDITOR = "ed.test@folt.test"  # Executive Director + Auditor
+HOP = "hop.test@folt.test"  # Head of Programs
+HOF = "hof.test@folt.test"  # Head of Finance + Accounts User + Accounts Manager
+MARK = "E2E procurement requisition"
 
 PASS, FAIL = [], []
 
@@ -61,6 +64,12 @@ def as_user(user, fn):
 
 def teardown():
 	frappe.set_user("Administrator")
+	for name in frappe.get_all("Material Request", filters={"title": ["like", f"{MARK}%"]}, pluck="name", order_by="creation desc"):
+		doc = frappe.get_doc("Material Request", name)
+		if doc.docstatus == 1:
+			doc.flags.ignore_permissions = True
+			doc.cancel()
+		frappe.delete_doc("Material Request", name, force=True, ignore_permissions=True)
 	for ba in frappe.get_all("Bank Account", filters={"party_type": "Supplier", "party": SUPPLIER}, pluck="name"):
 		frappe.delete_doc("Bank Account", ba, force=True, ignore_permissions=True)
 	for dt in ("Contact", "Address"):
@@ -86,6 +95,7 @@ def run():
 	teardown()
 	try:
 		_run()
+		_requisitions()
 	finally:
 		teardown()
 	print(f"\n  {len(PASS)} passed, {len(FAIL)} failed")
@@ -184,3 +194,78 @@ def _run():
 	audit = as_user(AUDITOR, lambda: pp.dashboard(COMPANY, start, end))
 	check("the auditor reads the dashboard", audit["counts"] is not None)
 	expect_throw("the auditor cannot register a supplier", lambda: as_user(AUDITOR, lambda: pp.save("Supplier", {**values, "supplier_name": SUPPLIER + " 2"})))
+
+
+def _approved_activity(approved=True):
+	return frappe.db.get_value("Activity Requisition", {"docstatus": 1 if approved else 0, "company": COMPANY}, "name")
+
+
+def _requisitions():
+	print("\n--- a purchase requisition ---")
+	item = frappe.db.get_value("Item", {"is_stock_item": 0, "disabled": 0}, "name")
+	activity = _approved_activity()
+	draft = {
+		"title": f"{MARK} 1", "company": COMPANY, "transaction_date": nowdate(), "schedule_date": add_days(nowdate(), 14),
+		"folt_priority": "High", "folt_activity_requisition": activity,
+		"items": [{"item_code": item, "qty": 2, "folt_estimated_rate": 5000, "schedule_date": add_days(nowdate(), 14), "uom": frappe.db.get_value("Item", item, "stock_uom")}],
+	}
+	unapproved = _approved_activity(False)
+	if unapproved:
+		expect_throw("a requisition against an unapproved activity is refused", lambda: as_user(REQUESTER, lambda: pp.save("Material Request", {**draft, "folt_activity_requisition": unapproved})))
+	name = as_user(REQUESTER, lambda: pp.save("Material Request", draft))["name"]
+	mr = frappe.get_doc("Material Request", name)
+	check("an employee raises a requisition, purpose Purchase", mr.material_request_type == "Purchase" and mr.owner == REQUESTER)
+	check("it starts in Draft", mr.workflow_state == "Draft", mr.workflow_state)
+	templated = as_user(REQUESTER, lambda: pp.save("Material Request", {**draft, "title": "{material_request_type}"}))["name"]
+	t = frappe.db.get_value("Material Request", templated, "title")
+	check("a templated title becomes what is being bought", "{" not in t and t, t)
+	frappe.db.set_value("Material Request", templated, "title", f"{MARK} templated")
+	check("the requester's department is filled", mr.folt_department == frappe.db.get_value("Employee", {"user_id": REQUESTER}, "department"), mr.folt_department)
+	project = frappe.db.get_value("Activity Requisition", activity, "project")
+	check("the activity's project fills the line", not project or mr.items[0].project == project, mr.items[0].project)
+	check("the estimated total is the lines' qty x the requester's estimate", flt(mr.folt_estimated_total) == 10000 and flt(mr.items[0].folt_estimated_amount) == 10000, mr.folt_estimated_total)
+
+	print("\n--- its approval ---")
+	expect_throw("it does not go for review without a justification", lambda: as_user(REQUESTER, lambda: pp.act("Material Request", name, "transition", "Submit for Review")))
+	as_user(REQUESTER, lambda: pp.save("Material Request", {"folt_justification": "Venue sound for the Kalokol forum.", "modified": str(frappe.db.get_value("Material Request", name, "modified"))}, name))
+	expect_throw("the requester cannot submit it around the workflow", lambda: as_user(REQUESTER, lambda: pp.act("Material Request", name, "submit")), frappe.PermissionError)
+	as_user(REQUESTER, lambda: pp.act("Material Request", name, "transition", "Submit for Review"))
+	check("submitted for review, it waits on the Head of Programs", frappe.db.get_value("Material Request", name, "workflow_state") == "Pending Head of Programs")
+	expect_throw("the requester cannot approve it", lambda: as_user(REQUESTER, lambda: pp.act("Material Request", name, "transition", "Approve")))
+	bulk = as_user(HOP, lambda: pp.act_many([{"doctype": "Material Request", "name": name}], "Return for Revision"))
+	check("a return for revision is never done in bulk", not bulk["done"] and bulk["failed"], bulk["failed"])
+	bulk = as_user(HOP, lambda: pp.act_many([{"doctype": "Material Request", "name": name}, {"doctype": "Journal Entry", "name": "x"}], "Approve"))
+	check("the Head of Programs approves it from the inbox in bulk", bulk["done"] == [{"doctype": "Material Request", "name": name}] and len(bulk["failed"]) == 1, bulk)
+	check("it now waits on the Head of Finance", frappe.db.get_value("Material Request", name, "workflow_state") == "Pending Head of Finance")
+	expect_throw("returning it needs a reason", lambda: as_user(HOF, lambda: pp.act("Material Request", name, "transition", "Return for Revision")))
+	as_user(HOF, lambda: pp.act("Material Request", name, "transition", "Return for Revision", "Split the PA hire from the generator."))
+	back = frappe.get_doc("Material Request", name)
+	check("returned, it is a Draft again with the reason on it", back.workflow_state == "Draft" and "generator" in (back.folt_rejection_reason or ""), back.folt_rejection_reason)
+	as_user(REQUESTER, lambda: pp.act("Material Request", name, "transition", "Submit for Review"))
+	check("resubmitted, last time's reason is cleared", not frappe.db.get_value("Material Request", name, "folt_rejection_reason"))
+	as_user(HOP, lambda: pp.act("Material Request", name, "transition", "Approve"))
+	as_user(HOF, lambda: pp.act("Material Request", name, "transition", "Approve"))
+	done = frappe.get_doc("Material Request", name)
+	check("the Head of Finance's approval submits it", done.docstatus == 1 and done.workflow_state == "Approved", f"{done.docstatus} {done.workflow_state}")
+	check("ERPNext now has it pending an order", done.status == "Pending", done.status)
+	expect_throw("an approved requisition cannot be edited", lambda: as_user(REQUESTER, lambda: pp.save("Material Request", {"folt_justification": "changed"}, name)))
+
+	print("\n--- what it has become ---")
+	f = as_user(REQUESTER, lambda: pp.flow("Material Request", name))
+	check("its flow names itself and its lines' ordered and received quantities", any(d["current"] for d in f["documents"]) and f["lines"] and f["lines"][0]["ordered_qty"] == 0, f["lines"])
+	ctx = as_user(REQUESTER, pp.context)
+	check("the context names the requisition workflow", ctx["workflows"].get("Material Request") == "FoLT Purchase Requisition Approval")
+	check("the requester's estimate survives the approvers' saves", flt(done.items[0].folt_estimated_rate) == 5000 and flt(done.folt_estimated_total) == 10000, f"{done.items[0].folt_estimated_rate} {done.folt_estimated_total}")
+	other = _other_employee()
+	if other:
+		expect_throw("another employee cannot open somebody else's requisition", lambda: as_user(other, lambda: pp.record("Material Request", name)), frappe.PermissionError)
+	else:
+		print("  SKIP  another employee cannot open somebody else's requisition -- no second Employee-only test login")
+
+
+def _other_employee():
+	staff = set(pp.STAFF)
+	for user in frappe.get_all("Has Role", filters={"role": "Employee", "parenttype": "User", "parent": ["like", "%.test@folt.test"]}, pluck="parent"):
+		if user != REQUESTER and not set(frappe.get_roles(user)) & staff:
+			return user
+	return None

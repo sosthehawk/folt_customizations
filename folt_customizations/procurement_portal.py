@@ -98,6 +98,7 @@ LOOKUPS = {
 	"erpnext.controllers.accounts_controller.get_taxes_and_charges",
 	"erpnext.controllers.accounts_controller.get_default_taxes_and_charges",
 	"erpnext.controllers.accounts_controller.get_payment_terms",
+	"folt_customizations.material_request.activity_defaults",
 }
 
 # The setters each controller's own validate() runs, in its order, minus the checks.
@@ -186,6 +187,7 @@ def context():
 	employee = frappe.db.get_value("Employee", {"user_id": frappe.session.user, "status": "Active"}, ["name", "employee_name", "department", "company"], as_dict=True)
 	roles = _roles()
 	return {
+		"user": frappe.session.user,
 		"companies": companies,
 		"default_company": default_company,
 		"capabilities": capabilities,
@@ -325,7 +327,10 @@ def _requester_defaults(values):
 def preview(doctype, doc):
 	"""ERPNext's own defaults and totals for an unsaved draft. Writes nothing."""
 	_writable(doctype)
-	return _common.preview_doc(doctype, doc, _PREVIEW.get(doctype, ("set_missing_values",)))
+	after = None
+	if doctype == "Material Request":
+		from folt_customizations.material_request import preview as after
+	return _common.preview_doc(doctype, doc, _PREVIEW.get(doctype, ("set_missing_values",)), after)
 
 
 @frappe.whitelist(methods=["POST"])
@@ -723,7 +728,7 @@ def _supplier_performance(po_filters, from_date, to_date):
 
 
 _SUMMARY_FIELDS = {
-	"Material Request": ["title", "folt_department as kind", "transaction_date as posting_date"],
+	"Material Request": ["title", "folt_estimated_total as amount", "folt_department as kind", "transaction_date as posting_date"],
 	"Request for Quotation": ["transaction_date as posting_date"],
 	"Supplier Quotation": ["supplier_name as title", "grand_total as amount", "transaction_date as posting_date"],
 	"Procurement Committee Evaluation": ["recommended_supplier as title", "request_for_quotation as kind"],
@@ -763,3 +768,149 @@ def approvals():
 	"""What waits on this person in the procurement workflows, and what they have sent and is waiting."""
 	_only_procurement()
 	return _common.approvals_view([dt for dt in CHAIN if _is_staff() or dt in REQUESTER_DOCTYPES], _summarise)
+
+
+@frappe.whitelist(methods=["POST"])
+def act_many(items, transition):
+	"""The same workflow step on several documents at once (the approvals inbox's bulk Approve).
+
+	Each document moves through apply_workflow as the person, exactly as one at a time, in its own
+	savepoint: one that ERPNext refuses is reported and the others still move. A turn-down is never
+	done in bulk -- each needs the reason for that document (workflow_access).
+	"""
+	from frappe.model.workflow import apply_workflow, get_workflow
+
+	from folt_customizations.workflow_access import is_turn_down
+
+	_only_procurement()
+	rows = _json(items, []) or []
+	if not isinstance(rows, list) or not rows or len(rows) > 50:
+		frappe.throw(_("Choose between 1 and 50 documents."))
+	done, failed = [], []
+	for row in rows:
+		doctype, name = (row or {}).get("doctype"), (row or {}).get("name")
+		if doctype not in CHAIN:
+			failed.append({"doctype": doctype, "name": name, "message": _("Not a procurement workflow document.")})
+			continue
+		_doctype(doctype)
+		frappe.db.savepoint("act_many")
+		try:
+			doc = frappe.get_doc(doctype, name)
+			wf = get_workflow(doctype)
+			move = next((t for t in wf.transitions if t.state == doc.get(wf.workflow_state_field) and t.action == transition), None)
+			if move and is_turn_down(wf, move.state, move.next_state):
+				frappe.throw(_("{0} needs a reason for this document. Open it to do it.").format(transition))
+			apply_workflow(doc, transition)
+			done.append({"doctype": doctype, "name": name})
+		except Exception as e:  # noqa: BLE001 -- reported per document; the rest still move
+			frappe.db.rollback(save_point="act_many")
+			frappe.clear_last_message()
+			failed.append({"doctype": doctype, "name": name, "message": frappe.utils.strip_html(str(e)) or type(e).__name__})
+	return {"done": done, "failed": failed}
+
+
+# --- the chain a document is part of ----------------------------------------------------------
+
+# (child doctype, link field, the doctype it names, the parent doctype): one line naming another
+# document. Read in both directions, they join the buying chain from wherever one stands on it.
+_LINKS = (
+	("Request for Quotation Item", "material_request", "Material Request", "Request for Quotation"),
+	("Supplier Quotation Item", "material_request", "Material Request", "Supplier Quotation"),
+	("Supplier Quotation Item", "request_for_quotation", "Request for Quotation", "Supplier Quotation"),
+	("Purchase Order Item", "material_request", "Material Request", "Purchase Order"),
+	("Purchase Order Item", "supplier_quotation", "Supplier Quotation", "Purchase Order"),
+	("Purchase Receipt Item", "purchase_order", "Purchase Order", "Purchase Receipt"),
+	("Purchase Receipt Item", "material_request", "Material Request", "Purchase Receipt"),
+	("Purchase Invoice Item", "purchase_order", "Purchase Order", "Purchase Invoice"),
+	("Purchase Invoice Item", "purchase_receipt", "Purchase Receipt", "Purchase Invoice"),
+	("Payment Entry Reference", "reference_name", "Purchase Invoice", "Payment Entry"),
+)
+# Parent-level links: (doctype, field, the doctype it names).
+_HEAD_LINKS = (
+	("Procurement Committee Evaluation", "request_for_quotation", "Request for Quotation"),
+	("Derogation Waiver Request", "supplier_quotation", "Supplier Quotation"),
+	("Purchase Order", "folt_committee_evaluation", "Procurement Committee Evaluation"),
+	("Purchase Order", "folt_waiver_request", "Derogation Waiver Request"),
+)
+_FLOW_ORDER = ("Material Request", "Request for Quotation", "Supplier Quotation", "Procurement Committee Evaluation",
+               "Derogation Waiver Request", "Purchase Order", "Purchase Receipt", "Purchase Invoice", "Payment Entry")
+_FLOW_FIELDS = {
+	"Material Request": ["transaction_date as date", "folt_estimated_total as amount"],
+	"Request for Quotation": ["transaction_date as date"],
+	"Supplier Quotation": ["transaction_date as date", "supplier_name as party", "grand_total as amount"],
+	"Procurement Committee Evaluation": ["recommended_supplier as party"],
+	"Derogation Waiver Request": ["supplier as party", "estimated_value as amount"],
+	"Purchase Order": ["transaction_date as date", "supplier_name as party", "grand_total as amount"],
+	"Purchase Receipt": ["posting_date as date", "supplier_name as party", "grand_total as amount"],
+	"Purchase Invoice": ["posting_date as date", "supplier_name as party", "grand_total as amount"],
+	"Payment Entry": ["posting_date as date", "party_name as party", "paid_amount as amount"],
+}
+_FLOW_CAP = 50
+
+
+def _chain_of(doctype, name):
+	"""Every document joined to this one along the buying chain, by the lines and links that name
+	each other. Names only, gathered without permission checks; the caller lists them as the
+	reader may see them."""
+	found = {dt: set() for dt in _FLOW_ORDER}
+	found[doctype].add(name)
+	frontier = [(doctype, name)]
+	while frontier:
+		dt, dn = frontier.pop()
+		new = []
+		for child, field, target, parent in _LINKS:
+			if dt == target:
+				extra = {"reference_doctype": "Purchase Invoice"} if child == "Payment Entry Reference" else {}
+				for p in frappe.get_all(child, filters={field: dn, "parenttype": parent, **extra}, pluck="parent", distinct=True):
+					new.append((parent, p))
+			elif dt == parent:
+				for v in frappe.get_all(child, filters={"parent": dn, "parenttype": parent, field: ["is", "set"]}, pluck=field, distinct=True):
+					new.append((target, v))
+		for owner, field, target in _HEAD_LINKS:
+			if dt == target:
+				for p in frappe.get_all(owner, filters={field: dn}, pluck="name"):
+					new.append((owner, p))
+			elif dt == owner and frappe.get_meta(owner).has_field(field):
+				v = frappe.db.get_value(owner, dn, field)
+				if v:
+					new.append((target, v))
+		for ndt, ndn in new:
+			if ndt in found and ndn not in found[ndt] and len(found[ndt]) < _FLOW_CAP:
+				found[ndt].add(ndn)
+				frontier.append((ndt, ndn))
+	return found
+
+
+@frappe.whitelist()
+def flow(doctype, name):
+	"""The documents this one is part of a chain with -- its requisition, RFQs, quotations, award,
+	orders, receipts, invoices and payments -- each as the reader may see it; and for a
+	requisition, its lines with what has been ordered and received against each (ERPNext's own
+	ordered_qty and received_qty)."""
+	_doctype(doctype)
+	if doctype not in _FLOW_ORDER:
+		frappe.throw(_("{0} is not on the buying chain.").format(doctype))
+	frappe.get_doc(doctype, name).check_permission("read")
+	found = _chain_of(doctype, name)
+	documents = []
+	hidden = 0
+	for dt in _FLOW_ORDER:
+		names = found[dt]
+		if not names:
+			continue
+		if not _may(dt):
+			hidden += len(names)
+			continue
+		meta = frappe.get_meta(dt)
+		fields = ["name", "docstatus"] + [f for f in ("status", "workflow_state") if meta.has_field(f)]
+		fields += [f for f in _FLOW_FIELDS.get(dt, []) if meta.has_field(f.split(" ")[0])]
+		rows = frappe.get_list(dt, filters={"name": ["in", list(names)]}, fields=fields, order_by="creation asc")
+		hidden += len(names) - len(rows)
+		for r in rows:
+			documents.append({"doctype": dt, **r, "current": dt == doctype and r.name == name})
+	lines = []
+	if doctype == "Material Request":
+		lines = frappe.get_all("Material Request Item", filters={"parent": name, "parenttype": "Material Request"},
+		                       fields=["item_code", "item_name", "qty", "uom", "stock_qty", "ordered_qty", "received_qty", "folt_estimated_rate", "folt_estimated_amount", "schedule_date"],
+		                       order_by="idx asc")
+	return {"documents": documents, "hidden": hidden, "lines": lines}

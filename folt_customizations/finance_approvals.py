@@ -1,4 +1,5 @@
-"""Approval before posting: Journal Entry, Payment Entry and Purchase Invoice.
+"""Approval before posting: Journal Entry, Payment Entry and Purchase Invoice -- and, since
+ADR-008, the purchase requisition (Material Request), which goes forward the same way.
 
 Each of the three carries a workflow (fixtures: FoLT Journal Entry / Payment Entry / Purchase
 Invoice Approval). The preparer -- Accounts User -- submits it for approval, an Accounts Manager
@@ -31,7 +32,9 @@ from frappe.model.workflow import get_workflow, get_workflow_name
 
 from folt_customizations.workflow_access import _is_a_person_acting
 
-GOVERNED = ("Journal Entry", "Payment Entry", "Purchase Invoice")
+GOVERNED = ("Journal Entry", "Payment Entry", "Purchase Invoice", "Material Request")
+# Governed documents that are not ledger vouchers: refused in the same words, minus the ledger.
+_NOT_LEDGER = {"Material Request"}
 
 # The whitelisted methods that save or submit whatever document the caller hands them.
 _GENERIC_WRITES = {
@@ -80,7 +83,9 @@ def refuse_direct_submit(doc, method=None):
 
 	frappe.throw(
 		(
-			_("{0} {1} posts to the ledger only when it is approved. Submit it for approval instead.")
+			_("{0} {1} goes forward only when it is approved. Submit it for approval instead.")
+			if doc.docstatus == 1 and doc.doctype in _NOT_LEDGER
+			else _("{0} {1} posts to the ledger only when it is approved. Submit it for approval instead.")
 			if doc.docstatus == 1
 			else _("{0} {1} is reversed only through its approval workflow, by whoever may cancel it there.")
 		).format(_(doc.doctype), frappe.bold(doc.name or _("(new)"))),

@@ -315,6 +315,11 @@ doc_events = {
     "Purchase Order": {
         "validate": "folt_customizations.purchase_order.validate",
     },
+    # A purchase requisition (ADR-008): the activity it is for fills what it can, the lines'
+    # estimates add up to its estimated total, and it says why before it goes for review.
+    "Material Request": {
+        "validate": "folt_customizations.material_request.validate",
+    },
     # A Procurement Committee Evaluation scores the bids received against one RFQ, and a bid
     # can be withdrawn while the committee is still scoring it. Frappe validates links before
     # it runs validate(), so a cancelled quotation left in the grid would freeze the evaluation
@@ -463,6 +468,7 @@ FOLT_WORKFLOWS = [
     "FoLT Journal Entry Approval",
     "FoLT Payment Entry Approval",
     "FoLT Purchase Invoice Approval",
+    "FoLT Purchase Requisition Approval",
 ]
 
 # Workflow State / Action masters referenced by the workflows above. ERPNext 16 validates
@@ -490,6 +496,8 @@ FOLT_WORKFLOW_ACTIONS = [
     "Mark Paid", "Mark Partly Paid", "Raise Dispute", "Resolve Dispute",
     "Record Disbursement", "Mark Accounted", "Flag Overdue", "Close Float", "Mark Settled",
     "Cancel",
+    # The purchase requisition's approvers send it back to its requester (ADR-008).
+    "Return for Revision",
 ]
 
 # Kenyan statutory payroll salary components (NSSF, SHIF, Housing Levy, PAYE + helpers).

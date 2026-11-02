@@ -211,7 +211,10 @@ MASTER_DATA_PERMISSIONS = {
 # if_owner rows) and picks the items they need (`select` on Item). Everything after the request
 # -- approval, sourcing, ordering -- belongs to the roles ERPNext and FoLT's workflows already name.
 PROCUREMENT_PERMISSIONS = {
-	"Item": {"Employee": ("select",)},
+	# Read, not select: ERPNext's get_item_details checks read on the Item (get_item_details.py:87)
+	# on every save of a requisition, so select alone fails the requester's own draft. The item
+	# master names what FoLT buys; nothing on it is confidential.
+	"Item": {role: ("read",) for role in ("Employee", "Head of Programs", "Head of Finance")},
 	# Supplier evaluation is ERPNext's Supplier Scorecard, which ships for the System Manager
 	# alone. The people who keep suppliers keep their scorecards; buyers read them.
 	"Supplier Scorecard": {
@@ -224,6 +227,13 @@ PROCUREMENT_PERMISSIONS = {
 	# ERPNext lets the Purchase User and the stores read goods receipts but not the Purchase
 	# Manager, who answers for whether what was ordered arrived.
 	"Purchase Receipt": {"Purchase Manager": ("read",)},
+	# The requisition's approvers (FoLT Purchase Requisition Approval). Write, because a turn-down
+	# parks its reason on the document first (workflow_access.hold_rejection_reason); submit for
+	# the Head of Finance, whose Approve is what submits it.
+	"Material Request": {
+		"Head of Programs": ("read", "write"),
+		"Head of Finance": ("read", "write", "submit"),
+	},
 }
 
 # Rows that hold only on the documents the person created themselves (Custom DocPerm if_owner).

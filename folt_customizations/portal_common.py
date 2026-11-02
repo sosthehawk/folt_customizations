@@ -263,7 +263,7 @@ def template_taxes(doc, m):
 		doc.append("taxes", row)
 
 
-def preview_doc(doctype, doc, methods):
+def preview_doc(doctype, doc, methods, after=None):
 	"""ERPNext's own defaults and totals for an unsaved draft. Writes nothing.
 
 	Runs the controller's own setters on an unsaved copy, so a total in the form is ERPNext's
@@ -284,6 +284,11 @@ def preview_doc(doctype, doc, methods):
 		except Exception:  # noqa: BLE001
 			# A half-filled form is normal while somebody types. The preview is advice; the save
 			# validates for real and says what is missing.
+			frappe.clear_last_message()
+	if after:
+		try:
+			after(draft)
+		except Exception:  # noqa: BLE001 -- advice, as above
 			frappe.clear_last_message()
 	return draft.as_dict(convert_dates_to_str=True)
 

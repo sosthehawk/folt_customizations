@@ -102,6 +102,7 @@ def run():
 		_run_phase2()
 		_run_phase3()
 		_run_phase4()
+		_run_phase5()
 		check("the run committed nothing (delete_session's commit was held back)", len(commits) <= 1, f"{len(commits)} commit attempts")
 	finally:
 		frappe.db.commit = real_commit
@@ -494,3 +495,68 @@ def _run_phase4():
 	check("a gateway that does not answer comes back as a refusal", refused(r, "send_failed"), r)
 	check("a bad number refused", refused(ap.send_test_sms("call me"), "invalid_setting"))
 	check("phase 4 left no messages", not frappe.local.message_log, frappe.local.message_log)
+
+
+def _run_phase5():
+	print("\n— integrations")
+	check("integrations are a System Manager's", thrown(lambda: as_user(USER_ADMIN, ap.integrations)) == "PermissionError")
+	r = ap.save_webhook(
+		{"webhook_doctype": "Note", "webhook_docevent": "after_insert", "request_url": "https://hooks.example.invalid/folt", "request_method": "POST", "request_structure": "JSON", "webhook_json": "{}", "enabled": 1, "enable_security": 1},
+		headers=[{"key": "Authorization", "value": "Bearer HOOK-E2E"}, {"key": "Content-Type", "value": "application/json"}],
+		secret="WHSEC-E2E",
+	)
+	h = r["webhooks"][-1] if r["webhooks"] else None
+	check("webhook created; secret and token write-only", h and h["secret_set"] and h["headers"][0]["value"] is None and h["headers"][1]["value"] == "application/json" and "HOOK-E2E" not in frappe.as_json(r) and "WHSEC-E2E" not in frappe.as_json(r), h)
+	r = ap.save_webhook({"enabled": 0}, h["name"], headers=[{"key": "Authorization", "value": None}, {"key": "Content-Type", "value": "application/json"}])
+	check("a null header keeps the stored token", next(x.value for x in frappe.get_doc("Webhook", h["name"]).webhook_headers if x.key == "Authorization") == "Bearer HOOK-E2E")
+	check("plain http refused", refused(ap.save_webhook({"request_url": "http://hooks.example/folt"}, h["name"]), "invalid_setting"))
+	check("unknown event refused", refused(ap.save_webhook({"webhook_docevent": "whenever"}, h["name"]), "invalid_setting"))
+	check("no secret in the audit", not frappe.db.exists("Activity Log", {"content": ["like", "%HOOK-E2E%"]}) and not frappe.db.exists("Activity Log", {"content": ["like", "%WHSEC-E2E%"]}))
+	r = ap.delete_webhook(h["name"])
+	check("webhook deleted", not any(x["name"] == h["name"] for x in r["webhooks"]))
+	email = PREFIX + "api@folt.test"
+	ap.create_user({"email": email, "first_name": "Api", "roles": ["Purchase User"], "send_welcome_email": 0})
+	k = ap.generate_api_keys(email)
+	check("API secret shown once", k.get("api_key") and k.get("api_secret"), k)
+	listed = next((x for x in ap.integrations()["api_keys"] if x["user"] == email), None)
+	check("...and only a hint listed", listed and listed["api_key_hint"] == "…" + k["api_key"][-4:] and k["api_secret"] not in frappe.as_json(ap.integrations()), listed)
+	ap.revoke_api_keys(email)
+	check("keys revoked", not frappe.db.get_value("User", email, "api_key") and not any(x["user"] == email for x in ap.integrations()["api_keys"]))
+
+	print("\n— workflows, documents, health")
+	w = ap.workflows()
+	check("workflows read with transitions and roles", w["workflows"] and all(t["role"] for wf in w["workflows"] for t in wf["transitions"]), len(w["workflows"]))
+	d = ap.documents()
+	check("file totals and retention read", "bytes" in d["private"] and d["retention"])
+	first = d["retention"][0]
+	r = ap.save_retention([{"doctype": first["doctype"], "days": first["days"] + 1}])
+	check("retention changed", next(x for x in r["retention"] if x["doctype"] == first["doctype"])["days"] == first["days"] + 1)
+	check("retention bounds", refused(ap.save_retention([{"doctype": first["doctype"], "days": 0}]), "invalid_setting"))
+	check("only logs already kept", refused(ap.save_retention([{"doctype": "User", "days": 5}]), "not_found"))
+	r = ap.update_settings({"max_file_size": 10485760, "allowed_file_extensions": "pdf\npng\njpg"})
+	check("file rules are System Settings", r.get("changed") == ["allowed_file_extensions", "max_file_size"], r)
+	check("...a System Manager's", refused(as_user(SECURITY_ADMIN, ap.update_settings, {"max_file_size": 1}), "privileged_field"))
+	h = ap.system_health()
+	check("system health reads", "versions" in h and any(v["app"] == "frappe" for v in h["versions"]) and all("\n" not in e["message"] for e in h["recent_errors"]))
+
+	print("\n— backups and the audit")
+	from folt_customizations import bff_support
+
+	real_dir = bff_support._backup_dir
+	import tempfile
+	from pathlib import Path
+
+	with tempfile.TemporaryDirectory() as tmp:
+		bff_support._backup_dir = lambda: Path(tmp)
+		try:
+			r = ap.start_backup()
+			check("a backup is queued", r.get("queued") is True, r)
+			(Path(tmp) / "20990101_000000-site-database.sql.gz").write_bytes(b"x")
+			check("not again within 30 minutes", refused(ap.start_backup(), "backup_recent"))
+		finally:
+			bff_support._backup_dir = real_dir
+	a = as_user(SECURITY_ADMIN, ap.audit_rows, "admin", None, None, None, 0, 5)
+	check("Security Administrator reads this module's own record", a["items"] and all(i["what"] for i in a["items"]), a)
+	check("...not the error log", refused(as_user(SECURITY_ADMIN, ap.audit_rows, "errors"), "privileged_field") and quiet())
+	check("bad kind refused", refused(ap.audit_rows("everything"), "invalid_setting"))
+	check("phase 5 left no messages", not frappe.local.message_log, frappe.local.message_log)

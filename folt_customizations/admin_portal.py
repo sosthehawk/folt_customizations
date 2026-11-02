@@ -1287,6 +1287,12 @@ SYSTEM_SETTINGS_FIELDS = {
 	"first_day_of_the_week": ("select", None),
 	"float_precision": ("select", None),
 	"currency_precision": ("select", None),
+	# files and uploads
+	"max_file_size": ("int", None),
+	"allowed_file_extensions": ("text", None),
+	"only_allow_system_managers_to_upload_public_files": ("bool", None),
+	"strip_exif_metadata_from_uploaded_images": ("bool", None),
+	"allow_guests_to_upload_files": ("bool", None),
 }
 
 
@@ -1347,7 +1353,7 @@ def update_settings(values, modified=None):
 
 				if value not in get_timezones()["timezones"]:
 					return _refuse("invalid_setting", _("{0} is not a time zone.").format(value))
-			if len(value) > 140:
+			if len(value) > (4000 if kind == "text" else 140):
 				return _refuse("invalid_setting", _("{0} is too long.").format(field))
 			clean[field] = value
 	if clean.get("disable_user_pass_login") and not _other_sign_in():
@@ -2162,3 +2168,388 @@ def send_test_sms(number):
 		return _refuse("send_failed", _("The gateway answered: {0}").format(text))
 	_record("test SMS sent", None, None, {}, {"to": number})
 	return {"sent_to": number}
+
+
+# =================================================================================================
+# Phase 5: integrations (webhooks, API keys, OAuth), workflows and approval rules (read-only),
+# files and log retention, system health, backups on demand, and the audit's own kinds.
+# =================================================================================================
+
+WEBHOOK_FIELDS = ("webhook_doctype", "webhook_docevent", "request_url", "request_method", "request_structure", "condition", "enabled", "enable_security", "timeout", "webhook_json")
+WEBHOOK_EVENTS = ("after_insert", "on_update", "on_submit", "on_cancel", "on_trash", "on_update_after_submit", "on_change")
+_SECRET_HEADER = ("authorization", "token", "key", "secret", "password", "auth", "signature", "cookie")
+
+
+def _secret_header(key):
+	return any(h in cstr(key).lower() for h in _SECRET_HEADER)
+
+
+def _integrations():
+	from frappe.utils.password import get_decrypted_password
+
+	hooks = []
+	for w in frappe.get_all("Webhook", fields=["name", *WEBHOOK_FIELDS, "modified"], order_by="name asc"):
+		headers = frappe.get_all("Webhook Header", filters={"parent": w.name, "parenttype": "Webhook"}, fields=["key", "value"], order_by="idx asc")
+		last = frappe.get_all("Webhook Request Log", filters={"webhook": w.name}, fields=["creation", "error"], order_by="creation desc", limit=1)
+		hooks.append(
+			{
+				"name": w.name,
+				**{f: (bool(w.get(f)) if f in ("enabled", "enable_security") else w.get(f)) for f in WEBHOOK_FIELDS},
+				"timeout": cint(w.timeout) or None,
+				"secret_set": bool(get_decrypted_password("Webhook", w.name, "webhook_secret", raise_exception=False)),
+				"headers": [{"key": h.key, "secret": _secret_header(h.key), "value": None if _secret_header(h.key) else h.value} for h in headers],
+				"last_call": cstr(last[0].creation) if last else None,
+				"last_error": (cstr(last[0].error).strip().splitlines() or [None])[-1] if last and last[0].error else None,
+				"modified": cstr(w.modified),
+			}
+		)
+	log = [
+		{"name": r.name, "at": cstr(r.creation), "webhook": r.webhook, "url": r.url, "reference": f"{r.reference_doctype} {r.reference_document}" if r.reference_doctype else None, "ok": not r.error, "error": (cstr(r.error).strip().splitlines() or [None])[-1] if r.error else None}
+		for r in frappe.get_all("Webhook Request Log", fields=["name", "creation", "webhook", "url", "reference_doctype", "reference_document", "error"], order_by="creation desc", limit=20)
+	]
+	keys = [
+		{"user": u.name, "full_name": u.full_name, "enabled": bool(u.enabled), "api_key_hint": "…" + u.api_key[-4:]}
+		for u in frappe.get_all("User", filters={"api_key": ["is", "set"], "name": ["!=", "Guest"]}, fields=["name", "full_name", "enabled", "api_key"], order_by="name asc")
+	]
+	oauth = [
+		{"name": c.name, "app_name": c.app_name, "user": c.user, "scopes": c.scopes, "redirect": c.default_redirect_uri, "skip_authorization": bool(c.skip_authorization)}
+		for c in frappe.get_all("OAuth Client", fields=["name", "app_name", "user", "scopes", "default_redirect_uri", "skip_authorization"], order_by="app_name asc")
+	]
+	requests = [
+		{"name": r.name, "at": cstr(r.creation), "service": r.integration_request_service, "status": r.status, "reference": f"{r.reference_doctype} {r.reference_docname}" if r.reference_doctype else None}
+		for r in frappe.get_all("Integration Request", fields=["name", "creation", "integration_request_service", "status", "reference_doctype", "reference_docname"], order_by="creation desc", limit=20)
+	]
+	apps = set(frappe.get_installed_apps())
+	return {
+		"webhooks": hooks,
+		"webhook_log": log,
+		"api_keys": keys,
+		"oauth_clients": oauth,
+		"integration_requests": requests,
+		"events": list(WEBHOOK_EVENTS),
+		"payments": {"installed": "payments" in apps, "mpesa": bool(frappe.db.exists("DocType", "Mpesa Settings"))},
+	}
+
+
+@frappe.whitelist(methods=["GET"])
+def integrations():
+	"""Webhooks (secret and secret-looking header values write-only), their recent calls (never
+	headers or payloads), users with API keys (a hint, never the key or secret), OAuth clients,
+	integration requests, and whether a payments app is installed."""
+	_only()
+	return _integrations()
+
+
+@frappe.whitelist(methods=["POST"])
+def save_webhook(values, name=None, headers=None, secret=None, modified=None):
+	"""Create or change a webhook. Its secret is write-only; a header whose value looks secret is too
+	(null keeps the stored value). The URL must be https (http only for localhost)."""
+	_only()
+	values = _json(values, {}) or {}
+	title = cstr(values.pop("title", "")).strip()
+	extra = sorted(set(values) - set(WEBHOOK_FIELDS))
+	if extra:
+		return _refuse("field_not_allowed", _("These cannot be set here: {0}.").format(", ".join(extra)))
+	if name:
+		if not frappe.db.exists("Webhook", name):
+			return _refuse("not_found", _("There is no webhook {0}.").format(name))
+		doc = frappe.get_doc("Webhook", name)
+		if modified and cstr(modified) != cstr(doc.modified):
+			return _refuse("stale", _("Someone else changed this webhook since you opened it. Reload and try again."))
+		before = {f: doc.get(f) for f in values}
+	else:
+		doc = frappe.new_doc("Webhook")
+		# Webhook is named by prompt: the title given, else "<doctype> <event> <n>".
+		base = title or f"{values.get('webhook_doctype') or 'Webhook'} {values.get('webhook_docevent') or ''}".strip()
+		doc.name, n = base, 2
+		while frappe.db.exists("Webhook", doc.name):
+			doc.name, n = f"{base} {n}", n + 1
+		before = {}
+	url = cstr(values.get("request_url", doc.request_url)).strip()
+	if url and not (url.lower().startswith("https://") or url.lower().startswith(("http://localhost", "http://127.0.0.1"))):
+		return _refuse("invalid_setting", _("A webhook URL starts with https://."))
+	if values.get("webhook_doctype") and not frappe.db.exists("DocType", values["webhook_doctype"]):
+		return _refuse("not_found", _("There is no doctype {0}.").format(values["webhook_doctype"]))
+	if values.get("webhook_docevent") and values["webhook_docevent"] not in WEBHOOK_EVENTS:
+		return _refuse("invalid_setting", _("The event is one of {0}.").format(", ".join(WEBHOOK_EVENTS)))
+	for f, v in values.items():
+		doc.set(f, (1 if v else 0) if f in ("enabled", "enable_security") else v)
+	if secret:
+		doc.webhook_secret = secret
+	rows = _json(headers, None)
+	if rows is not None:
+		stored = {h.key: h.value for h in doc.get("webhook_headers") or []}
+		new_rows = []
+		for h in rows if isinstance(rows, list) else []:
+			key = cstr(h.get("key")).strip()
+			if not key:
+				continue
+			value = h.get("value")
+			if value is None:
+				if key not in stored:
+					return _refuse("invalid_setting", _("Header {0} needs a value.").format(key))
+				value = stored[key]
+			new_rows.append({"key": key, "value": cstr(value)})
+		doc.set("webhook_headers", new_rows)
+	doc.flags.ignore_permissions = True
+	doc.save() if name else doc.insert()
+	after = {f: doc.get(f) for f in values}
+	if secret:
+		before["webhook_secret"], after["webhook_secret"] = "old", "new"
+	_record("webhook saved", "Webhook", doc.name, before, after)
+	return _integrations()
+
+
+@frappe.whitelist(methods=["POST"])
+def delete_webhook(name):
+	_only()
+	if not frappe.db.exists("Webhook", cstr(name)):
+		return _refuse("not_found", _("There is no webhook {0}.").format(name))
+	frappe.delete_doc("Webhook", name, ignore_permissions=True, force=True)
+	_record("webhook deleted", None, None, {"deleted": f"Webhook {name}"}, {})
+	return _integrations()
+
+
+@frappe.whitelist(methods=["POST"])
+def generate_api_keys(user):
+	"""A new API secret for a user (and a key when they have none). The secret is in this answer
+	once and never again -- it is not stored readable anywhere this app reaches."""
+	_only()
+	doc, refused = _target(user)
+	if refused:
+		return refused
+	if doc.user_type != "System User":
+		return _refuse("invalid_setting", _("API keys are for system users."))
+	secret = frappe.generate_hash(length=15)
+	if not doc.api_key:
+		doc.api_key = frappe.generate_hash(length=15)
+	doc.api_secret = secret
+	doc.flags.ignore_permissions = True
+	doc.save()
+	_record("API secret generated", "User", doc.name)
+	return {"user": doc.name, "api_key": doc.api_key, "api_secret": secret}
+
+
+@frappe.whitelist(methods=["POST"])
+def revoke_api_keys(user):
+	"""Remove a user's API key and secret: anything using them stops working at once."""
+	_only()
+	doc, refused = _target(user)
+	if refused:
+		return refused
+	if not doc.api_key:
+		return _integrations()
+	frappe.db.set_value("User", doc.name, {"api_key": None})
+	from frappe.utils.password import remove_encrypted_password
+
+	remove_encrypted_password("User", doc.name, "api_secret")
+	frappe.clear_cache(user=doc.name)
+	_record("API keys revoked", "User", doc.name)
+	return _integrations()
+
+
+# --- workflows and approval rules (read-only) ------------------------------------------------------
+
+
+@frappe.whitelist(methods=["GET"])
+def workflows():
+	"""Every workflow with its states, transitions and who may take them, and how many documents
+	wait on each (open Workflow Actions). Read-only: workflows are FoLT's fixtures and every
+	migrate would put a change made here back. ERPNext's Authorization Rules come with them."""
+	_only()
+	waiting = dict(frappe.db.sql("select reference_doctype, count(distinct reference_name) from `tabWorkflow Action` where status = 'Open' group by reference_doctype"))
+	out = []
+	for w in frappe.get_all("Workflow", fields=["name", "document_type", "is_active", "workflow_state_field", "modified"], order_by="document_type asc"):
+		states = frappe.get_all("Workflow Document State", filters={"parent": w.name}, fields=["state", "doc_status", "allow_edit", "update_field", "update_value"], order_by="idx asc")
+		transitions = frappe.get_all("Workflow Transition", filters={"parent": w.name}, fields=["state", "action", "next_state", "allowed", "allow_self_approval", "condition"], order_by="idx asc")
+		out.append(
+			{
+				"name": w.name,
+				"document_type": w.document_type,
+				"active": bool(w.is_active),
+				"states": [{"state": s.state, "docstatus": cint(s.doc_status), "editor": s.allow_edit} for s in states],
+				"transitions": [
+					{"from": t.state, "action": t.action, "to": t.next_state, "role": t.allowed, "self_approval": bool(t.allow_self_approval), "condition": t.condition or None}
+					for t in transitions
+				],
+				"waiting": cint(waiting.get(w.document_type)) if w.is_active else 0,
+				"modified": cstr(w.modified),
+			}
+		)
+	rules = []
+	if frappe.db.exists("DocType", "Authorization Rule"):
+		for r in frappe.get_all("Authorization Rule", fields=["name", "transaction", "based_on", "company", "value", "approving_role", "approving_user", "system_role", "system_user"], order_by="transaction asc"):
+			rules.append({k: (r.get(k) if k != "value" else frappe.utils.flt(r.value)) for k in ("name", "transaction", "based_on", "company", "value", "approving_role", "approving_user", "system_role", "system_user")})
+	return {"workflows": out, "authorization_rules": rules}
+
+
+# --- files and log retention ----------------------------------------------------------------------
+
+
+def _documents():
+	totals = {
+		row[0]: {"files": cint(row[1]), "bytes": cint(row[2])}
+		for row in frappe.db.sql("select is_private, count(*), coalesce(sum(file_size), 0) from tabFile where is_folder = 0 group by is_private")
+	}
+	by_doctype = [
+		{"doctype": r[0] or None, "files": cint(r[1]), "bytes": cint(r[2])}
+		for r in frappe.db.sql(
+			"""select attached_to_doctype, count(*), coalesce(sum(file_size), 0) from tabFile where is_folder = 0
+			group by attached_to_doctype order by 3 desc limit 10"""
+		)
+	]
+	retention = [{"doctype": r.ref_doctype, "days": cint(r.days)} for r in frappe.get_doc("Log Settings").logs_to_clear]
+	return {
+		"public": totals.get(0, {"files": 0, "bytes": 0}),
+		"private": totals.get(1, {"files": 0, "bytes": 0}),
+		"by_doctype": by_doctype,
+		"retention": retention,
+	}
+
+
+@frappe.whitelist(methods=["GET"])
+def documents():
+	"""How many files there are, public and private, where they sit, and how long each log is kept.
+	The upload rules themselves are System Settings (update_settings)."""
+	_only()
+	return _documents()
+
+
+@frappe.whitelist(methods=["POST"])
+def save_retention(rows):
+	"""How many days each log already in Log Settings is kept (at least 1)."""
+	_only()
+	rows = _json(rows, []) or []
+	doc = frappe.get_doc("Log Settings")
+	current = {r.ref_doctype: r for r in doc.logs_to_clear}
+	before, after = {}, {}
+	for r in rows if isinstance(rows, list) else []:
+		dt, days = cstr(r.get("doctype")), r.get("days")
+		if dt not in current:
+			return _refuse("not_found", _("{0} is not a log kept here.").format(dt))
+		if not isinstance(days, int) or isinstance(days, bool) or days < 1 or days > 3650:
+			return _refuse("invalid_setting", _("Days are 1 to 3650."))
+		if cint(current[dt].days) != days:
+			before[dt], after[dt] = cint(current[dt].days), days
+			current[dt].days = days
+	if after:
+		doc.flags.ignore_permissions = True
+		doc.save()
+		_record("log retention changed", "Log Settings", "Log Settings", before, after)
+	return _documents()
+
+
+# --- system health, versions, recent errors ---------------------------------------------------------
+
+
+@frappe.whitelist(methods=["GET"])
+def system_health():
+	"""Frappe's own System Health Report (workers, queues, scheduler, e-mail, errors, database,
+	storage, backups, sign-ins), the installed apps' versions, and the last errors -- each error's
+	last line only: a traceback is server internals, not a status."""
+	_only()
+	from frappe.utils.change_log import get_versions
+
+	report = frappe.get_doc("System Health Report")
+	pick = lambda name, fields: [{f: r.get(f) for f in fields} for r in report.get(name) or []]  # noqa: E731
+	errors = [
+		{"name": e.name, "at": cstr(e.creation), "method": e.method, "message": (cstr(e.error).strip().splitlines() or [""])[-1][:300]}
+		for e in frappe.get_all("Error Log", fields=["name", "creation", "method", "error"], order_by="creation desc", limit=15)
+	]
+	return {
+		"scheduler": report.get("scheduler_status"),
+		"background_jobs": report.get("background_jobs_check"),
+		"workers": cint(report.get("total_background_workers")),
+		"queues": pick("queue_status", ("queue", "pending_jobs")),
+		"failing_jobs": pick("failing_scheduled_jobs", ("scheduled_job_type", "failure_rate")),
+		"socketio": report.get("socketio_ping_check"),
+		"email": {"pending": cint(report.get("pending_emails")), "failed": cint(report.get("failed_emails")), "total": cint(report.get("total_outgoing_emails"))},
+		"errors_total": cint(report.get("total_errors")),
+		"database": {"engine": report.get("database"), "version": report.get("database_version"), "size_mb": frappe.utils.flt(report.get("db_storage_usage"), 1)},
+		"storage_mb": {"backups": frappe.utils.flt(report.get("backups_size"), 1), "private_files": frappe.utils.flt(report.get("private_files_size"), 1), "public_files": frappe.utils.flt(report.get("public_files_size"), 1)},
+		"onsite_backups": cint(report.get("onsite_backups")),
+		"users": {"total": cint(report.get("total_users")), "new": cint(report.get("new_users")), "failed_logins": cint(report.get("failed_logins")), "active_sessions": cint(report.get("active_sessions"))},
+		"versions": [{"app": app, "version": v.get("version"), "branch": v.get("branch")} for app, v in sorted(get_versions().items())],
+		"recent_errors": errors,
+	}
+
+
+# --- backups on demand --------------------------------------------------------------------------------
+
+BACKUP_COOLDOWN_MINUTES = 30
+
+
+@frappe.whitelist(methods=["POST"])
+def start_backup(with_files=0):
+	"""Queue a backup now (the database; with files on request), on the long queue -- the same
+	backup the scheduler takes. Refused within 30 minutes of the last one, so a double click or an
+	impatient retry does not fill the disk."""
+	_only()
+	import time
+
+	from folt_customizations.bff_support import _backup_dir
+
+	folder = _backup_dir()
+	newest = max((p.stat().st_mtime for p in folder.glob("*-database.sql*")), default=0) if folder.exists() else 0
+	if newest and time.time() - newest < BACKUP_COOLDOWN_MINUTES * 60:
+		return _refuse("backup_recent", _("A backup was taken {0} minutes ago; the next can start {1} minutes after it.").format(int((time.time() - newest) // 60), BACKUP_COOLDOWN_MINUTES))
+	frappe.enqueue("frappe.utils.backups.new_backup", queue="long", timeout=3600, ignore_files=not cint(with_files), force=True, enqueue_after_commit=True)
+	_record("backup started", None, None, {}, {"with files": bool(cint(with_files))})
+	return {"queued": True, "with_files": bool(cint(with_files))}
+
+
+# --- the audit's own kinds ----------------------------------------------------------------------------
+
+
+@frappe.whitelist(methods=["GET"])
+def audit_rows(kind, q=None, from_date=None, to_date=None, start=0, limit=50):
+	"""admin: this module's own records (FoLT Settings: ...). logins: sign-ins, sign-outs and
+	failures. errors: Error Log, each error's last line. Newest first; dates are inclusive days."""
+	_only(SECURITY_ADMIN)
+	start, limit = max(cint(start), 0), min(max(cint(limit), 1), 500)
+	between = []
+	if from_date or to_date:
+		between = [["creation", "between", [from_date or "2000-01-01", (to_date or "2999-12-31") + " 23:59:59"]]]
+	like = f"%{cstr(q).strip()}%" if q else None
+	if kind in ("admin", "logins"):
+		filters = list(between)
+		if kind == "admin":
+			filters.append(["subject", "like", AUDIT_PREFIX + "%"])
+		else:
+			filters.append(["operation", "in", ["Login", "Logout", "Impersonate"]])
+		or_filters = [["subject", "like", like], ["user", "like", like], ["full_name", "like", like]] if like else None
+		rows = frappe.get_all(
+			"Activity Log",
+			filters=filters,
+			or_filters=or_filters,
+			fields=["name", "creation", "user", "full_name", "operation", "status", "subject", "content", "ip_address", "reference_doctype", "reference_name"],
+			order_by="creation desc",
+			start=start,
+			limit=limit + 1,
+		)
+		items = [
+			{
+				"name": r.name,
+				"at": cstr(r.creation),
+				"user": r.user,
+				"full_name": r.full_name,
+				"what": (cstr(r.subject)[len(AUDIT_PREFIX):] if kind == "admin" else r.operation),
+				"status": r.status,
+				"detail": (cstr(r.content) or None) if kind == "admin" else frappe.utils.strip_html(cstr(r.subject))[:300] or None,
+				"ip": r.ip_address,
+				"reference": f"{r.reference_doctype} {r.reference_name}" if r.reference_doctype and r.reference_name else None,
+			}
+			for r in rows[:limit]
+		]
+	elif kind == "errors":
+		if not _is_system_manager():
+			return _refuse("privileged_field", _("Errors are a System Manager's to read."))
+		or_filters = [["method", "like", like], ["error", "like", like]] if like else None
+		rows = frappe.get_all("Error Log", filters=between, or_filters=or_filters, fields=["name", "creation", "method", "error", "owner"], order_by="creation desc", start=start, limit=limit + 1)
+		items = [
+			{"name": r.name, "at": cstr(r.creation), "user": r.owner, "full_name": None, "what": r.method, "status": "Error", "detail": (cstr(r.error).strip().splitlines() or [""])[-1][:300], "ip": None, "reference": None}
+			for r in rows[:limit]
+		]
+	else:
+		return _refuse("invalid_setting", _("kind is admin, logins or errors."))
+	return {"kind": kind, "items": items, "more": len(rows) > limit}

@@ -1752,3 +1752,413 @@ def save_my_preferences(values):
 		ns.flags.ignore_permissions = True
 		ns.save()
 	return _my_preferences()
+
+
+# =================================================================================================
+# Phase 4: e-mail accounts, the e-mail queue, templates, notification rules, announcements, SMS.
+# A System Manager's. Secrets -- an account's password, an SMS gateway's key -- are write-only: they
+# are never returned, only whether one is set.
+# =================================================================================================
+
+EMAIL_ACCOUNT_FIELDS = (
+	"email_account_name", "email_id", "service", "enable_outgoing", "default_outgoing", "smtp_server", "smtp_port",
+	"use_tls", "use_ssl_for_outgoing", "no_smtp_authentication", "login_id_is_different", "login_id",
+	"always_use_account_email_id_as_sender", "always_use_account_name_as_sender_name", "send_unsubscribe_message",
+	"track_email_status", "add_signature", "signature", "footer",
+)
+EMAIL_ACCOUNT_CHECKS = {
+	"enable_outgoing", "default_outgoing", "use_tls", "use_ssl_for_outgoing", "no_smtp_authentication", "login_id_is_different",
+	"always_use_account_email_id_as_sender", "always_use_account_name_as_sender_name", "send_unsubscribe_message",
+	"track_email_status", "add_signature",
+}
+TEMPLATE_FIELDS = ("subject", "use_html", "response", "response_html", "reference_doctype")
+NOTIFICATION_FIELDS = ("enabled", "subject", "message", "message_type", "condition", "channel", "document_type", "event", "days_in_advance", "date_changed", "value_changed", "send_system_notification")
+NOTIFICATION_CHANNELS = ("Email", "System Notification", "SMS")
+NOTIFICATION_EVENTS = ("New", "Save", "Submit", "Cancel", "Days After", "Days Before", "Value Change")
+ANNOUNCEMENT_FIELDS = ("title", "content", "notify_on_login", "notify_on_every_login", "expire_notification_on")
+SMS_FIELDS = ("sms_gateway_url", "message_parameter", "receiver_parameter", "use_post")
+_SECRET_PARAM = ("key", "token", "secret", "password", "pass", "auth", "signature")
+
+
+def _secret_param(row):
+	return bool(row.get("header")) or any(h in cstr(row.get("parameter")).lower() for h in _SECRET_PARAM)
+
+
+def _email_account_view(a):
+	from frappe.utils.password import get_decrypted_password
+
+	return {
+		"name": a.name,
+		**{f: (bool(a.get(f)) if f in EMAIL_ACCOUNT_CHECKS else (a.get(f) or None)) for f in EMAIL_ACCOUNT_FIELDS},
+		"enable_incoming": bool(a.enable_incoming),
+		"password_set": bool(get_decrypted_password("Email Account", a.name, "password", raise_exception=False)),
+		"modified": cstr(a.modified),
+	}
+
+
+def _communications():
+	accounts = [_email_account_view(frappe.get_doc("Email Account", n)) for n in frappe.get_all("Email Account", pluck="name", order_by="name asc")]
+	counts = dict(frappe.db.sql("select status, count(*) from `tabEmail Queue` group by status"))
+	recent = []
+	for q in frappe.get_all("Email Queue", fields=["name", "creation", "status", "error", "reference_doctype", "reference_name", "sender"], order_by="creation desc", limit=20):
+		recent.append(
+			{
+				"name": q.name,
+				"at": cstr(q.creation),
+				"status": q.status,
+				"sender": q.sender,
+				"recipients": frappe.db.count("Email Queue Recipient", {"parent": q.name}),
+				"reference": f"{q.reference_doctype} {q.reference_name}" if q.reference_doctype else None,
+				"error": (frappe.utils.strip_html(q.error or "").splitlines() or [None])[-1] if q.error else None,
+			}
+		)
+	templates = [
+		{"name": t.name, "subject": t.subject, "use_html": bool(t.use_html), "response": t.response, "response_html": t.response_html, "reference_doctype": t.reference_doctype, "modified": cstr(t.modified)}
+		for t in frappe.get_all("Email Template", fields=["name", "subject", "use_html", "response", "response_html", "reference_doctype", "modified"], order_by="name asc")
+	]
+	notifications = []
+	for n in frappe.get_all("Notification", fields=["name", "enabled", "channel", "document_type", "event", "subject", "message", "message_type", "condition", "is_standard", "module", "days_in_advance", "date_changed", "value_changed", "send_system_notification", "modified"], order_by="document_type asc, name asc"):
+		roles = frappe.get_all("Notification Recipient", filters={"parent": n.name, "parenttype": "Notification"}, fields=["receiver_by_role", "receiver_by_document_field", "cc"])
+		notifications.append(
+			{
+				**{k: n.get(k) for k in ("name", "channel", "document_type", "event", "subject", "message", "message_type", "condition", "module", "date_changed", "value_changed")},
+				"enabled": bool(n.enabled),
+				"standard": bool(n.is_standard),
+				"days_in_advance": cint(n.days_in_advance) or None,
+				"send_system_notification": bool(n.send_system_notification),
+				"recipients": [{"role": r.receiver_by_role or None, "field": r.receiver_by_document_field or None, "cc": r.cc or None} for r in roles],
+				"modified": cstr(n.modified),
+			}
+		)
+	announcements = [
+		{
+			"name": a.name,
+			"title": a.title,
+			"content": a.content,
+			"notify_on_login": bool(a.notify_on_login),
+			"notify_on_every_login": bool(a.notify_on_every_login),
+			"expire_notification_on": cstr(a.expire_notification_on) or None,
+			"by": a.owner,
+			"modified": cstr(a.modified),
+		}
+		for a in frappe.get_all("Note", filters={"public": 1}, fields=["name", "title", "content", "notify_on_login", "notify_on_every_login", "expire_notification_on", "owner", "modified"], order_by="modified desc")
+	]
+	sms = frappe.get_doc("SMS Settings")
+	params = [{"parameter": p.parameter, "secret": _secret_param(p), "value": None if _secret_param(p) else p.value, "value_set": bool(p.value), "header": bool(p.header)} for p in sms.parameters]
+	sms_log = [
+		{"name": s.name, "sent_on": cstr(s.sent_on), "sender": s.sender_name, "requested": cint(s.no_of_requested_sms), "sent": cint(s.no_of_sent_sms), "message": (s.message or "")[:160]}
+		for s in frappe.get_all("SMS Log", fields=["name", "sent_on", "sender_name", "no_of_requested_sms", "no_of_sent_sms", "message"], order_by="creation desc", limit=20)
+	]
+	return {
+		"email_accounts": accounts,
+		"queue": {"counts": {k: cint(v) for k, v in counts.items()}, "recent": recent},
+		"templates": templates,
+		"notifications": notifications,
+		"announcements": announcements,
+		"sms": {
+			"sms_gateway_url": sms.sms_gateway_url or None,
+			"message_parameter": sms.message_parameter or None,
+			"receiver_parameter": sms.receiver_parameter or None,
+			"use_post": bool(sms.use_post),
+			"parameters": params,
+			"configured": bool(sms.sms_gateway_url),
+			"modified": cstr(sms.modified),
+		},
+		"sms_log": sms_log,
+		"doctypes_with_notifications": sorted({n["document_type"] for n in notifications if n["document_type"]}),
+	}
+
+
+@frappe.whitelist(methods=["GET"])
+def communications():
+	"""E-mail accounts, the e-mail queue, templates, notification rules, announcements and SMS."""
+	_only()
+	return _communications()
+
+
+@frappe.whitelist(methods=["POST"])
+def save_email_account(values, name=None, password=None, modified=None):
+	"""Create or change an outgoing e-mail account. The password is write-only: sent only to set
+	or change it, never returned. Frappe checks the SMTP connection itself when the account sends."""
+	_only()
+	values = _json(values, {}) or {}
+	extra = sorted(set(values) - set(EMAIL_ACCOUNT_FIELDS))
+	if extra:
+		return _refuse("field_not_allowed", _("These cannot be set here: {0}.").format(", ".join(extra)))
+	if name:
+		if not frappe.db.exists("Email Account", name):
+			return _refuse("not_found", _("There is no e-mail account {0}.").format(name))
+		doc = frappe.get_doc("Email Account", name)
+		if modified and cstr(modified) != cstr(doc.modified):
+			return _refuse("stale", _("Someone else changed this account since you opened it. Reload and try again."))
+		if "email_account_name" in values and values["email_account_name"] != doc.email_account_name:
+			return _refuse("field_not_allowed", _("An e-mail account's name is fixed once made."))
+		before = {f: doc.get(f) for f in values}
+	else:
+		if not cstr(values.get("email_account_name")).strip() or not cstr(values.get("email_id")).strip():
+			return _refuse("invalid_setting", _("An account needs a name and an e-mail address."))
+		if frappe.db.exists("Email Account", cstr(values["email_account_name"]).strip()):
+			return _refuse("duplicate", _("There is already an e-mail account {0}.").format(values["email_account_name"]))
+		doc = frappe.new_doc("Email Account")
+		before = {}
+	for f, v in values.items():
+		doc.set(f, (1 if v else 0) if f in EMAIL_ACCOUNT_CHECKS else (cstr(v).strip() if v is not None else None))
+	if password:
+		doc.password = password
+		doc.awaiting_password = 0
+	doc.flags.ignore_permissions = True
+	doc.save()
+	after = {f: doc.get(f) for f in values}
+	if password:
+		before["password"], after["password"] = "old", "new"  # masked by _record
+	_record("e-mail account saved", "Email Account", doc.name, before, after)
+	return _communications()
+
+
+@frappe.whitelist(methods=["POST"])
+def send_test_email(account=None):
+	"""Send a test e-mail to the person asking, now, through `account` (or the default outgoing
+	account). A failure comes back as the mail server's words, so the settings can be put right."""
+	_only()
+	sender = None
+	if account:
+		row = frappe.db.get_value("Email Account", account, ["email_id", "enable_outgoing"], as_dict=True)
+		if not row:
+			return _refuse("not_found", _("There is no e-mail account {0}.").format(account))
+		if not row.enable_outgoing:
+			return _refuse("invalid_setting", _("{0} does not send e-mail; switch sending on first.").format(account))
+		sender = row.email_id
+	to = frappe.db.get_value("User", frappe.session.user, "email")
+	if not to:
+		return _refuse("no_email", _("You have no e-mail address to send the test to."))
+	try:
+		frappe.sendmail(
+			recipients=[to],
+			sender=sender,
+			subject=_("FoLT ERP test e-mail"),
+			message=_("<p>This is a test from Settings &rarr; Communications. If you can read it, {0} sends e-mail.</p>").format(account or _("the default account")),
+			now=True,
+		)
+	except Exception as e:  # noqa: BLE001 -- the mail server's refusal is the answer here
+		frappe.clear_messages()
+		return _refuse("send_failed", _("The test e-mail was not sent: {0}").format(cstr(e)[:300]))
+	_record("test e-mail sent", "Email Account", account) if account else _record("test e-mail sent")
+	return {"sent_to": to, "account": account}
+
+
+@frappe.whitelist(methods=["POST"])
+def save_email_template(values, name=None, modified=None):
+	_only()
+	values = _json(values, {}) or {}
+	extra = sorted(set(values) - set(TEMPLATE_FIELDS) - {"name"})
+	if extra:
+		return _refuse("field_not_allowed", _("These cannot be set here: {0}.").format(", ".join(extra)))
+	if name:
+		if not frappe.db.exists("Email Template", name):
+			return _refuse("not_found", _("There is no e-mail template {0}.").format(name))
+		doc = frappe.get_doc("Email Template", name)
+		if modified and cstr(modified) != cstr(doc.modified):
+			return _refuse("stale", _("Someone else changed this template since you opened it. Reload and try again."))
+		before = {f: doc.get(f) for f in values}
+	else:
+		new_name = cstr(values.pop("name", "")).strip()
+		if not new_name:
+			return _refuse("invalid_setting", _("A template needs a name."))
+		if frappe.db.exists("Email Template", new_name):
+			return _refuse("duplicate", _("There is already a template {0}.").format(new_name))
+		doc = frappe.new_doc("Email Template")
+		doc.name = new_name
+		before = {}
+	values.pop("name", None)
+	if values.get("reference_doctype") and not frappe.db.exists("DocType", values["reference_doctype"]):
+		return _refuse("not_found", _("There is no doctype {0}.").format(values["reference_doctype"]))
+	for f, v in values.items():
+		doc.set(f, (1 if v else 0) if f == "use_html" else v)
+	doc.flags.ignore_permissions = True
+	doc.save() if name else doc.insert()
+	_record("e-mail template saved", "Email Template", doc.name, before, {f: doc.get(f) for f in values})
+	return _communications()
+
+
+@frappe.whitelist(methods=["POST"])
+def delete_email_template(name):
+	_only()
+	if not frappe.db.exists("Email Template", cstr(name)):
+		return _refuse("not_found", _("There is no e-mail template {0}.").format(name))
+	try:
+		frappe.db.savepoint("template_delete")
+		frappe.delete_doc("Email Template", name, ignore_permissions=True)
+	except frappe.LinkExistsError:
+		frappe.db.rollback(save_point="template_delete")
+		frappe.clear_messages()
+		return _refuse("in_use", _("{0} is used by a notification or a setting, so it is kept.").format(name))
+	_record("e-mail template deleted", None, None, {"deleted": f"Email Template {name}"}, {})
+	return _communications()
+
+
+@frappe.whitelist(methods=["POST"])
+def save_notification(values, name=None, recipients=None, modified=None):
+	"""Create or change a notification rule. A standard one (shipped by an app, re-imported on its
+	updates) is only switched on or off here; a custom one is edited in full. Recipients are roles,
+	a field of the document holding an address, or fixed addresses (cc)."""
+	_only()
+	values = _json(values, {}) or {}
+	extra = sorted(set(values) - set(NOTIFICATION_FIELDS) - {"name"})
+	if extra:
+		return _refuse("field_not_allowed", _("These cannot be set here: {0}.").format(", ".join(extra)))
+	recipients = _json(recipients, None)
+	if name:
+		if not frappe.db.exists("Notification", name):
+			return _refuse("not_found", _("There is no notification {0}.").format(name))
+		doc = frappe.get_doc("Notification", name)
+		if modified and cstr(modified) != cstr(doc.modified):
+			return _refuse("stale", _("Someone else changed this notification since you opened it. Reload and try again."))
+		if doc.is_standard and (set(values) - {"enabled"} or recipients is not None):
+			return _refuse("standard_notification", _("{0} is shipped by an app, so it is only switched on or off here.").format(name))
+		if doc.is_standard:
+			# Notification.validate_standard refuses ANY save of an enabled standard notification outside
+			# developer mode -- so a save could switch one off but never back on. The flag alone does not
+			# make it drift from the app's file (which is what that guard protects), so it is written alone.
+			want = 1 if values.get("enabled") else 0
+			if cint(doc.enabled) != want:
+				frappe.db.set_value("Notification", doc.name, "enabled", want)
+				frappe.clear_cache(doctype="Notification")
+				_record("notification " + ("switched on" if want else "switched off"), "Notification", doc.name, {"enabled": cint(doc.enabled)}, {"enabled": want})
+			return _communications()
+		before = {f: doc.get(f) for f in values}
+	else:
+		new_name = cstr(values.pop("name", "")).strip()
+		if not new_name:
+			return _refuse("invalid_setting", _("A notification needs a name."))
+		if frappe.db.exists("Notification", new_name):
+			return _refuse("duplicate", _("There is already a notification {0}.").format(new_name))
+		doc = frappe.new_doc("Notification")
+		doc.name = new_name
+		doc.is_standard = 0
+		before = {}
+	values.pop("name", None)
+	if values.get("channel") and values["channel"] not in NOTIFICATION_CHANNELS:
+		return _refuse("invalid_setting", _("Channel is one of {0}.").format(", ".join(NOTIFICATION_CHANNELS)))
+	if values.get("event") and values["event"] not in NOTIFICATION_EVENTS:
+		return _refuse("invalid_setting", _("Event is one of {0}.").format(", ".join(NOTIFICATION_EVENTS)))
+	if values.get("document_type") and not frappe.db.exists("DocType", values["document_type"]):
+		return _refuse("not_found", _("There is no doctype {0}.").format(values["document_type"]))
+	for f, v in values.items():
+		doc.set(f, (1 if v else 0) if f in ("enabled", "send_system_notification") else v)
+	if recipients is not None:
+		rows = []
+		for r in recipients if isinstance(recipients, list) else []:
+			role, field, cc = cstr(r.get("role")).strip(), cstr(r.get("field")).strip(), cstr(r.get("cc")).strip()
+			if role and not frappe.db.exists("Role", role):
+				return _refuse("unknown_role", _("Not a role: {0}.").format(role))
+			if role or field or cc:
+				rows.append({"receiver_by_role": role or None, "receiver_by_document_field": field or None, "cc": cc or None})
+		doc.set("recipients", rows)
+	doc.flags.ignore_permissions = True
+	doc.save() if name else doc.insert()
+	_record("notification saved", "Notification", doc.name, before, {f: doc.get(f) for f in values})
+	return _communications()
+
+
+@frappe.whitelist(methods=["POST"])
+def save_announcement(values, name=None, modified=None):
+	"""A public note every staff user sees -- on Home, and once at sign-in when notify_on_login."""
+	_only()
+	values = _json(values, {}) or {}
+	extra = sorted(set(values) - set(ANNOUNCEMENT_FIELDS))
+	if extra:
+		return _refuse("field_not_allowed", _("These cannot be set here: {0}.").format(", ".join(extra)))
+	if name:
+		if not frappe.db.exists("Note", {"name": name, "public": 1}):
+			return _refuse("not_found", _("There is no announcement {0}.").format(name))
+		doc = frappe.get_doc("Note", name)
+		if modified and cstr(modified) != cstr(doc.modified):
+			return _refuse("stale", _("Someone else changed this announcement since you opened it. Reload and try again."))
+		before = {f: doc.get(f) for f in values}
+	else:
+		if not cstr(values.get("title")).strip():
+			return _refuse("invalid_setting", _("An announcement needs a title."))
+		doc = frappe.new_doc("Note")
+		doc.public = 1
+		before = {}
+	for f, v in values.items():
+		doc.set(f, (1 if v else 0) if f in ("notify_on_login", "notify_on_every_login") else (v or None))
+	doc.flags.ignore_permissions = True
+	doc.save()
+	_record("announcement saved", "Note", doc.name, before, {f: doc.get(f) for f in values if f != "content"})
+	return _communications()
+
+
+@frappe.whitelist(methods=["POST"])
+def delete_announcement(name):
+	_only()
+	if not frappe.db.exists("Note", {"name": cstr(name), "public": 1}):
+		return _refuse("not_found", _("There is no announcement {0}.").format(name))
+	title = frappe.db.get_value("Note", name, "title")
+	frappe.delete_doc("Note", name, ignore_permissions=True)
+	_record("announcement deleted", None, None, {"deleted": f"Announcement {title}"}, {})
+	return _communications()
+
+
+@frappe.whitelist(methods=["POST"])
+def save_sms_settings(values, parameters=None, modified=None):
+	"""The SMS gateway. A parameter that looks like a key (or is sent as a header) is write-only: send
+	its value to set or change it, leave it null to keep the stored one."""
+	_only()
+	values = _json(values, {}) or {}
+	extra = sorted(set(values) - set(SMS_FIELDS))
+	if extra:
+		return _refuse("field_not_allowed", _("These cannot be set here: {0}.").format(", ".join(extra)))
+	doc = frappe.get_doc("SMS Settings")
+	if modified and cstr(modified) != cstr(doc.modified):
+		return _refuse("stale", _("Someone else changed the SMS settings since you opened them. Reload and try again."))
+	url = cstr(values.get("sms_gateway_url", doc.sms_gateway_url)).strip()
+	if url and not url.lower().startswith(("https://", "http://")):
+		return _refuse("invalid_setting", _("The gateway URL starts with https://."))
+	before = {f: doc.get(f) for f in values}
+	for f, v in values.items():
+		doc.set(f, (1 if v else 0) if f == "use_post" else (cstr(v).strip() or None))
+	params = _json(parameters, None)
+	if params is not None:
+		stored = {p.parameter: p.value for p in doc.parameters}
+		rows = []
+		for p in params if isinstance(params, list) else []:
+			key = cstr(p.get("parameter")).strip()
+			if not key:
+				continue
+			value = p.get("value")
+			if value is None:
+				if key not in stored:
+					return _refuse("invalid_setting", _("{0} needs a value.").format(key))
+				value = stored[key]
+			rows.append({"parameter": key, "value": cstr(value), "header": 1 if p.get("header") else 0})
+		doc.set("parameters", rows)
+		before["parameters"], values["parameters"] = sorted(stored), sorted(r["parameter"] for r in rows)
+	doc.flags.ignore_permissions = True
+	doc.save()
+	_record("SMS settings changed", "SMS Settings", "SMS Settings", before, {f: (values[f] if f == "parameters" else doc.get(f)) for f in values})
+	return _communications()
+
+
+@frappe.whitelist(methods=["POST"])
+def send_test_sms(number):
+	"""Send a test SMS through the gateway, now; the gateway's refusal comes back in its words."""
+	_only()
+	from frappe.core.doctype.sms_settings.sms_settings import send_sms
+
+	number = cstr(number).strip()
+	if not number or not all(ch.isdigit() or ch in "+ -" for ch in number) or len(number) > 20:
+		return _refuse("invalid_setting", _("Give a phone number, e.g. +254700000000."))
+	if not frappe.db.get_single_value("SMS Settings", "sms_gateway_url"):
+		return _refuse("invalid_setting", _("Set up the SMS gateway first."))
+	try:
+		send_sms([number], _("FoLT ERP test SMS from Settings."), success_msg=False)
+	except Exception as e:  # noqa: BLE001 -- the gateway's refusal is the answer here
+		frappe.clear_messages()
+		return _refuse("send_failed", _("The test SMS was not sent: {0}").format(cstr(e)[:300]))
+	if frappe.local.message_log:
+		text = frappe.utils.strip_html(cstr(frappe.local.message_log[-1]))[:300]
+		frappe.clear_messages()
+		return _refuse("send_failed", _("The gateway answered: {0}").format(text))
+	_record("test SMS sent", None, None, {}, {"to": number})
+	return {"sent_to": number}

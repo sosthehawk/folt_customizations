@@ -75,6 +75,8 @@ WORKFLOW_PERMISSIONS = {
 		"Executive Director": ("select",),
 		# A Purchase Manager amending a cancelled order re-saves it from scratch (ADR-008).
 		"Purchase Manager": ("select",),
+		# The receiving officer's goods receipt re-derives the party account on save (ADR-008).
+		"Stock User": ("select",),
 	},
 	# The float's life after approval is now tracked on the advance itself -- Disbursed,
 	# Overdue, Accounted, Closed -- and every one of those is a transition on an already

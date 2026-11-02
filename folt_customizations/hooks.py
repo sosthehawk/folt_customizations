@@ -330,6 +330,12 @@ doc_events = {
         "validate": "folt_customizations.sourcing.validate_quotation",
         "on_cancel": "folt_customizations.procurement.withdraw_cancelled_quotation",
     },
+    # A receipt that rejects goods says why, and the buyer is told (receiving.py).
+    "Purchase Receipt": {
+        "validate": "folt_customizations.receiving.validate",
+        "before_submit": "folt_customizations.receiving.before_submit",
+        "on_submit": "folt_customizations.receiving.on_submit",
+    },
     # An RFQ's quotation deadline, and the bids dated after it (sourcing.py).
     "Request for Quotation": {
         "validate": "folt_customizations.sourcing.validate_rfq",

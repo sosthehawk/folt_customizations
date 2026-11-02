@@ -104,6 +104,7 @@ LOOKUPS = {
 	"erpnext.stock.doctype.material_request.material_request.make_request_for_quotation",
 	"erpnext.buying.doctype.request_for_quotation.request_for_quotation.make_supplier_quotation_from_rfq",
 	"erpnext.stock.doctype.material_request.material_request.make_purchase_order",
+	"erpnext.buying.doctype.purchase_order.purchase_order.make_purchase_receipt",
 }
 
 # ERPNext's writing helpers a procurement screen uses: sending a document by email, with its print.
@@ -116,7 +117,8 @@ _PREVIEW = {
 	"Material Request": ("set_missing_values",),
 	"Supplier Quotation": ("set_missing_values", "calculate_taxes_and_totals"),
 	"Purchase Order": ("set_missing_values", "calculate_taxes_and_totals", "set_total_in_words"),
-	"Purchase Receipt": ("set_missing_values", "calculate_taxes_and_totals", "set_total_in_words"),
+	# validate_accepted_rejected_qty is ERPNext's own: received = accepted + rejected on each line.
+	"Purchase Receipt": ("set_missing_values", "validate_accepted_rejected_qty", "calculate_taxes_and_totals", "set_total_in_words"),
 	"Purchase Invoice": ("set_missing_values", "calculate_taxes_and_totals", "set_total_in_words"),
 }
 
@@ -948,6 +950,29 @@ def flow(doctype, name):
 		today = getdate(nowdate())
 		for l in lines:
 			l["overdue"] = bool(l.schedule_date and getdate(l.schedule_date) < today and flt(l.received_qty) < flt(l.stock_qty or l.qty))
+	if doctype == "Purchase Receipt":
+		# Against the order: what it asked for, what earlier receipts brought (rejected included, as
+		# ERPNext counts them), this receipt's
+		# received / accepted / rejected, and what the order still awaits -- ERPNext's figures.
+		lines = frappe.get_all("Purchase Receipt Item", filters={"parent": name, "parenttype": "Purchase Receipt"},
+		                       fields=["item_code", "item_name", "uom", "received_qty", "qty", "rejected_qty", "stock_qty", "conversion_factor",
+		                               "purchase_order", "purchase_order_item", "warehouse", "rejected_warehouse", "batch_no", "serial_no"],
+		                       order_by="idx asc")
+		this = frappe.db.get_value("Purchase Receipt", name, ["docstatus", "creation"], as_dict=True)
+		for l in lines:
+			if not l.purchase_order_item:
+				continue
+			ordered = flt(frappe.db.get_value("Purchase Order Item", l.purchase_order_item, "qty"))
+			# Received before: the submitted receipts made before this one, rejected included as
+			# ERPNext counts them -- not the order's running total, which a later receipt also fills.
+			before = frappe.db.sql(
+				"""select coalesce(sum(i.received_qty), 0) from `tabPurchase Receipt Item` i
+				join `tabPurchase Receipt` r on r.name = i.parent
+				where i.purchase_order_item = %s and r.docstatus = 1 and r.name != %s and r.creation < %s""",
+				(l.purchase_order_item, name, this.creation),
+			)[0][0]
+			l.update({"ordered_qty": ordered, "previously_received": flt(before),
+			          "outstanding": max(ordered - flt(before) - (flt(l.received_qty) if this.docstatus < 2 else 0), 0)})
 	if doctype == "Material Request":
 		lines = frappe.get_all("Material Request Item", filters={"parent": name, "parenttype": "Material Request"},
 		                       fields=["item_code", "item_name", "qty", "uom", "stock_qty", "ordered_qty", "received_qty", "folt_estimated_rate", "folt_estimated_amount", "schedule_date"],

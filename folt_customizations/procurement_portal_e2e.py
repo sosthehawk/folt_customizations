@@ -30,6 +30,7 @@ FIN_MANAGER = "finmanager.test@folt.test"  # Finance Manager + Accounts User + A
 FIN_OFFICER = "finofficer.test@folt.test"  # Finance Officer + Accounts User
 AUDITOR = "ed.test@folt.test"  # Executive Director + Auditor
 HOP = "hop.test@folt.test"  # Head of Programs
+RECEIVER = "receiver.test@folt.test"  # Stock User
 HOF = "hof.test@folt.test"  # Head of Finance + Accounts User + Accounts Manager
 MARK = "E2E procurement requisition"
 BIDDERS = ("E2E Bidder Alpha", "E2E Bidder Beta")
@@ -78,6 +79,8 @@ def teardown():
 	rfqs = frappe.get_all("Request for Quotation", filters={"subject": RFQ_SUBJECT}, pluck="name")
 	for ev in frappe.get_all("Procurement Committee Evaluation", filters={"request_for_quotation": ["in", rfqs or [""]]}, pluck="name"):
 		_drop("Procurement Committee Evaluation", ev)
+	for pr in frappe.get_all("Purchase Receipt", filters={"supplier": ["in", BIDDERS]}, pluck="name", order_by="creation desc"):
+		_drop("Purchase Receipt", pr)
 	for po in frappe.get_all("Purchase Order", filters={"supplier": ["in", BIDDERS]}, pluck="name", order_by="creation desc"):
 		_drop("Purchase Order", po)
 	sqs = frappe.get_all("Supplier Quotation", filters={"supplier": ["in", BIDDERS]}, pluck="name")
@@ -429,6 +432,8 @@ def _ordering(mr, quotes):
 	check("the portal shows it acknowledged", any(o["name"] == order and o["acknowledged_on"] for o in view["orders"]))
 	del other
 
+	_receiving(order)
+
 	print("\n--- delivery, cancel and amend ---")
 	lines = as_user(BUYER, lambda: pp.flow("Purchase Order", order))["lines"]
 	check("the order's lines carry ERPNext's received and billed figures", lines and lines[0]["received_qty"] == 0 and "billed_amt" in lines[0] and lines[0]["overdue"] is False, lines)
@@ -438,3 +443,67 @@ def _ordering(mr, quotes):
 	amended = as_user(MANAGER, lambda: pp.act("Purchase Order", order, "amend"))["name"]
 	check("a cancelled order is amended into a new draft", frappe.db.get_value("Purchase Order", amended, ["amended_from", "docstatus", "workflow_state"]) == (order, 0, "Draft"),
 	      frappe.db.get_value("Purchase Order", amended, ["amended_from", "docstatus", "workflow_state"]))
+
+
+def _rejected_warehouse():
+	"""Where rejected goods are held: ERPNext requires one on a rejecting line. The site has none, so
+	the check makes its own (kept between runs: a warehouse is configuration, not test data)."""
+	abbr = frappe.get_cached_value("Company", COMPANY, "abbr")
+	name = f"E2E Rejected Goods - {abbr}"
+	if not frappe.db.exists("Warehouse", name):
+		frappe.get_doc({"doctype": "Warehouse", "warehouse_name": "E2E Rejected Goods", "company": COMPANY}).insert(ignore_permissions=True)
+	return name
+
+
+def _receipt(order, received, accepted, rejected=0, notes=None):
+	made = as_user(RECEIVER, lambda: pp.lookup("erpnext.buying.doctype.purchase_order.purchase_order.make_purchase_receipt", {"source_name": order}))
+	doc = {k: v for k, v in made.items() if k not in ("name", "__islocal", "__unsaved", "docstatus", "owner", "creation", "modified")}
+	row = {k: v for k, v in made["items"][0].items() if k not in ("name", "parent", "parenttype", "parentfield", "docstatus", "idx")}
+	row.update({"received_qty": received, "qty": accepted, "rejected_qty": rejected})
+	doc.update({"items": [row], "posting_date": nowdate(), "supplier_delivery_note": "DN-E2E-1", "folt_discrepancy_notes": notes})
+	if rejected:
+		doc["folt_inspection_status"] = "Passed with exceptions"
+		row["rejected_warehouse"] = _rejected_warehouse()
+	return doc
+
+
+def _receiving(order):
+	print("\n--- goods received against the order ---")
+	if not frappe.db.exists("User", RECEIVER):
+		print("  SKIP  goods receipts -- no Stock User test login (seed_test_users.py)")
+		return
+	expect_throw("a requester cannot make a receipt", lambda: as_user(REQUESTER, lambda: pp.lookup("erpnext.buying.doctype.purchase_order.purchase_order.make_purchase_receipt", {"source_name": order})), frappe.PermissionError)
+	first = as_user(RECEIVER, lambda: pp.save("Purchase Receipt", _receipt(order, 1, 1)))["name"]
+	as_user(RECEIVER, lambda: pp.act("Purchase Receipt", first, "submit"))
+	check("the receiving officer records a partial delivery", frappe.db.get_value("Purchase Receipt", first, "docstatus") == 1)
+	check("the order is half received", flt(frappe.db.get_value("Purchase Order", order, "per_received")) == 50, frappe.db.get_value("Purchase Order", order, "per_received"))
+	lines = as_user(RECEIVER, lambda: pp.flow("Purchase Receipt", first))["lines"]
+	check("the receipt's line reads against the order: ordered, earlier, outstanding",
+	      lines and lines[0]["ordered_qty"] == 2 and lines[0]["previously_received"] == 0 and lines[0]["outstanding"] == 1, lines)
+	over = as_user(RECEIVER, lambda: pp.save("Purchase Receipt", _receipt(order, 3, 3)))["name"]
+	expect_throw("receiving more than the order allows is refused, for a service line too", lambda: as_user(RECEIVER, lambda: pp.act("Purchase Receipt", over, "submit")))
+	frappe.set_user("Administrator")
+	frappe.delete_doc("Purchase Receipt", over, force=True, ignore_permissions=True)
+	expect_throw("a rejection without notes is refused", lambda: as_user(RECEIVER, lambda: pp.save("Purchase Receipt", _receipt(order, 1, 0, 1))))
+	second = as_user(RECEIVER, lambda: pp.save("Purchase Receipt", _receipt(order, 1, 0, 1, "Camera arrived with a cracked lens.")))["name"]
+	as_user(RECEIVER, lambda: pp.act("Purchase Receipt", second, "submit"))
+	rec = frappe.get_doc("Purchase Receipt", second)
+	check("the rejection is recorded on the receipt with its notes", flt(rec.items[0].rejected_qty) == 1 and "cracked" in rec.folt_discrepancy_notes)
+	check("ERPNext counts the delivery against the order, rejected or not", flt(frappe.db.get_value("Purchase Order", order, "per_received")) == 100)
+	lines = as_user(RECEIVER, lambda: pp.flow("Purchase Receipt", second))["lines"]
+	check("the second receipt reads one earlier, none outstanding", lines[0]["previously_received"] == 1 and lines[0]["outstanding"] == 0, lines)
+	over = _receipt_or_none(order)
+	check("nothing more can be received against a fully delivered order", over is None or not over["items"], over and over.get("items"))
+	f = as_user(BUYER, lambda: pp.flow("Purchase Order", order))
+	check("the order's chain holds its two receipts", sum(1 for d in f["documents"] if d["doctype"] == "Purchase Receipt") == 2)
+	frappe.set_user("Administrator")
+	for pr in (second, first):
+		_drop("Purchase Receipt", pr)
+
+
+def _receipt_or_none(order):
+	try:
+		return as_user(RECEIVER, lambda: pp.lookup("erpnext.buying.doctype.purchase_order.purchase_order.make_purchase_receipt", {"source_name": order}))
+	except Exception:  # noqa: BLE001 -- ERPNext refuses a receipt against a fully received order
+		frappe.clear_last_message()
+		return None

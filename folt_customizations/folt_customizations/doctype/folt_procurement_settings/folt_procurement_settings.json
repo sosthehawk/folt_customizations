@@ -7,7 +7,9 @@
  "engine": "InnoDB",
  "field_order": [
   "approval_section",
-  "po_ed_threshold"
+  "po_ed_threshold",
+  "match_section",
+  "match_price_tolerance"
  ],
  "fields": [
   {
@@ -21,6 +23,19 @@
    "fieldname": "po_ed_threshold",
    "fieldtype": "Currency",
    "label": "Executive Director approves orders above",
+   "non_negative": 1
+  },
+  {
+   "fieldname": "match_section",
+   "fieldtype": "Section Break",
+   "label": "Three-way match"
+  },
+  {
+   "default": "2",
+   "description": "A supplier invoice's unit price, or its tax share of the net, may differ from the purchase order's by up to this before the match flags it.",
+   "fieldname": "match_price_tolerance",
+   "fieldtype": "Percent",
+   "label": "Price tolerance",
    "non_negative": 1
   }
  ],

@@ -105,6 +105,8 @@ LOOKUPS = {
 	"erpnext.buying.doctype.request_for_quotation.request_for_quotation.make_supplier_quotation_from_rfq",
 	"erpnext.stock.doctype.material_request.material_request.make_purchase_order",
 	"erpnext.buying.doctype.purchase_order.purchase_order.make_purchase_receipt",
+	"erpnext.stock.doctype.purchase_receipt.purchase_receipt.make_purchase_invoice",
+	"erpnext.buying.doctype.purchase_order.purchase_order.make_purchase_invoice",
 }
 
 # ERPNext's writing helpers a procurement screen uses: sending a document by email, with its print.
@@ -1012,6 +1014,18 @@ def handoff(doctype, name, target):
 	result = getattr(procurement_chain, row.method)(**{row.arg: name})
 	new_name = result if isinstance(result, str) else (result or {}).get("name")
 	return {"doctype": target, "name": new_name}
+
+
+@frappe.whitelist()
+def match(name):
+	"""The three-way match of a supplier invoice, as match.compute works it out now."""
+	from folt_customizations import match as m
+
+	_doctype("Purchase Invoice")
+	doc = frappe.get_doc("Purchase Invoice", name)
+	doc.check_permission("read")
+	result = m.compute(doc)
+	return {**result, "override_reason": doc.get("folt_match_override_reason")}
 
 
 # --- comparing the bids against one RFQ --------------------------------------------------------

@@ -229,14 +229,26 @@ def approval_tier(doc, method=None):
 
 
 def ensure_procurement_settings():
-    """after_migrate: give FoLT Procurement Settings its threshold on a site that has never set
-    one. Frappe does not apply a single doctype's field defaults when the doctype is created, and
-    an empty threshold would read as zero -- every order approved by the Finance Manager alone.
-    A value somebody has set, including zero, is never touched."""
+    """after_migrate: give FoLT Procurement Settings its defaults on a site that has never set them,
+    and switch ERPNext's duplicate supplier-invoice-number check on once.
+
+    Frappe does not apply a single doctype's field defaults when the doctype is created, and an
+    empty threshold reads as zero -- every order approved by the Finance Manager alone. A value
+    somebody has set, including zero, is never touched. The duplicate check (Accounts Settings'
+    check_supplier_invoice_uniqueness) is turned on the first time only, remembered in a global, so an
+    administrator who turns it off is not overruled by the next migrate.
+    """
     if not frappe.db.exists("DocType", "FoLT Procurement Settings"):
         return
-    stored = frappe.db.sql("select value from `tabSingles` where doctype=%s and field=%s", ("FoLT Procurement Settings", "po_ed_threshold"))
-    if stored and stored[0][0] not in (None, ""):
-        return
-    default = frappe.get_meta("FoLT Procurement Settings").get_field("po_ed_threshold").default
-    frappe.db.set_single_value("FoLT Procurement Settings", "po_ed_threshold", float(default or 0))
+    meta = frappe.get_meta("FoLT Procurement Settings")
+    for field in ("po_ed_threshold", "match_price_tolerance"):
+        df = meta.get_field(field)
+        if not df:
+            continue
+        stored = frappe.db.sql("select value from `tabSingles` where doctype=%s and field=%s", ("FoLT Procurement Settings", field))
+        if stored and stored[0][0] not in (None, ""):
+            continue
+        frappe.db.set_single_value("FoLT Procurement Settings", field, float(df.default or 0))
+    if not frappe.db.get_global("folt_supplier_invoice_uniq_seeded"):
+        frappe.db.set_single_value("Accounts Settings", "check_supplier_invoice_uniqueness", 1)
+        frappe.db.set_global("folt_supplier_invoice_uniq_seeded", "1")

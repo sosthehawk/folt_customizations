@@ -211,7 +211,7 @@ after_install = [
     "folt_customizations.leave_notifications.apply_leave_notification_templates",
     "folt_customizations.hr_accounts.apply_hr_accounts",
     "folt_customizations.masterdata.apply_master_data",
-    # The purchase order's Executive Director threshold, on a site that has never set one (ADR-008).
+    # FoLT Procurement Settings' defaults, and the duplicate invoice-number check (ADR-008).
     "folt_customizations.purchase_order.ensure_procurement_settings",
 ]
 after_migrate = [
@@ -227,6 +227,9 @@ after_migrate = [
     # After the fixtures sync: their empty `accounts` tables would otherwise wipe the ledgers.
     "folt_customizations.hr_accounts.apply_hr_accounts",
     "folt_customizations.masterdata.apply_master_data",
+    # FoLT Procurement Settings' defaults on a site that has never set them, and the duplicate
+    # supplier-invoice-number check switched on once (ADR-008).
+    "folt_customizations.purchase_order.ensure_procurement_settings",
 ]
 
 # Bulk submit from the list view runs twenty or more documents in a background job, out of
@@ -371,6 +374,9 @@ doc_events = {
         "on_cancel": "folt_customizations.float_lifecycle.sync_from_voucher",
     },
     "Purchase Invoice": {
+        # Three-way match against the order and the receipt; a discrepancy is approved only with
+        # the approver's reason (match.py, ADR-008).
+        "validate": "folt_customizations.match.validate",
         "before_submit": "folt_customizations.finance_approvals.refuse_direct_submit",
         "before_cancel": "folt_customizations.finance_approvals.refuse_direct_submit",
     },

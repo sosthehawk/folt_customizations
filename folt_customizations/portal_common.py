@@ -109,7 +109,10 @@ def record_view(doctype, name=None, masker=None):
 		moves = []
 		if doc.docstatus < 2:
 			for t in get_transitions(doc):
-				moves.append({"action": t.action, "next_state": t.next_state, "needs_reason": is_turn_down(wf, state, t.next_state)})
+				from folt_customizations.match import needs_reason as match_needs_reason
+
+				moves.append({"action": t.action, "next_state": t.next_state,
+				              "needs_reason": is_turn_down(wf, state, t.next_state) or match_needs_reason(doc, t.next_state)})
 		workflow = {"name": workflow_name, "state": state, "transitions": moves}
 
 	gl_entries = []

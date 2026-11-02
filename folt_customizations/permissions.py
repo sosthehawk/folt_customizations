@@ -239,6 +239,9 @@ PROCUREMENT_PERMISSIONS = {
 	# ERPNext lets the Purchase User and the stores read goods receipts but not the Purchase
 	# Manager, who answers for whether what was ordered arrived.
 	"Purchase Receipt": {"Purchase Manager": ("read",)},
+	# Finance registers and approves supplier invoices against the order (three-way match): the
+	# accounting roles read what was ordered. ERPNext gives them the receipt, not the order.
+	"Purchase Order": {role: ("read",) for role in ("Accounts User", "Accounts Manager")},
 	# The requisition's approvers (FoLT Purchase Requisition Approval). Write, because a turn-down
 	# parks its reason on the document first (workflow_access.hold_rejection_reason); submit for
 	# the Head of Finance, whose Approve is what submits it.

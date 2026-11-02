@@ -79,6 +79,8 @@ def teardown():
 	rfqs = frappe.get_all("Request for Quotation", filters={"subject": RFQ_SUBJECT}, pluck="name")
 	for ev in frappe.get_all("Procurement Committee Evaluation", filters={"request_for_quotation": ["in", rfqs or [""]]}, pluck="name"):
 		_drop("Procurement Committee Evaluation", ev)
+	for pi in frappe.get_all("Purchase Invoice", filters={"supplier": ["in", BIDDERS]}, pluck="name", order_by="creation desc"):
+		_drop("Purchase Invoice", pi)
 	for pr in frappe.get_all("Purchase Receipt", filters={"supplier": ["in", BIDDERS]}, pluck="name", order_by="creation desc"):
 		_drop("Purchase Receipt", pr)
 	for po in frappe.get_all("Purchase Order", filters={"supplier": ["in", BIDDERS]}, pluck="name", order_by="creation desc"):
@@ -381,11 +383,11 @@ def _ordering(mr, quotes):
 	check("ERPNext also makes an order straight from a requisition, unsaved", made["items"][0]["material_request"] == mr and not frappe.db.exists("Purchase Order", made.get("name") or "x"))
 
 	print("\n--- the threshold ---")
-	settings = frappe.get_single("FoLT Procurement Settings")
-	before = settings.po_ed_threshold
+	# Only the threshold is changed and put back: saving the whole settings record would write
+	# every other field as it stands (an unset one as zero).
+	before = frappe.db.get_single_value("FoLT Procurement Settings", "po_ed_threshold")
 	try:
-		settings.po_ed_threshold = 1000
-		settings.save(ignore_permissions=True)
+		frappe.db.set_single_value("FoLT Procurement Settings", "po_ed_threshold", 1000)
 		as_user(BUYER, lambda: pp.save("Purchase Order", {"modified": str(frappe.db.get_value("Purchase Order", order, "modified"))}, order))
 		check("an order above the threshold needs the Executive Director", frappe.db.get_value("Purchase Order", order, "folt_approval_tier") == "Executive")
 		as_user(BUYER, lambda: pp.act("Purchase Order", order, "transition", "Submit for approval"))
@@ -397,15 +399,13 @@ def _ordering(mr, quotes):
 		expect_throw("the Finance Manager cannot approve it a second time", lambda: as_user(FIN_MANAGER, lambda: pp.act("Purchase Order", order, "transition", "Approve")))
 		as_user(AUDITOR, lambda: pp.act("Purchase Order", order, "transition", "Approve"))
 		check("the Executive Director's approval submits it", frappe.db.get_value("Purchase Order", order, ["workflow_state", "docstatus"]) == ("Approved", 1))
-		settings.po_ed_threshold = 10_000_000
-		settings.save(ignore_permissions=True)
+		frappe.db.set_single_value("FoLT Procurement Settings", "po_ed_threshold", 10_000_000)
 		small = frappe.get_doc("Purchase Order", order)
 		from folt_customizations.purchase_order import approval_tier
 		approval_tier(small)
 		check("below the threshold the Finance Manager's approval is enough", small.folt_approval_tier == "Standard")
 	finally:
-		settings.po_ed_threshold = before
-		settings.save(ignore_permissions=True)
+		frappe.db.set_single_value("FoLT Procurement Settings", "po_ed_threshold", before)
 
 	print("\n--- the supplier ---")
 	expect_throw("email is for the procurement roles", lambda: as_user(REQUESTER, lambda: pp.operate("frappe.core.doctype.communication.email.make", {})), frappe.PermissionError)
@@ -496,7 +496,10 @@ def _receiving(order):
 	check("nothing more can be received against a fully delivered order", over is None or not over["items"], over and over.get("items"))
 	f = as_user(BUYER, lambda: pp.flow("Purchase Order", order))
 	check("the order's chain holds its two receipts", sum(1 for d in f["documents"] if d["doctype"] == "Purchase Receipt") == 2)
+	_invoicing(order)
 	frappe.set_user("Administrator")
+	for pi in frappe.get_all("Purchase Invoice", filters={"supplier": ["in", BIDDERS]}, pluck="name", order_by="creation desc"):
+		_drop("Purchase Invoice", pi)
 	for pr in (second, first):
 		_drop("Purchase Receipt", pr)
 
@@ -507,3 +510,72 @@ def _receipt_or_none(order):
 	except Exception:  # noqa: BLE001 -- ERPNext refuses a receipt against a fully received order
 		frappe.clear_last_message()
 		return None
+
+
+def _invoice(order, bill_no, rate=None, qty=None, extra_line=False):
+	made = as_user(FIN_OFFICER, lambda: pp.lookup("erpnext.buying.doctype.purchase_order.purchase_order.make_purchase_invoice", {"source_name": order}))
+	doc = {k: v for k, v in made.items() if k not in ("name", "__islocal", "__unsaved", "docstatus", "owner", "creation", "modified", "workflow_state")}
+	rows = []
+	for r in made["items"]:
+		row = {k: v for k, v in r.items() if k not in ("name", "parent", "parenttype", "parentfield", "docstatus", "idx")}
+		if rate is not None:
+			row["rate"] = rate
+		if qty is not None:
+			row["qty"] = qty
+		rows.append(row)
+	if extra_line:
+		extra = {k: v for k, v in rows[0].items() if k not in ("po_detail", "purchase_order", "pr_detail", "purchase_receipt")}
+		extra.update({"qty": 1, "rate": 500})
+		rows.append(extra)
+	doc.update({"items": rows, "bill_no": bill_no, "bill_date": nowdate(), "posting_date": nowdate(), "set_posting_time": 1})
+	return doc
+
+
+def _invoicing(order):
+	print("\n--- the supplier's invoice, matched three ways ---")
+	from folt_customizations import match as m
+	from folt_customizations.purchase_order import ensure_procurement_settings
+
+	ensure_procurement_settings()
+	check("ERPNext refuses a second invoice number from the same supplier", bool(frappe.db.get_single_value("Accounts Settings", "check_supplier_invoice_uniqueness")))
+	check("the price tolerance defaults to 2%", m.tolerance() == 2)
+	good = as_user(FIN_OFFICER, lambda: pp.save("Purchase Invoice", _invoice(order, "E2E-INV-1")))["name"]
+	check("an invoice at the order's price for what was received matches", frappe.db.get_value("Purchase Invoice", good, "folt_match_status") == "Matched",
+	      frappe.db.get_value("Purchase Invoice", good, ["folt_match_status", "folt_match_notes"]))
+	expect_throw("a second invoice with the same supplier number is refused", lambda: as_user(FIN_OFFICER, lambda: pp.save("Purchase Invoice", _invoice(order, "E2E-INV-1"))))
+	frappe.set_user("Administrator")
+	frappe.delete_doc("Purchase Invoice", good, force=True, ignore_permissions=True)
+
+	# ERPNext itself refuses a price other than the order's while Buying Settings' maintain_same_rate
+	# is on (it is here); the match's price flag is the check for when it is off. Read on an unsaved
+	# invoice, as the form's preview would.
+	priced = frappe.get_doc({"doctype": "Purchase Invoice", **_invoice(order, "E2E-INV-PRICE", rate=4200)})
+	priced.run_method("set_missing_values")
+	priced.calculate_taxes_and_totals()
+	got = m.compute(priced)
+	check("a price 5% above the order is flagged", got["status"] == "Discrepancies" and any(f["kind"] == "price" for f in got["flags"]), got["flags"])
+	expect_throw("and ERPNext refuses it outright while it keeps the order's rate", lambda: as_user(FIN_OFFICER, lambda: pp.save("Purchase Invoice", _invoice(order, "E2E-INV-2", rate=4200))))
+
+	odd = as_user(FIN_OFFICER, lambda: pp.save("Purchase Invoice", _invoice(order, "E2E-INV-3", extra_line=True)))["name"]
+	got = as_user(FIN_OFFICER, lambda: pp.match(odd))
+	check("a line on no order is flagged", any(f["kind"] == "unordered" for f in got["flags"]), got["flags"])
+	check("the flags are written on the invoice", frappe.db.get_value("Purchase Invoice", odd, "folt_match_status") == "Discrepancies")
+	as_user(FIN_OFFICER, lambda: pp.act("Purchase Invoice", odd, "transition", "Submit for approval"))
+	moves = as_user(HOF, lambda: pp.record("Purchase Invoice", odd))["workflow"]["transitions"]
+	check("approving it asks for a reason", any(mv["action"] == "Approve" and mv["needs_reason"] for mv in moves), moves)
+	expect_throw("it is not approved without one", lambda: as_user(HOF, lambda: pp.act("Purchase Invoice", odd, "transition", "Approve")))
+	as_user(HOF, lambda: pp.act("Purchase Invoice", odd, "transition", "Approve", "Delivery charge agreed by phone; order to be amended."))
+	inv = frappe.get_doc("Purchase Invoice", odd)
+	check("with a reason it is approved and posted", inv.docstatus == 1 and inv.workflow_state == "Approved", f"{inv.docstatus} {inv.workflow_state}")
+	check("the reason stays on the invoice", "Delivery charge" in (inv.folt_match_override_reason or ""))
+	check("ERPNext shows what is owed", flt(inv.outstanding_amount) > 0 and inv.status in ("Unpaid", "Overdue"), f"{inv.status} {inv.outstanding_amount}")
+
+	# ERPNext's maker offers nothing more to bill on a fully billed order; a hand-made copy of the
+	# billed lines is what over-billing looks like, read unsaved.
+	again = frappe.copy_doc(inv)
+	again.bill_no = "E2E-INV-4"
+	again.items = [r for r in again.items if r.get("po_detail")]
+	got = m.compute(again)
+	check("billing again what is already billed is flagged against what was received", any(f["kind"] == "quantity" for f in got["flags"]), got["flags"])
+	f = as_user(BUYER, lambda: pp.flow("Purchase Order", order))
+	check("the order's chain holds its invoices", sum(1 for d in f["documents"] if d["doctype"] == "Purchase Invoice") >= 1)

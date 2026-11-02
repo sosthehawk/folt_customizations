@@ -206,6 +206,34 @@ MASTER_DATA_PERMISSIONS = {
 }
 
 
+# Procurement (procurement_portal.py, ADR-008). A purchase requisition is ERPNext's Material
+# Request, and raising one is open to staff: any Employee prepares their own (OWNER_PERMISSIONS,
+# if_owner rows) and picks the items they need (`select` on Item). Everything after the request
+# -- approval, sourcing, ordering -- belongs to the roles ERPNext and FoLT's workflows already name.
+PROCUREMENT_PERMISSIONS = {
+	"Item": {"Employee": ("select",)},
+	# Supplier evaluation is ERPNext's Supplier Scorecard, which ships for the System Manager
+	# alone. The people who keep suppliers keep their scorecards; buyers read them.
+	"Supplier Scorecard": {
+		"Purchase Manager": ("read", "write", "create"),
+		"Purchase Master Manager": ("read", "write", "create"),
+		"Purchase User": ("read",),
+		"Procurement Committee": ("read",),
+	},
+	"Supplier Scorecard Period": {role: ("read",) for role in ("Purchase Manager", "Purchase Master Manager", "Purchase User")},
+	# ERPNext lets the Purchase User and the stores read goods receipts but not the Purchase
+	# Manager, who answers for whether what was ordered arrived.
+	"Purchase Receipt": {"Purchase Manager": ("read",)},
+}
+
+# Rows that hold only on the documents the person created themselves (Custom DocPerm if_owner).
+# Kept apart from the maps above because _grant resolves one row per role and permlevel and an
+# owner-only row is a second, narrower row for the same role.
+OWNER_PERMISSIONS = {
+	"Material Request": {"Employee": ("read", "write", "create", "delete", "print")},
+}
+
+
 # Check fields a fresh Custom DocPerm comes with already ticked.
 DEFAULT_ON_PTYPES = ("read", "export")
 
@@ -216,6 +244,7 @@ def _maps():
 		(LINK_FIELD_PERMISSIONS, 0),
 		(MASTER_DATA_PERMISSIONS, 0),
 		(ADMIN_PERMISSIONS, 0),
+		(PROCUREMENT_PERMISSIONS, 0),
 		(PERMLEVEL_1_PERMISSIONS, 1),
 	)
 
@@ -238,6 +267,12 @@ def apply_role_permissions():
 				ptypes = [p for p in ptypes if not revoked(doctype, role, permlevel, p)]
 				if ptypes and _grant(doctype, role, ptypes, permlevel):
 					changed = True
+	for doctype, roles in OWNER_PERMISSIONS.items():
+		if not frappe.db.exists("DocType", doctype):
+			continue
+		for role, ptypes in roles.items():
+			if frappe.db.exists("Role", role) and _grant_owner(doctype, role, [p for p in ptypes if not revoked(doctype, role, 0, p)]):
+				changed = True
 	if changed:
 		frappe.clear_cache()
 
@@ -307,6 +342,33 @@ def _grant(doctype, role, ptypes, permlevel=0):
 				update_permission_property(doctype, role, permlevel, ptype, 0)
 
 	# get_meta caches per doctype; drop it so a later role in the same run sees the new rows.
+	frappe.clear_cache(doctype=doctype)
+	return True
+
+
+def _grant_owner(doctype, role, ptypes):
+	"""Ensure an if_owner row gives `role` `ptypes` on its own documents of `doctype`."""
+	if not ptypes:
+		return False
+	from frappe.permissions import setup_custom_perms
+
+	setup_custom_perms(doctype)
+	name = frappe.db.get_value("Custom DocPerm", {"parent": doctype, "role": role, "permlevel": 0, "if_owner": 1})
+	if name:
+		row = frappe.get_doc("Custom DocPerm", name)
+		missing = [p for p in ptypes if not row.get(p)]
+		if not missing:
+			return False
+		for p in missing:
+			row.set(p, 1)
+		row.save(ignore_permissions=True)
+	else:
+		row = frappe.get_doc({"doctype": "Custom DocPerm", "parent": doctype, "parenttype": "DocType", "parentfield": "permissions",
+		                      "role": role, "permlevel": 0, "if_owner": 1, **{p: 1 for p in ptypes}})
+		for p in DEFAULT_ON_PTYPES:
+			if p not in ptypes:
+				row.set(p, 0)
+		row.insert(ignore_permissions=True)
 	frappe.clear_cache(doctype=doctype)
 	return True
 

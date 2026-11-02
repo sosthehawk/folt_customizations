@@ -38,10 +38,12 @@ _GENERIC_WRITES = {
 	"frappe.client.submit",
 	"frappe.client.cancel",
 	"frappe.desk.form.linked_with.cancel_all_linked_docs",
-	# The FoLT app's own document endpoints (finance_portal), which hand a person's request to
+	# The FoLT app's own document endpoints (finance_portal, procurement_portal), which hand a person's request to
 	# the document as directly as frappe.client does.
 	"folt_customizations.finance_portal.save",
 	"folt_customizations.finance_portal.act",
+	"folt_customizations.procurement_portal.save",
+	"folt_customizations.procurement_portal.act",
 	"frappe.client.save",
 	"frappe.client.insert",
 	"frappe.client.insert_many",

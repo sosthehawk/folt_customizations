@@ -25,21 +25,15 @@ Posting is not decided here either: finance_approvals refuses a direct submit of
 approval-governed voucher, and `act` goes through apply_workflow like the Desk's buttons do.
 """
 
-import csv
-import io
-import re
-
 import frappe
 from frappe import _
-from frappe.model.workflow import apply_workflow, get_transitions, get_workflow, get_workflow_name
+from frappe.model.workflow import get_workflow_name
 from frappe.utils import cint, flt, getdate, nowdate
 
+from folt_customizations import portal_common as _common
 from folt_customizations.portal_common import FILTER_OPS, STD_FIELDS
-from folt_customizations.portal_common import columns as _columns
-from folt_customizations.portal_common import filters as _filters
 from folt_customizations.portal_common import parse_json as _json
 from folt_customizations.portal_common import version_summary as _version_summary
-from folt_customizations.workflow_access import hold_rejection_reason, is_turn_down
 
 READERS = ("Accounts User", "Accounts Manager", "Auditor", "System Manager")
 MANAGERS = ("Accounts Manager", "System Manager")
@@ -252,41 +246,19 @@ def records(doctype, q=None, filters=None, order_by=None, start=0, page_length=2
 	"""One page of a Finance list, as the person may see it, with its total."""
 	_only_finance()
 	_doctype(doctype)
-	meta = frappe.get_meta(doctype)
-	if meta.issingle:
-		frappe.throw(_("{0} is a single settings record, not a list.").format(doctype))
 	_group, wanted, search, _date = DOCTYPES[doctype]
-	columns = _columns(doctype, wanted)
-	fields = ["name", "docstatus", "modified"] + [c["fieldname"] for c in columns]
-	for extra in ("status", "workflow_state", "company", meta.title_field):
-		if extra and meta.get_field(extra) and extra not in fields:
-			fields.append(extra)
-
-	where = _filters(doctype, filters)
-	or_filters = [[doctype, f, "like", f"%{q}%"] for f in search if f == "name" or meta.get_field(f)] if q else None
-
-	order = "modified desc"
-	if order_by:
-		field, _sp, direction = str(order_by).partition(" ")
-		if (field in _STD_FIELDS or meta.get_field(field)) and direction.lower() in ("", "asc", "desc"):
-			order = f"{field} {direction.lower() or 'asc'}"
-
-	page_length = min(max(cint(page_length) or 20, 1), 500)
-	rows = frappe.get_list(doctype, fields=fields, filters=where, or_filters=or_filters, order_by=order,
-	                       limit_start=cint(start), limit_page_length=page_length)
-	total = frappe.get_list(doctype, fields=[{"COUNT": "*", "as": "total"}], filters=where, or_filters=or_filters)
-	return {
-		"columns": columns,
-		"rows": rows,
-		"total": total[0].total if total else 0,
-		"title_field": meta.title_field,
-		"submittable": bool(meta.is_submittable),
-	}
+	return _common.list_view(doctype, wanted, search, q=q, raw_filters=filters, order_by=order_by, start=start, page_length=page_length)
 
 
-def _mask(value):
-	value = str(value or "")
-	return re.sub(r"[0-9A-Za-z](?=.{4})", "•", value) if value else value
+_mask = _common.mask
+
+
+def _mask_bank(doctype, data):
+	if doctype == "Bank Account" and not _is_manager():
+		# Account numbers are shown in full to the people who manage them, and as their last four
+		# characters to everybody else who works with the account.
+		for field in ("bank_account_no", "iban"):
+			data[field] = _mask(data.get(field))
 
 
 @frappe.whitelist()
@@ -294,75 +266,7 @@ def record(doctype, name=None):
 	"""A document with everything its screen shows: ledger impact, workflow moves, timeline."""
 	_only_finance()
 	_doctype(doctype)
-	meta = frappe.get_meta(doctype)
-	name = doctype if meta.issingle else name
-	doc = frappe.get_doc(doctype, name)
-	doc.check_permission("read")
-	doc.apply_fieldlevel_read_permissions()
-
-	from frappe.desk.form.load import get_docinfo
-
-	get_docinfo(doc)
-	docinfo = frappe.response.pop("docinfo", {}) or {}
-
-	data = doc.as_dict(convert_dates_to_str=True)
-	if doctype == "Bank Account" and not _is_manager():
-		# Account numbers are shown in full to the people who manage them, and as their last four
-		# characters to everybody else who works with the account.
-		for field in ("bank_account_no", "iban"):
-			data[field] = _mask(data.get(field))
-
-	workflow = None
-	workflow_name = get_workflow_name(doctype)
-	if workflow_name:
-		wf = get_workflow(doctype)
-		state = doc.get(wf.workflow_state_field)
-		moves = []
-		if doc.docstatus < 2:
-			for t in get_transitions(doc):
-				moves.append({"action": t.action, "next_state": t.next_state, "needs_reason": is_turn_down(wf, state, t.next_state)})
-		workflow = {"name": workflow_name, "state": state, "transitions": moves}
-
-	gl_entries = []
-	if meta.is_submittable and doc.docstatus > 0 and frappe.has_permission("GL Entry", "read"):
-		gl_entries = frappe.get_list(
-			"GL Entry",
-			filters={"voucher_type": doctype, "voucher_no": doc.name},
-			fields=["name", "posting_date", "account", "party_type", "party", "debit", "credit", "account_currency",
-			        "debit_in_account_currency", "credit_in_account_currency", "against", "cost_center", "project",
-			        "is_cancelled", "remarks"],
-			order_by="creation asc, name asc",
-		)
-
-	payments = []
-	if doctype in ("Sales Invoice", "Purchase Invoice") and doc.docstatus == 1 and frappe.has_permission("Payment Ledger Entry", "read"):
-		payments = frappe.get_list(
-			"Payment Ledger Entry",
-			filters={"against_voucher_type": doctype, "against_voucher_no": doc.name, "delinked": 0, "voucher_no": ["!=", doc.name]},
-			fields=["voucher_type", "voucher_no", "posting_date", "amount", "account_currency"],
-			order_by="posting_date asc",
-		)
-
-	perms = docinfo.get("permissions") or {}
-	return {
-		"doctype": doctype,
-		"name": doc.name,
-		"doc": data,
-		"permissions": {k: bool(perms.get(k)) for k in ("read", "write", "create", "submit", "cancel", "amend", "delete", "print", "email")},
-		"workflow": workflow,
-		"gl_entries": gl_entries,
-		"payments": payments,
-		"timeline": {
-			"versions": [{"owner": v.get("owner"), "creation": v.get("creation"), "data": v.get("data")} for v in docinfo.get("versions", [])],
-			"comments": [{"comment_type": c.get("comment_type"), "content": c.get("content"), "owner": c.get("owner"), "creation": c.get("creation")} for c in docinfo.get("comments", [])],
-			"workflow_logs": [{"content": c.get("content"), "owner": c.get("owner"), "creation": c.get("creation")} for c in docinfo.get("workflow_logs", [])],
-			"communications": [{"subject": c.get("subject"), "recipients": c.get("recipients"), "sender": c.get("sender"), "creation": c.get("creation"), "communication_type": c.get("communication_type")} for c in docinfo.get("communications", [])],
-		},
-		"attachments": [{"name": a.get("name"), "file_name": a.get("file_name"), "file_url": a.get("file_url"), "is_private": a.get("is_private")} for a in docinfo.get("attachments", [])],
-		"print_formats": [frappe.get_meta(doctype).default_print_format or "Standard"] + frappe.get_all(
-			"Print Format", filters={"doc_type": doctype, "disabled": 0}, pluck="name", order_by="name"
-		),
-	}
+	return _common.record_view(doctype, name, masker=_mask_bank)
 
 
 @frappe.whitelist()
@@ -370,31 +274,7 @@ def meta(doctype):
 	"""The fields of a Finance doctype (and its child tables), for a form drawn from them."""
 	_only_finance()
 	_doctype(doctype)
-
-	def fields_of(m):
-		return [
-			{k: df.get(k) for k in ("fieldname", "label", "fieldtype", "options", "reqd", "read_only", "hidden", "default",
-			                        "depends_on", "mandatory_depends_on", "read_only_depends_on", "in_list_view", "columns",
-			                        "description", "allow_on_submit", "precision", "non_negative", "collapsible", "fetch_from",
-			                        "permlevel", "bold", "length")}
-			for df in m.fields
-		]
-
-	m = frappe.get_meta(doctype)
-	children = {}
-	for df in m.get_table_fields():
-		children[df.options] = fields_of(frappe.get_meta(df.options))
-	return {
-		"doctype": doctype,
-		"issingle": bool(m.issingle),
-		"is_submittable": bool(m.is_submittable),
-		"is_tree": bool(m.is_tree),
-		"title_field": m.title_field,
-		"autoname": m.autoname,
-		"fields": fields_of(m),
-		"children": children,
-		"writable_permlevels": m.get_permlevel_access("write"),
-	}
+	return _common.meta_view(doctype)
 
 
 # --- writes -----------------------------------------------------------------------------------
@@ -402,52 +282,13 @@ def meta(doctype):
 
 @frappe.whitelist(methods=["POST"])
 def save(doctype, doc, name=None):
-	"""Save a draft (new or existing), or a single settings record. Never submits.
-
-	For an existing document only the fields sent are changed, and a child table sent is the whole
-	table. `modified` travels with an existing document, so somebody else's newer save is refused
-	rather than overwritten.
-	"""
+	"""Save a draft (new or existing), or a single settings record. Never submits (portal_common.save_doc)."""
 	_only_finance()
 	_doctype(doctype)
-	values = _json(doc, {}) or {}
-	for field in ("docstatus", "doctype", "amended_from", "workflow_state", "folt_rejection_reason"):
-		values.pop(field, None)
-	m = frappe.get_meta(doctype)
-
-	if m.issingle:
-		target = frappe.get_doc(doctype)
-		target.update(values)
-		target.save()
-	elif name:
-		target = frappe.get_doc(doctype, name)
-		if target.docstatus == 2:
-			frappe.throw(_("{0} is cancelled. Amend it to make a new version.").format(name))
-		target.update(values)
-		_template_taxes(target, m)
-		target.save()
-	else:
-		values.pop("name", None)
-		target = frappe.get_doc({"doctype": doctype, **values})
-		_template_taxes(target, m)
-		target.insert()
-	return {"name": target.name}
+	return {"name": _common.save_doc(doctype, doc, name).name}
 
 
-def _template_taxes(doc, m):
-	"""A tax template chosen with no tax rows gets the template's rows, as the Desk's form does.
-
-	ERPNext's controllers do not copy a template's rows on save; the Desk does it in the browser
-	when the template is picked. Doing it here keeps an invoice saved from the app from quietly
-	going out without its VAT.
-	"""
-	df = m.get_field("taxes_and_charges")
-	if not df or not doc.get("taxes_and_charges") or doc.get("taxes"):
-		return
-	from erpnext.controllers.accounts_controller import get_taxes_and_charges
-
-	for row in get_taxes_and_charges(df.options, doc.taxes_and_charges) or []:
-		doc.append("taxes", row)
+_template_taxes = _common.template_taxes
 
 
 # The setters each controller's own validate() runs, in its order, minus the checks: what turns a
@@ -463,82 +304,22 @@ _PREVIEW = {
 
 @frappe.whitelist(methods=["POST"])
 def preview(doctype, doc):
-	"""ERPNext's own defaults and totals for an unsaved draft. Writes nothing.
-
-	The form shows what ERPNext would make of the document -- item details, accounts, taxes from
-	the template, totals, outstanding, due date -- by running the controller's own methods on an
-	unsaved copy, so a total in the form is ERPNext's total, not one the browser added up.
-	"""
+	"""ERPNext's own defaults and totals for an unsaved draft. Writes nothing."""
 	_only_finance()
 	_doctype(doctype)
-	if not (frappe.has_permission(doctype, "create") or frappe.has_permission(doctype, "write")):
-		frappe.throw(_("You cannot prepare a {0}.").format(_(doctype)), frappe.PermissionError)
-	values = _json(doc, {}) or {}
-	values.pop("docstatus", None)
-	draft = frappe.get_doc({"doctype": doctype, **values})
-	draft.docstatus = 0
-	for method in _PREVIEW.get(doctype, ("set_missing_values",)):
-		fn = getattr(draft, method, None)
-		if not callable(fn):
-			continue
-		try:
-			fn()
-		except Exception:  # noqa: BLE001
-			# A half-filled form is normal while somebody types -- a party not chosen yet, an item
-			# half typed -- and the controllers do not all raise ValidationError for it. The
-			# preview is advice; the save validates for real and says what is missing.
-			frappe.clear_last_message()
-	return draft.as_dict(convert_dates_to_str=True)
+	return _common.preview_doc(doctype, doc, _PREVIEW.get(doctype, ("set_missing_values",)))
 
 
 @frappe.whitelist(methods=["POST"])
 def act(doctype, name, action, transition=None, reason=None):
 	"""Move a document: a workflow step, or ERPNext's submit / cancel / amend / delete.
 
-	A workflow step goes through apply_workflow exactly as the Desk's button does, with the reason
-	for a turn-down parked first (workflow_access). Submit and cancel are ERPNext's own; on an
-	approval-governed voucher they are refused by finance_approvals, so the screen offers the
-	workflow's moves instead.
+	On an approval-governed voucher submit and cancel are refused (portal_common.act_on, and
+	finance_approvals for every other door), so the screen offers the workflow's moves instead.
 	"""
 	_only_finance()
 	_doctype(doctype)
-	doc = frappe.get_doc(doctype, name)
-
-	if action == "transition":
-		if not transition:
-			frappe.throw(_("Which step?"))
-		if reason and reason.strip():
-			hold_rejection_reason(doctype, name, reason.strip())
-		apply_workflow(doc, transition)
-		return {"name": doc.name}
-	if action in ("submit", "cancel") and get_workflow_name(doctype):
-		# Not only finance_approvals' request check: a document with a workflow is posted and
-		# reversed by its workflow's moves, whoever and wherever the call comes from.
-		frappe.throw(
-			_("{0} is posted and reversed through its approval workflow. Use the workflow's steps.").format(_(doctype)),
-			frappe.PermissionError,
-			title=_("Needs approval"),
-		)
-	if action == "submit":
-		doc.submit()
-		return {"name": doc.name}
-	if action == "cancel":
-		doc.cancel()
-		return {"name": doc.name}
-	if action == "amend":
-		if doc.docstatus != 2:
-			frappe.throw(_("Only a cancelled document can be amended."))
-		if not frappe.has_permission(doctype, "amend", doc):
-			frappe.throw(_("You cannot amend {0}.").format(name), frappe.PermissionError)
-		new = frappe.copy_doc(doc)
-		new.amended_from = doc.name
-		new.docstatus = 0
-		new.insert()
-		return {"name": new.name}
-	if action == "delete":
-		frappe.delete_doc(doctype, name)
-		return {"name": None}
-	frappe.throw(_("Unknown action {0}.").format(action))
+	return _common.act_on(doctype, name, action, transition, reason)
 
 
 @frappe.whitelist(methods=["POST"])
@@ -546,11 +327,7 @@ def attach(doctype, docname):
 	"""Frappe's own upload_file, private, onto a Finance document; Frappe checks the write right."""
 	_only_finance()
 	_doctype(doctype)
-	frappe.form_dict.update({"doctype": doctype, "docname": docname, "is_private": 1})
-	from frappe.handler import upload_file
-
-	f = upload_file()
-	return {"name": f.name, "file_name": f.file_name, "file_url": f.file_url, "is_private": f.is_private}
+	return _common.attach_file(doctype, docname)
 
 
 @frappe.whitelist()
@@ -558,11 +335,7 @@ def copy(doctype, name):
 	"""An unsaved copy of a document, to start a new one from (Duplicate). Writes nothing."""
 	_only_finance()
 	_doctype(doctype)
-	source = frappe.get_doc(doctype, name)
-	source.check_permission("read")
-	new = frappe.copy_doc(source)
-	new.docstatus = 0
-	return new.as_dict(convert_dates_to_str=True)
+	return _common.copy_view(doctype, name)
 
 
 # --- searches and helpers ---------------------------------------------------------------------
@@ -574,16 +347,12 @@ def link_search(doctype, txt="", filters=None, page_length=20):
 	_only_finance()
 	if doctype in _HR_ONLY:
 		frappe.throw(_("{0} belongs to HR.").format(doctype), frappe.PermissionError)
-	from frappe.desk.search import search_link
-
-	return search_link(doctype, txt or "", filters=_json(filters), page_length=min(cint(page_length) or 20, 50))
+	return _common.link_search(doctype, txt, filters, page_length)
 
 
 def _call(method, args, allowed):
 	_only_finance()
-	if method not in allowed:
-		frappe.throw(_("{0} is not available from Finance.").format(method), frappe.PermissionError)
-	return frappe.call(method, **(_json(args, {}) or {}))
+	return _common.call_allowed(method, args, allowed, _("{0} is not available from Finance."))
 
 
 @frappe.whitelist(methods=["POST"])
@@ -623,55 +392,24 @@ def payment_reconciliation(action, doc, args=None):
 
 
 def _run(report, filters):
-	from frappe.desk.query_report import run
-
-	return run(_report(report), filters=_json(filters, {}) or {}, ignore_prepared_report=True)
+	return _common.run_report(_report(report), filters)
 
 
 @frappe.whitelist(methods=["POST"])
 def run_report(report, filters=None):
 	"""A native ERPNext report, run as the person asking, exactly as the Desk runs it."""
 	_only_finance()
-	out = _run(report, filters)
-	return {k: out.get(k) for k in ("columns", "result", "message", "chart", "report_summary", "add_total_row", "skip_total_row")}
+	return _common.report_view(_run(report, filters))
 
 
-def _cell(value):
-	if isinstance(value, str) and len(value) > 1 and value[0] == value[-1] == "'":
-		return value[1:-1]  # the reports quote their label rows ('Total', 'Opening')
-	return value
+_cell = _common._cell
 
 
 @frappe.whitelist()
 def export_report(report, filters=None, file_format="xlsx"):
 	"""The same report as a spreadsheet: the report's own rows and columns, nothing recomputed."""
 	_only_finance()
-	out = _run(report, filters)
-	columns = [c if isinstance(c, dict) else {"label": c, "fieldname": c} for c in out.get("columns") or []]
-	columns = [c for c in columns if not c.get("hidden")]
-	table = [[_(c.get("label") or c.get("fieldname")) for c in columns]]
-	for row in out.get("result") or []:
-		if isinstance(row, dict):
-			indent = "    " * cint(row.get("indent") or 0)
-			cells = [_cell(row.get(c.get("fieldname"))) for c in columns]
-			if cells and isinstance(cells[0], str):
-				cells[0] = indent + cells[0]
-		else:
-			cells = [_cell(v) for v in row[: len(columns)]]
-		table.append(["" if v is None else v for v in cells])
-
-	filename = f"{report} {nowdate()}"
-	if file_format == "csv":
-		buf = io.StringIO()
-		csv.writer(buf).writerows(table)
-		frappe.response.filename = f"{filename}.csv"
-		frappe.response.filecontent = buf.getvalue()
-	else:
-		from frappe.utils.xlsxutils import make_xlsx
-
-		frappe.response.filename = f"{filename}.xlsx"
-		frappe.response.filecontent = make_xlsx(table, report[:31]).getvalue()
-	frappe.response.type = "binary"
+	_common.export_report(report, _run(report, filters), file_format)
 
 
 # --- trees ------------------------------------------------------------------------------------
@@ -912,34 +650,7 @@ def _summarise(doctype, name):
 def approvals():
 	"""What waits on this person in the finance workflows, and what they have sent and is waiting."""
 	_only_finance()
-	governed = [dt for dt in DOCTYPES if get_workflow_name(dt) and frappe.has_permission(dt, "read")]
-	actions = frappe.get_list(
-		"Workflow Action",
-		filters={"status": "Open", "reference_doctype": ["in", governed or [""]]},
-		fields=["reference_doctype", "reference_name", "workflow_state", "creation"],
-		order_by="creation asc",
-		limit_page_length=200,
-	)
-	seen, waiting = set(), []
-	for a in actions:
-		key = (a.reference_doctype, a.reference_name)
-		if key in seen or not frappe.has_permission(a.reference_doctype, "read", a.reference_name):
-			continue
-		seen.add(key)
-		doc = frappe.get_doc(a.reference_doctype, a.reference_name)
-		moves = [t.action for t in get_transitions(doc)] if doc.docstatus < 2 else []
-		if not moves:
-			continue
-		waiting.append({"doctype": a.reference_doctype, "name": a.reference_name, "state": a.workflow_state, "since": a.creation,
-		                "moves": moves, **_summarise(a.reference_doctype, a.reference_name)})
-
-	mine = []
-	for dt in governed:
-		for row in frappe.get_list(dt, filters={"owner": frappe.session.user, "docstatus": 0}, fields=["name", "workflow_state", "modified"],
-		                           order_by="modified desc", limit_page_length=50):
-			mine.append({"doctype": dt, "name": row.name, "state": row.workflow_state, "since": row.modified, **_summarise(dt, row.name)})
-	mine.sort(key=lambda r: str(r["since"]), reverse=True)
-	return {"waiting": waiting, "mine": mine, "workflows": {dt: get_workflow_name(dt) for dt in governed}}
+	return _common.approvals_view(list(DOCTYPES), _summarise)
 
 
 _AUDITED = ("Journal Entry", "Sales Invoice", "Purchase Invoice", "Payment Entry", "Account", "Company", "Accounts Settings",

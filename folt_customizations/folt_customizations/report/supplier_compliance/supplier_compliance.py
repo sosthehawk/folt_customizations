@@ -3,6 +3,8 @@ a contact email, bank details on record (whether, never the number), and the wai
 buy from it without competition."""
 
 import frappe
+
+from folt_customizations.report_common import readable
 from frappe import _
 from frappe.utils import getdate, nowdate
 
@@ -16,10 +18,10 @@ def execute(filters=None):
 	                            order_by="supplier_name", limit_page_length=0)
 	names = [s.name for s in suppliers] or [""]
 	banks = {}
-	for b in frappe.get_all("Bank Account", filters={"party_type": "Supplier", "party": ["in", names]}, fields=["party"]):
+	for b in readable("Bank Account", filters={"party_type": "Supplier", "party": ["in", names]}, fields=["party"]):
 		banks[b.party] = banks.get(b.party, 0) + 1
 	waivers = {}
-	for w in frappe.get_all("Derogation Waiver Request", filters={"supplier": ["in", names], "docstatus": ["<", 2]}, fields=["supplier"]):
+	for w in readable("Derogation Waiver Request", filters={"supplier": ["in", names], "docstatus": ["<", 2]}, fields=["supplier"]):
 		waivers[w.supplier] = waivers.get(w.supplier, 0) + 1
 	today = getdate(nowdate())
 	rows = []

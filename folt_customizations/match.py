@@ -109,6 +109,10 @@ def validate(doc, method=None):
 	"""Purchase Invoice validate: write the match, and gate a quiet approval of a discrepancy."""
 	if doc.get("is_return") or not doc.meta.has_field("folt_match_status"):
 		return
+	# The override reason is the approver's, written here from the reason their Approve parked; a
+	# value anybody typed onto the invoice is put back to what it was (ADR-008 phase 8).
+	before = doc.get_doc_before_save()
+	doc.folt_match_override_reason = before.get("folt_match_override_reason") if before else None
 	result = compute(doc)
 	doc.folt_match_status = result["status"]
 	doc.folt_match_notes = "\n".join(f["message"] for f in result["flags"]) or None
@@ -131,7 +135,7 @@ def _approval_needs_reason(doc, result):
 	if before.get(wf.workflow_state_field) == moving_to or not target or int(target.doc_status or 0) != 1:
 		return
 	reason = held_reason(doc.doctype, doc.name, frappe.db.get_value(doc.doctype, doc.name, "modified"))
-	if not (reason or "").strip() and not (doc.get("folt_match_override_reason") or "").strip():
+	if not (reason or "").strip():
 		frappe.throw(
 			_("{0} does not match its order and receipt:\n{1}\nApprove it with your reason, or send it back.").format(doc.name, doc.folt_match_notes),
 			title=_("Approving a discrepancy needs a reason"),

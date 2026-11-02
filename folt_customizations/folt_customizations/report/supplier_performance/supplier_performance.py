@@ -6,7 +6,7 @@ import frappe
 from frappe import _
 from frappe.utils import date_diff, flt
 
-from folt_customizations.report_common import period
+from folt_customizations.report_common import period, readable
 
 
 def execute(filters=None):
@@ -18,7 +18,7 @@ def execute(filters=None):
 	names = [o.name for o in orders] or [""]
 	last = {}
 	recv = frappe.get_all("Purchase Receipt Item", filters={"purchase_order": ["in", names], "docstatus": 1}, fields=["purchase_order", "parent", "received_qty", "rejected_qty"])
-	pr_dates = dict(frappe.get_all("Purchase Receipt", filters={"name": ["in", list({r.parent for r in recv}) or [""]]}, fields=["name", "posting_date"], as_list=True))
+	pr_dates = dict(readable("Purchase Receipt", filters={"name": ["in", list({r.parent for r in recv}) or [""]]}, fields=["name", "posting_date"], as_list=True))
 	got, rejected = {}, {}
 	for r in recv:
 		d = pr_dates.get(r.parent)
@@ -27,9 +27,9 @@ def execute(filters=None):
 		got[r.purchase_order] = got.get(r.purchase_order, 0) + flt(r.received_qty)
 		rejected[r.purchase_order] = rejected.get(r.purchase_order, 0) + flt(r.rejected_qty)
 	unmatched = {}
-	for p in frappe.get_all("Purchase Invoice", filters={"docstatus": 1, "folt_match_status": "Discrepancies", "supplier": ["in", list({o.supplier for o in orders}) or [""]]}, fields=["supplier"]):
+	for p in readable("Purchase Invoice", filters={"docstatus": 1, "folt_match_status": "Discrepancies", "supplier": ["in", list({o.supplier for o in orders}) or [""]]}, fields=["supplier"]):
 		unmatched[p.supplier] = unmatched.get(p.supplier, 0) + 1
-	scores = {s.name: s for s in frappe.get_all("Supplier Scorecard", fields=["name", "supplier_score", "status"])}
+	scores = {s.name: s for s in readable("Supplier Scorecard", fields=["name", "supplier_score", "status"])}
 	by = {}
 	for o in orders:
 		s = by.setdefault(o.supplier, {"supplier": o.supplier, "supplier_name": o.supplier_name, "orders": 0, "value": 0.0, "received_orders": 0, "on_time": 0,

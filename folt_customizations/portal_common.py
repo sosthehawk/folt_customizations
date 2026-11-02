@@ -17,6 +17,15 @@ FILTER_OPS = {"=", "!=", ">", "<", ">=", "<=", "like", "not like", "in", "not in
 STD_FIELDS = {"name", "owner", "creation", "modified", "modified_by", "docstatus", "amended_from"}
 
 
+
+def _may_make(doc):
+	"""The workflow moves this person may make on the document: Frappe's get_transitions (role and
+	condition) less those its self-approval rule forbids them -- which get_transitions leaves in and
+	apply_workflow refuses only when the button is pressed."""
+	from frappe.model.workflow import get_transitions, has_approval_access
+
+	return [t for t in get_transitions(doc) if has_approval_access(frappe.session.user, doc, t)]
+
 def parse_json(value, default=None):
 	if value in (None, ""):
 		return default
@@ -70,7 +79,15 @@ def version_summary(data):
 # who may do what -- Frappe's document permissions and the doctype's workflow do.
 
 # Never written from a form: the lifecycle fields belong to submit, the workflow and amend.
-PROTECTED = ("docstatus", "doctype", "amended_from", "workflow_state", "folt_rejection_reason")
+# Fields a person never sets through an edge. `owner` decides who an owner-only permission
+# belongs to and whom the self-approval rule protects; `name` on an existing document would point the
+# save at another record's row; the rest are Frappe's bookkeeping, or facts FoLT's own code records
+# (a match approved despite its flags, a supplier's acknowledgement on the portal).
+PROTECTED = (
+	"docstatus", "doctype", "amended_from", "workflow_state", "folt_rejection_reason",
+	"name", "owner", "creation", "modified_by",
+	"folt_match_override_reason", "folt_supplier_acknowledged_on", "folt_supplier_acknowledged_by",
+)
 
 
 def mask(value):
@@ -84,7 +101,7 @@ def record_view(doctype, name=None, masker=None):
 	payments against it, timeline, attachments and print formats. `masker(doctype, data)` may
 	blank fields the reader should only see in part."""
 	from frappe.desk.form.load import get_docinfo
-	from frappe.model.workflow import get_transitions, get_workflow, get_workflow_name
+	from frappe.model.workflow import get_workflow, get_workflow_name
 
 	from folt_customizations.workflow_access import is_turn_down
 
@@ -108,7 +125,7 @@ def record_view(doctype, name=None, masker=None):
 		state = doc.get(wf.workflow_state_field)
 		moves = []
 		if doc.docstatus < 2:
-			for t in get_transitions(doc):
+			for t in _may_make(doc):
 				from folt_customizations.match import needs_reason as match_needs_reason
 
 				moves.append({"action": t.action, "next_state": t.next_state,
@@ -237,6 +254,18 @@ def save_doc(doctype, doc, name=None, protected=PROTECTED):
 		target.save()
 	elif name:
 		target = frappe.get_doc(doctype, name)
+		# Child rows sent back keep their own names, but each must already be this document's:
+		# a row named after another document's row would be written over that row.
+		for field in m.get_table_fields():
+			rows = values.get(field.fieldname)
+			if isinstance(rows, list):
+				mine = {r.name for r in target.get(field.fieldname) or []}
+				for row in rows:
+					if isinstance(row, dict) and row.get("name") and row["name"] not in mine:
+						row.pop("name")
+					if isinstance(row, dict):
+						for key in ("parent", "parenttype", "parentfield", "owner", "docstatus"):
+							row.pop(key, None)
 		if target.docstatus == 2:
 			frappe.throw(_("{0} is cancelled. Amend it to make a new version.").format(name))
 		target.update(values)
@@ -291,6 +320,8 @@ def preview_doc(doctype, doc, methods, after=None):
 	if after:
 		try:
 			after(draft)
+		except frappe.PermissionError:
+			raise  # a refusal is not a half-filled form
 		except Exception:  # noqa: BLE001 -- advice, as above
 			frappe.clear_last_message()
 	return draft.as_dict(convert_dates_to_str=True)
@@ -437,7 +468,7 @@ def export_report(report, out, file_format="xlsx"):
 
 def approvals_view(doctypes, summarise):
 	"""What waits on this person in the given workflows, and what they have sent that is waiting."""
-	from frappe.model.workflow import get_transitions, get_workflow_name
+	from frappe.model.workflow import get_workflow_name
 
 	governed = [dt for dt in doctypes if get_workflow_name(dt) and frappe.has_permission(dt, "read")]
 	actions = frappe.get_list(
@@ -454,7 +485,7 @@ def approvals_view(doctypes, summarise):
 			continue
 		seen.add(key)
 		doc = frappe.get_doc(a.reference_doctype, a.reference_name)
-		moves = [t.action for t in get_transitions(doc)] if doc.docstatus < 2 else []
+		moves = [t.action for t in _may_make(doc)] if doc.docstatus < 2 else []
 		if not moves:
 			continue
 		waiting.append({"doctype": a.reference_doctype, "name": a.reference_name, "state": a.workflow_state, "since": a.creation,

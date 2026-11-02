@@ -185,10 +185,36 @@ def _keeps_bank_details() -> bool:
 	return bool(_roles() & set(BANK_KEEPERS))
 
 
+_BANK_FIELDS = ("bank_account_no", "iban", "branch_code")
+
+
 def _mask_bank(doctype, data):
 	if doctype == "Bank Account" and not _keeps_bank_details():
-		for field in ("bank_account_no", "iban", "branch_code"):
+		for field in _BANK_FIELDS:
 			data[field] = _common.mask(data.get(field))
+
+
+def _mask_bank_history(doctype, out):
+	"""The same mask on the record's history: a Version holds each change's old and new values."""
+	if doctype != "Bank Account" or _keeps_bank_details():
+		return
+	for version in (out.get("timeline") or {}).get("versions") or []:
+		data = _json(version.get("data"), None)
+		if not isinstance(data, dict):
+			continue
+		for change in data.get("changed") or []:
+			if isinstance(change, list) and len(change) == 3 and change[0] in _BANK_FIELDS:
+				change[1], change[2] = _common.mask(change[1]), _common.mask(change[2])
+		version["data"] = frappe.as_json(data)
+
+
+def _refuse_bank_probes(doctype, *parts):
+	"""A filter, sort or search over a masked field would read it back a character at a time."""
+	if doctype != "Bank Account" or _keeps_bank_details():
+		return
+	text = " ".join(str(p) for p in parts if p)
+	if any(field in text for field in _BANK_FIELDS):
+		frappe.throw(_("Bank account numbers are not searched or sorted from Procurement."), frappe.PermissionError)
 
 
 def _may(doctype, ptype="read"):
@@ -272,6 +298,7 @@ def records(doctype, q=None, filters=None, order_by=None, start=0, page_length=2
 		extra.append(["Material Request", "material_request_type", "=", "Purchase"])
 	if doctype in ("Contact", "Address", "Bank Account"):
 		extra.extend(_supplier_scope(doctype))
+	_refuse_bank_probes(doctype, filters, order_by)
 	return _common.list_view(doctype, wanted, search, q=q, raw_filters=filters, order_by=order_by, start=start, page_length=page_length, extra_filters=extra)
 
 
@@ -298,6 +325,7 @@ def record(doctype, name=None):
 	_doctype(doctype)
 	_assert_suppliers(doctype, name)
 	out = _common.record_view(doctype, name, masker=_mask_bank)
+	_mask_bank_history(doctype, out)
 	if doctype in READ_ONLY:
 		out["permissions"].update({"write": False, "create": False, "submit": False, "cancel": False, "amend": False, "delete": False})
 	return out
@@ -323,12 +351,18 @@ def save(doctype, doc, name=None):
 	_writable(doctype)
 	values = _json(doc, {}) or {}
 	if doctype in ("Contact", "Address"):
+		if not name and values.get("links") is None:
+			frappe.throw(_("A contact or address kept from Procurement is linked to a supplier."), frappe.PermissionError)
 		_links_to_suppliers_only(values)
 		if name:
 			_assert_suppliers(doctype, name)
 	if doctype == "Bank Account":
+		if not name:
+			values["party_type"] = values.get("party_type") or "Supplier"
 		if (values.get("party_type") or "Supplier") != "Supplier" or (name and frappe.db.get_value("Bank Account", name, "party_type") != "Supplier"):
 			frappe.throw(_("Procurement keeps suppliers' bank accounts only."), frappe.PermissionError)
+		if not name and not values.get("party"):
+			frappe.throw(_("A bank account kept from Procurement names its supplier."), frappe.PermissionError)
 		if name and not _keeps_bank_details():
 			# What this reader was shown is masked: never write the mask back over the number.
 			for field in ("bank_account_no", "iban", "branch_code"):
@@ -365,6 +399,8 @@ def _requester_defaults(values):
 def preview(doctype, doc):
 	"""ERPNext's own defaults and totals for an unsaved draft. Writes nothing."""
 	_writable(doctype)
+	if doctype in ("Contact", "Address", "Bank Account"):
+		frappe.throw(_("{0} has no preview in Procurement.").format(_(doctype)), frappe.PermissionError)
 	after = None
 	if doctype == "Material Request":
 		from folt_customizations.material_request import preview as after
@@ -393,7 +429,13 @@ def attach(doctype, docname):
 def copy(doctype, name):
 	"""An unsaved copy of a document, to start a new one from (Duplicate). Writes nothing."""
 	_writable(doctype)
-	return _common.copy_view(doctype, name)
+	_assert_suppliers(doctype, name)
+	out = _common.copy_view(doctype, name)
+	if doctype == "Bank Account":
+		# A new account is somebody else's account number, never a copy of this one's.
+		for field in _BANK_FIELDS:
+			out[field] = None
+	return out
 
 
 # --- searches and helpers ---------------------------------------------------------------------
@@ -414,6 +456,14 @@ def lookup(method, args=None):
 	_only_procurement()
 	if not _is_staff() and method not in REQUESTER_LOOKUPS:
 		frappe.throw(_("{0} is for the procurement roles.").format(method), frappe.PermissionError)
+	if method == "erpnext.controllers.accounts_controller.get_taxes_and_charges":
+		values = _json(args, {}) or {}
+		# ERPNext reads any document's `taxes` rows with no permission check; here only a purchase
+		# tax template the reader may read.
+		if values.get("master_doctype") != "Purchase Taxes and Charges Template":
+			frappe.throw(_("Only purchase tax templates are read here."), frappe.PermissionError)
+		if values.get("master_name") and not frappe.has_permission("Purchase Taxes and Charges Template", "read", values["master_name"]):
+			frappe.throw(_("{0} is not open to you.").format(values["master_name"]), frappe.PermissionError)
 	out = _common.call_allowed(method, args, LOOKUPS, _("{0} is not available from Procurement."))
 	# A maker answers an unsaved Document: the form takes it as plain values, dates as strings.
 	return out.as_dict(convert_dates_to_str=True) if hasattr(out, "as_dict") else out
@@ -846,6 +896,9 @@ def approvals():
 	return _common.approvals_view([dt for dt in CHAIN if _is_staff() or dt in REQUESTER_DOCTYPES], _summarise)
 
 
+_EMAIL_ARGS = ("doctype", "name", "recipients", "cc", "bcc", "subject", "content", "send_email", "print_format", "print_letterhead", "send_me_a_copy", "read_receipt", "attach_document_print")
+
+
 @frappe.whitelist(methods=["POST"])
 def operate(method, args=None):
 	"""One of the writing helpers a procurement screen uses (OPERATIONS): sending a document by
@@ -854,11 +907,19 @@ def operate(method, args=None):
 	if not _is_staff():
 		frappe.throw(_("{0} is for the procurement roles.").format(method), frappe.PermissionError)
 	values = _json(args, {}) or {}
-	if values.get("doctype") and values.get("doctype") not in DOCTYPES:
-		frappe.throw(_("{0} is not part of Procurement.").format(values.get("doctype")), frappe.PermissionError)
-	if values.get("doctype") and values.get("name"):
-		frappe.get_doc(values["doctype"], values["name"]).check_permission("email")
-	return _common.call_allowed(method, values, OPERATIONS, _("{0} is not available from Procurement."))
+	if method not in OPERATIONS:
+		frappe.throw(_("{0} is not available from Procurement.").format(method), frappe.PermissionError)
+	# An email from Procurement is about one of its documents, sent as the person, with that
+	# document's print: never a free-standing message, another sender, or files picked by name.
+	if not values.get("doctype") or not values.get("name"):
+		frappe.throw(_("An email from Procurement is sent about a document."), frappe.PermissionError)
+	if values["doctype"] not in DOCTYPES or values["doctype"] in ("Bank Account", "Contact", "Address"):
+		frappe.throw(_("{0} is not emailed from Procurement.").format(values.get("doctype")), frappe.PermissionError)
+	frappe.get_doc(values["doctype"], values["name"]).check_permission("email")
+	kept = {k: values[k] for k in _EMAIL_ARGS if k in values}
+	# No `sender`: Frappe sends as the session user. No `attachments`: Frappe copies named files
+	# onto the message without asking whether the sender may read them.
+	return _common.call_allowed(method, kept, OPERATIONS, _("{0} is not available from Procurement."))
 
 
 @frappe.whitelist(methods=["POST"])

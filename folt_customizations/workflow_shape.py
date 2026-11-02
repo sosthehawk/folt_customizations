@@ -91,8 +91,13 @@ def _forward_edges(workflow) -> dict[str, list[str]]:
 	state as its own successor.
 	"""
 	edges: dict[str, list[str]] = {}
+	cancelled = _cancelled_states(workflow)
 	for row in workflow.transitions:
 		if row.state == row.next_state:
+			continue
+		# Cancelling is not progress either: Approved -> Cancel -> Cancelled drawn as a step tells
+		# every reader that every voucher and order ends cancelled.
+		if row.next_state in cancelled:
 			continue
 		if is_turn_down(workflow, row.state, row.next_state):
 			continue
@@ -100,6 +105,11 @@ def _forward_edges(workflow) -> dict[str, list[str]]:
 		if row.next_state not in edges[row.state]:
 			edges[row.state].append(row.next_state)
 	return edges
+
+
+def _cancelled_states(workflow) -> set[str]:
+	"""The states whose doc_status is 2: where a cancelled document lives."""
+	return {row.state for row in workflow.states if int(row.doc_status or 0) == 2}
 
 
 def _reaches(edges: dict[str, list[str]], start: str) -> set[str]:
@@ -339,11 +349,13 @@ def _off_path(workflow, states: list[str], on_path: set[str], first: str | None)
 	"""The states a tracker does not draw as steps, and why each one is not a step.
 
 	`turned_down` states are reachable and meaningful -- they are where a rejected document
-	lives -- so a caller renders them beside the tracker rather than in it. `unreachable` means
+	lives -- so a caller renders them beside the tracker rather than in it. `cancelled` states
+	(doc_status 2) are where a cancelled document lives: ended, but not the end of the path. `unreachable` means
 	the workflow has a state nothing leads to, which is a fixture bug rather than a design, and
 	worth reporting rather than hiding.
 	"""
 	off = {}
+	cancelled = _cancelled_states(workflow)
 	for state in states:
 		if state in on_path:
 			continue
@@ -358,7 +370,7 @@ def _off_path(workflow, states: list[str], on_path: set[str], first: str | None)
 		)
 
 		off[state] = {
-			"kind": "turned_down" if turned_down else ("detour" if reachable else "unreachable"),
+			"kind": "cancelled" if state in cancelled else "turned_down" if turned_down else ("detour" if reachable else "unreachable"),
 			"roles": _movers(workflow, state),
 			"custodian": next(
 				(row.allow_edit for row in workflow.states if row.state == state and row.allow_edit),

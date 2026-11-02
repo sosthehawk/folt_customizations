@@ -48,6 +48,7 @@ def validate(doc, method=None):
          registration expired, which is a filing problem, not grounds to void the award.
     """
     require_award_authority(doc)
+    keep_acknowledgement(doc)
     approval_tier(doc)
 
     if not doc.supplier:
@@ -95,6 +96,21 @@ def validate(doc, method=None):
                     ),
                 title=_("Pre-qualification Expired"),
             )
+
+
+_ACKNOWLEDGEMENT = ("folt_supplier_acknowledged_on", "folt_supplier_acknowledged_by")
+
+
+def keep_acknowledgement(doc, method=None):
+    """The supplier's acknowledgement is written by the portal (supplier_portal.acknowledge_order)
+    and by nobody else: a person's save puts back whatever was there."""
+    from folt_customizations.workflow_access import _is_a_person_acting
+
+    if not _is_a_person_acting(doc):
+        return
+    before = doc.get_doc_before_save()
+    for field in _ACKNOWLEDGEMENT:
+        doc.set(field, before.get(field) if before else None)
 
 
 def require_award_authority(doc):

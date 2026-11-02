@@ -68,7 +68,9 @@ LINK_TARGETS = set(DOCTYPES) | {
 }
 
 # Fields that only the lifecycle, the tree or the server set.
-_PROTECTED = {"docstatus", "doctype", "workflow_state", "is_active", "folt_rejection_reason", "lft", "rgt", "old_parent"}
+# `name`, `owner` and Frappe's bookkeeping are never the client's to set (see portal_common.PROTECTED).
+_PROTECTED = {"docstatus", "doctype", "workflow_state", "is_active", "folt_rejection_reason", "lft", "rgt", "old_parent",
+              "name", "owner", "creation", "modified_by"}
 
 
 # --- the edge -------------------------------------------------------------------------------

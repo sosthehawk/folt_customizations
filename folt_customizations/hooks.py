@@ -255,6 +255,7 @@ doc_events = {
     # cancellation, which says nothing to anybody, is not it.
     "*": {
         "validate": [
+            "folt_customizations.workflow_access.keep_owner",
             "folt_customizations.workflow_access.enforce_state_custodian",
             "folt_customizations.workflow_access.require_rejection_reason",
         ],
@@ -319,11 +320,26 @@ doc_events = {
     # purchase_order.py.
     "Purchase Order": {
         "validate": "folt_customizations.purchase_order.validate",
+        "before_update_after_submit": "folt_customizations.purchase_order.keep_acknowledgement",
+        "before_submit": "folt_customizations.finance_approvals.refuse_direct_submit",
+        "before_cancel": "folt_customizations.finance_approvals.refuse_direct_submit",
     },
     # A purchase requisition (ADR-008): the activity it is for fills what it can, the lines'
     # estimates add up to its estimated total, and it says why before it goes for review.
     "Material Request": {
         "validate": "folt_customizations.material_request.validate",
+        "before_submit": "folt_customizations.finance_approvals.refuse_direct_submit",
+        "before_cancel": "folt_customizations.finance_approvals.refuse_direct_submit",
+    },
+    # The award documents go forward only by their approval workflows; a direct submit through
+    # the REST API would skip the committee or the authorisation (finance_approvals, ADR-008).
+    "Procurement Committee Evaluation": {
+        "before_submit": "folt_customizations.finance_approvals.refuse_direct_submit",
+        "before_cancel": "folt_customizations.finance_approvals.refuse_direct_submit",
+    },
+    "Derogation Waiver Request": {
+        "before_submit": "folt_customizations.finance_approvals.refuse_direct_submit",
+        "before_cancel": "folt_customizations.finance_approvals.refuse_direct_submit",
     },
     # A Procurement Committee Evaluation scores the bids received against one RFQ, and a bid
     # can be withdrawn while the committee is still scoring it. Frappe validates links before

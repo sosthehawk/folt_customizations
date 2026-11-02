@@ -68,6 +68,15 @@ def _from_activity(doc):
 	name = doc.get("folt_activity_requisition")
 	if not name:
 		return
+	# Whoever links an activity fills the requisition from it (budget line, department, project,
+	# cost centre), so they must be able to read it -- as activity_defaults asks. Checked when the
+	# link is made or changed, not on an approver's later save of a link somebody else made.
+	from folt_customizations.workflow_access import _is_a_person_acting
+
+	before = doc.get_doc_before_save()
+	if _is_a_person_acting(doc) and (not before or before.get("folt_activity_requisition") != name):
+		if not frappe.has_permission("Activity Requisition", "read", name):
+			frappe.throw(_("Activity Requisition {0} is not open to you.").format(frappe.bold(name)), frappe.PermissionError)
 	activity = frappe.db.get_value(
 		"Activity Requisition", name,
 		["docstatus", "workflow_state", "company", "requested_by", "budget_classification", *_LINE_FROM_ACTIVITY],

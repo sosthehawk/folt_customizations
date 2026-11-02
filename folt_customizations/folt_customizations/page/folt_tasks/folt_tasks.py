@@ -117,7 +117,7 @@ def _for_doctype(doctype, shaped, states_roles, roles, bucket, limit) -> dict:
 	submitted = {row.state for row in workflow.states if int(row.doc_status or 0) == 1}
 	owner_roles = {state: roles_the_owner_can_move(workflow, state) for state in states_roles}
 	ended = set(shaped["terminal"]) | {
-		state for state, info in shaped["off_path"].items() if info["kind"] == "turned_down"
+		state for state, info in shaped["off_path"].items() if info["kind"] in ("turned_down", "cancelled")
 	}
 
 	fields = _fields(doctype, state_field)

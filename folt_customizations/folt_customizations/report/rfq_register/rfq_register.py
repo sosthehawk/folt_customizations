@@ -5,7 +5,7 @@ import frappe
 from frappe import _
 from frappe.utils import flt, get_datetime, now_datetime
 
-from folt_customizations.report_common import period
+from folt_customizations.report_common import period, readable
 
 
 def execute(filters=None):
@@ -20,9 +20,9 @@ def execute(filters=None):
 	bids = {}
 	for i in frappe.get_all("Supplier Quotation Item", filters={"request_for_quotation": ["in", names], "docstatus": 1}, fields=["request_for_quotation", "parent"], distinct=True):
 		bids.setdefault(i.request_for_quotation, set()).add(i.parent)
-	heads = {q.name: q for q in frappe.get_all("Supplier Quotation", filters={"name": ["in", [p for s in bids.values() for p in s] or [""]]},
+	heads = {q.name: q for q in readable("Supplier Quotation", filters={"name": ["in", [p for s in bids.values() for p in s] or [""]]},
 	                                           fields=["name", "supplier_name", "base_grand_total"])}
-	evals = {e.request_for_quotation: e for e in frappe.get_all("Procurement Committee Evaluation", filters={"request_for_quotation": ["in", names], "docstatus": ["<", 2]},
+	evals = {e.request_for_quotation: e for e in readable("Procurement Committee Evaluation", filters={"request_for_quotation": ["in", names], "docstatus": ["<", 2]},
 	                                                             fields=["name", "request_for_quotation", "workflow_state"])}
 	rows = []
 	for r in rfqs:

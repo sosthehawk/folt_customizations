@@ -430,7 +430,7 @@ def _feed_item(row, title: str, shaped: dict, tones: dict) -> dict:
 	# Only turn-downs carry a reason: spa.act parks one for nothing else.
 	elif ((shaped.get("off_path") or {}).get(state) or {}).get("kind") == "turned_down" or reason:
 		kind = "turned_down"
-	elif state in (shaped.get("terminal") or []):
+	elif state in (shaped.get("terminal") or []) or ((shaped.get("off_path") or {}).get(state) or {}).get("kind") == "cancelled":
 		kind = "finished"
 	else:
 		kind = "forward"

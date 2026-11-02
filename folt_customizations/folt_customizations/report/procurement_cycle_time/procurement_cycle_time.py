@@ -5,12 +5,12 @@ import frappe
 from frappe import _
 from frappe.utils import date_diff
 
-from folt_customizations.report_common import period
+from folt_customizations.report_common import period, readable
 
 
 def _first(child, link, values, parent_doctype, date_field):
 	rows = frappe.get_all(child, filters={link: ["in", values or [""]], "docstatus": 1}, fields=[link, "parent"])
-	dates = dict(frappe.get_all(parent_doctype, filters={"name": ["in", list({r.parent for r in rows}) or [""]]}, fields=["name", date_field], as_list=True))
+	dates = dict(readable(parent_doctype, filters={"name": ["in", list({r.parent for r in rows}) or [""]]}, fields=["name", date_field], as_list=True))
 	out = {}
 	for r in rows:
 		d = dates.get(r.parent)
@@ -31,11 +31,11 @@ def execute(filters=None):
 			mr_of.setdefault(l.parent, l.material_request)
 		if l.supplier_quotation:
 			sq_of.setdefault(l.parent, l.supplier_quotation)
-	mr_dates = dict(frappe.get_all("Material Request", filters={"name": ["in", list(mr_of.values()) or [""]]}, fields=["name", "transaction_date"], as_list=True))
-	sq_dates = dict(frappe.get_all("Supplier Quotation", filters={"name": ["in", list(sq_of.values()) or [""]]}, fields=["name", "transaction_date"], as_list=True))
+	mr_dates = dict(readable("Material Request", filters={"name": ["in", list(mr_of.values()) or [""]]}, fields=["name", "transaction_date"], as_list=True))
+	sq_dates = dict(readable("Supplier Quotation", filters={"name": ["in", list(sq_of.values()) or [""]]}, fields=["name", "transaction_date"], as_list=True))
 	rfq_of = dict(frappe.get_all("Supplier Quotation Item", filters={"parent": ["in", list(sq_of.values()) or [""]], "request_for_quotation": ["is", "set"]},
 	                             fields=["parent", "request_for_quotation"], as_list=True))
-	rfq_dates = dict(frappe.get_all("Request for Quotation", filters={"name": ["in", list(rfq_of.values()) or [""]]}, fields=["name", "transaction_date"], as_list=True))
+	rfq_dates = dict(readable("Request for Quotation", filters={"name": ["in", list(rfq_of.values()) or [""]]}, fields=["name", "transaction_date"], as_list=True))
 	receipt = _first("Purchase Receipt Item", "purchase_order", names, "Purchase Receipt", "posting_date")
 	invoice = _first("Purchase Invoice Item", "purchase_order", names, "Purchase Invoice", "posting_date")
 	gap = lambda a, b: date_diff(b, a) if a and b else None  # noqa: E731

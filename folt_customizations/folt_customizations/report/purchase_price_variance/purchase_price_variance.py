@@ -5,7 +5,7 @@ import frappe
 from frappe import _
 from frappe.utils import flt
 
-from folt_customizations.report_common import period
+from folt_customizations.report_common import period, readable
 
 
 def execute(filters=None):
@@ -17,7 +17,7 @@ def execute(filters=None):
 	lines = frappe.get_all("Purchase Invoice Item", filters={"parent": ["in", list(heads) or [""]], "po_detail": ["is", "set"]},
 	                       fields=["parent", "item_code", "item_name", "qty", "base_rate", "purchase_order", "po_detail"])
 	po_rates = dict(frappe.get_all("Purchase Order Item", filters={"name": ["in", [l.po_detail for l in lines] or [""]]}, fields=["name", "base_rate"], as_list=True))
-	last = dict(frappe.get_all("Item", filters={"name": ["in", list({l.item_code for l in lines}) or [""]]}, fields=["name", "last_purchase_rate"], as_list=True))
+	last = dict(readable("Item", filters={"name": ["in", list({l.item_code for l in lines}) or [""]]}, fields=["name", "last_purchase_rate"], as_list=True))
 	rows = []
 	for l in lines:
 		h = heads[l.parent]

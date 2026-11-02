@@ -53,6 +53,24 @@ REJECTION_REASON_FIELD = "folt_rejection_reason"
 REASON_HOLD_SECONDS = 120
 
 
+def keep_owner(doc, method=None):
+	"""validate on every doctype: who a document belongs to is not something a person edits.
+
+	`owner` decides whose an owner-only permission is (a requester's own requisitions) and whom the
+	self-approval rule protects. Frappe lets any save carry it -- the REST API's PUT and insert, and
+	frappe.client -- so an employee could take over a colleague's draft, and an approver could hand
+	their own document to somebody else and then approve it. A System Manager may still reassign
+	one; FoLT's own code and ERPNext's (ignore_permissions, system flags) are not people.
+	"""
+	if not _is_a_person_acting(doc) or "System Manager" in frappe.get_roles():
+		return
+	if doc.is_new():
+		return  # Frappe stamps the inserting user as owner, whatever the insert carried
+	before = doc.get_doc_before_save()
+	if before and before.owner and doc.owner != before.owner:
+		frappe.throw(_("Who {0} belongs to is not changed by editing it.").format(frappe.bold(doc.name)), frappe.PermissionError)
+
+
 def enforce_state_custodian(doc, method=None):
 	"""Refuse a change to a workflow document by anyone but the role holding its current step.
 
@@ -392,6 +410,28 @@ def granted(doctype: str, role: str, permlevel: int = 0):
 			return perm
 
 
+def _granted_to_owner(doctype: str, role: str):
+	"""The owner-only (if_owner) rule for `role`, if that is all it holds."""
+	for perm in frappe.get_meta(doctype).permissions:
+		if perm.role == role and perm.permlevel == 0 and perm.if_owner:
+			return perm
+
+
+def _raiser_only(doctype: str, role: str) -> bool:
+	"""Whether every step the workflow gives `role` starts at its first state: the role raises its
+	own documents and sends them on (the requester's requisition, ADR-008), so a rule that holds
+	on the documents it created is the whole of what it needs."""
+	from frappe.model.workflow import get_workflow_name
+
+	name = get_workflow_name(doctype)
+	if not name:
+		return False
+	wf = frappe.get_cached_doc("Workflow", name)
+	first = wf.states[0].state if wf.states else None
+	moves = [t for t in wf.transitions if t.allowed == role]
+	return bool(moves) and all(t.state == first for t in moves)
+
+
 def audit(verbose: bool = True) -> dict:
 	"""Check the granted permissions against what the workflows require, both directions.
 
@@ -414,7 +454,7 @@ def audit(verbose: bool = True) -> dict:
 	missing, unmapped = [], []
 
 	for (doctype, role), ptypes in sorted(required.items()):
-		perm = granted(doctype, role)
+		perm = granted(doctype, role) or (_raiser_only(doctype, role) and _granted_to_owner(doctype, role))
 		absent = sorted(ptype for ptype in ptypes if not (perm and perm.get(ptype)))
 		if absent:
 			missing.append({"doctype": doctype, "role": role, "ptypes": absent})

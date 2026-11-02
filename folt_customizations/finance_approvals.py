@@ -1,5 +1,6 @@
 """Approval before posting: Journal Entry, Payment Entry and Purchase Invoice -- and, since
-ADR-008, the purchase requisition (Material Request), which goes forward the same way.
+ADR-008, the buying documents that go forward the same way: the purchase requisition (Material
+Request), the committee evaluation, the derogation waiver and the purchase order.
 
 Each of the three carries a workflow (fixtures: FoLT Journal Entry / Payment Entry / Purchase
 Invoice Approval). The preparer -- Accounts User -- submits it for approval, an Accounts Manager
@@ -28,13 +29,21 @@ from urllib.parse import unquote
 
 import frappe
 from frappe import _
-from frappe.model.workflow import get_workflow, get_workflow_name
+from frappe.model.workflow import get_workflow, get_workflow_name, has_approval_access, is_transition_condition_satisfied
 
 from folt_customizations.workflow_access import _is_a_person_acting
 
-GOVERNED = ("Journal Entry", "Payment Entry", "Purchase Invoice", "Material Request")
+# The buying documents joined in ADR-008 (phase 8): the requisition, the committee's evaluation,
+# the waiver and the order each go forward only by their approval workflow, and each was open to a
+# direct submit by a role that holds Submit on it (Purchase and Stock users on the requisition,
+# Purchase users on the order, the Head of Finance on the evaluation, Finance Officer and Executive
+# Director on the waiver).
+GOVERNED = (
+	"Journal Entry", "Payment Entry", "Purchase Invoice",
+	"Material Request", "Purchase Order", "Procurement Committee Evaluation", "Derogation Waiver Request",
+)
 # Governed documents that are not ledger vouchers: refused in the same words, minus the ledger.
-_NOT_LEDGER = {"Material Request"}
+_NOT_LEDGER = {"Material Request", "Purchase Order", "Procurement Committee Evaluation", "Derogation Waiver Request"}
 
 # The whitelisted methods that save or submit whatever document the caller hands them.
 _GENERIC_WRITES = {
@@ -76,8 +85,18 @@ def refuse_direct_submit(doc, method=None):
 	from_state = (before.get(field) if before else None) or workflow.states[0].state
 	to_state = doc.get(field)
 	roles = set(frappe.get_roles())
+	# The move must be a transition this person may make as apply_workflow would allow it: their
+	# role, the transition's condition (the order's approval tier) and its self-approval rule.
+	# Matching on role alone let a Finance Manager post an order the Executive Director must
+	# approve, and an approver approve their own document, through the REST API.
+	user = frappe.session.user
 	if from_state != to_state and any(
-		t.state == from_state and t.next_state == to_state and t.allowed in roles for t in workflow.transitions
+		t.state == from_state
+		and t.next_state == to_state
+		and t.allowed in roles
+		and has_approval_access(user, before or doc, t)
+		and is_transition_condition_satisfied(t, doc)
+		for t in workflow.transitions
 	):
 		return
 
@@ -94,22 +113,66 @@ def refuse_direct_submit(doc, method=None):
 	)
 
 
+_RUN_DOC_METHOD = {"run_doc_method", "frappe.handler.run_doc_method"}
+_METHOD_PREFIXES = ("/api/method/", "/api/v1/method/", "/api/v2/method/")
+
+
+def _commands(path: str) -> set[str]:
+	"""Every name the request could be calling a method by. The path and a `cmd` form field are both
+	read, and both count: Frappe's v1 router sets `cmd` from the path, its v2 router never sets it,
+	a legacy request may send `cmd` on any path -- and a caller chooses what the form carries, so
+	neither one alone is to be trusted to name the method that actually runs."""
+	out = set()
+	for prefix in _METHOD_PREFIXES:
+		if path.startswith(prefix):
+			rest = path[len(prefix):]
+			out.add(rest)
+			# v2's /api/v2/method/<doctype>/<method>: a controller method of that doctype.
+			out.update(part for part in rest.split("/") if part)
+	cmd = frappe.form_dict.get("cmd")
+	if cmd:
+		out.add(cmd)
+	return out
+
+
+def _addressed_doctype() -> str | None:
+	"""The doctype a run_doc_method call names, in any of the shapes v1 and v2 accept."""
+	form = frappe.form_dict
+	if form.get("dt"):
+		return form.get("dt")
+	for key in ("docs", "document", "doc"):
+		if form.get(key):
+			value = frappe.parse_json(form.get(key))
+			if isinstance(value, dict) and value.get("doctype"):
+				return value.get("doctype")
+	return None
+
+
 def _addressed_directly(doctype: str) -> bool:
-	"""Whether the current web request is a generic document write aimed at this doctype."""
+	"""Whether the current web request is a generic document write aimed at this doctype.
+
+	ADR-008 phase 8 closed four ways round the earlier check, which read only `cmd` and only v1's
+	path: Frappe's v2 method route (/api/v2/method/frappe.client.submit) sets no `cmd`; v2's
+	run_doc_method sends the document as `document`; run_doc_method is reachable by its dotted name
+	(frappe.handler.run_doc_method), which handler.py exempts from the whitelist check as well; and
+	Frappe's MCP endpoint (/api/v2/mcp) submits documents through tools of its own.
+	"""
 	request = getattr(frappe.local, "request", None)
 	if not request:
 		return False
 	path = unquote(request.path or "")
 	if path.startswith(_RESOURCE_PREFIXES):
 		return path.split("/")[3 if path.startswith("/api/resource/") else 4] == doctype
-	cmd = frappe.form_dict.get("cmd") or (path.split("/api/method/", 1)[1] if "/api/method/" in path else "")
-	if cmd in _GENERIC_WRITES:
+	if path.startswith("/api/v2/mcp"):
 		return True
-	if cmd == "run_doc_method":
-		addressed = frappe.form_dict.get("dt")
-		if not addressed and frappe.form_dict.get("docs"):
-			addressed = frappe.parse_json(frappe.form_dict.docs).get("doctype")
-		return addressed == doctype
+	commands = _commands(path)
+	if commands & _GENERIC_WRITES:
+		return True
+	if commands & _RUN_DOC_METHOD:
+		return _addressed_doctype() in (doctype, None)
+	# /api/v2/method/<doctype>/<method>: a whitelisted method on this doctype's controller.
+	if path.startswith("/api/v2/method/") and doctype in commands:
+		return True
 	return False
 
 

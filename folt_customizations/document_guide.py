@@ -306,7 +306,7 @@ def _kind(workflow, shaped: dict, previous: str | None, state: str, derived: boo
 		return "turned_down"
 	if shaped["off_path"].get(state, {}).get("kind") == "turned_down":
 		return "turned_down"
-	if state in shaped["terminal"]:
+	if state in shaped["terminal"] or shaped["off_path"].get(state, {}).get("kind") == "cancelled":
 		return "finished"
 	return "forward"
 

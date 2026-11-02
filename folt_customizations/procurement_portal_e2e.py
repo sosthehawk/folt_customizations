@@ -36,6 +36,7 @@ MARK = "E2E procurement requisition"
 BIDDERS = ("E2E Bidder Alpha", "E2E Bidder Beta")
 RFQ_SUBJECT = "E2E procurement RFQ"
 BIDDER_USER = "e2e.bidder.portal@example.com"
+OTHER_REQUESTER = "e2e.other.requester@example.com"  # made and removed here: an Employee with nothing else
 
 PASS, FAIL = [], []
 
@@ -74,11 +75,17 @@ def _drop(doctype, name):
 	frappe.delete_doc(doctype, name, force=True, ignore_permissions=True)
 
 
+def _drop_payments():
+	for pe in frappe.get_all("Payment Entry", filters={"party_type": "Supplier", "party": ["in", BIDDERS]}, pluck="name", order_by="creation desc"):
+		_drop("Payment Entry", pe)
+
+
 def teardown():
 	frappe.set_user("Administrator")
 	rfqs = frappe.get_all("Request for Quotation", filters={"subject": RFQ_SUBJECT}, pluck="name")
 	for ev in frappe.get_all("Procurement Committee Evaluation", filters={"request_for_quotation": ["in", rfqs or [""]]}, pluck="name"):
 		_drop("Procurement Committee Evaluation", ev)
+	_drop_payments()
 	for pi in frappe.get_all("Purchase Invoice", filters={"supplier": ["in", BIDDERS]}, pluck="name", order_by="creation desc"):
 		_drop("Purchase Invoice", pi)
 	for pr in frappe.get_all("Purchase Receipt", filters={"supplier": ["in", BIDDERS]}, pluck="name", order_by="creation desc"):
@@ -88,8 +95,11 @@ def teardown():
 	sqs = frappe.get_all("Supplier Quotation", filters={"supplier": ["in", BIDDERS]}, pluck="name")
 	for wv in frappe.get_all("Derogation Waiver Request", filters={"supplier_quotation": ["in", sqs or [""]]}, pluck="name"):
 		_drop("Derogation Waiver Request", wv)
-	if frappe.db.exists("User", BIDDER_USER):
-		frappe.delete_doc("User", BIDDER_USER, force=True, ignore_permissions=True)
+	for emp in frappe.get_all("Employee", filters={"user_id": OTHER_REQUESTER}, pluck="name"):
+		frappe.delete_doc("Employee", emp, force=True, ignore_permissions=True)
+	for user in (BIDDER_USER, OTHER_REQUESTER):
+		if frappe.db.exists("User", user):
+			frappe.delete_doc("User", user, force=True, ignore_permissions=True)
 	for sq in frappe.get_all("Supplier Quotation", filters={"supplier": ["in", BIDDERS]}, pluck="name"):
 		_drop("Supplier Quotation", sq)
 	for rfq in rfqs:
@@ -97,7 +107,8 @@ def teardown():
 	for b in BIDDERS:
 		if frappe.db.exists("Supplier", b):
 			frappe.delete_doc("Supplier", b, force=True, ignore_permissions=True)
-	for name in frappe.get_all("Material Request", filters={"title": ["like", f"{MARK}%"]}, pluck="name", order_by="creation desc"):
+	walked = frappe.get_all("Material Request", filters={"folt_justification": ["like", "E2E procurement walk%"]}, pluck="name")  # e2e/procurement.mjs
+	for name in frappe.get_all("Material Request", filters={"title": ["like", f"{MARK}%"]}, pluck="name", order_by="creation desc") + walked:
 		doc = frappe.get_doc("Material Request", name)
 		if doc.docstatus == 1:
 			doc.flags.ignore_permissions = True
@@ -165,6 +176,8 @@ def _run():
 	print("\n--- the allow-lists hold ---")
 	expect_throw("a journal entry is not a Procurement record", lambda: as_user(MANAGER, lambda: pp.records("Journal Entry")), frappe.PermissionError)
 	expect_throw("a salary slip is not a Procurement link search", lambda: as_user(MANAGER, lambda: pp.link_search("Salary Slip", "")), frappe.PermissionError)
+	expect_throw("the tax lookup reads purchase tax templates only", lambda: as_user(MANAGER, lambda: pp.lookup(
+		"erpnext.controllers.accounts_controller.get_taxes_and_charges", {"master_doctype": "Purchase Invoice", "master_name": "x"})), frappe.PermissionError)
 	expect_throw("an arbitrary method is not a Procurement lookup", lambda: as_user(MANAGER, lambda: pp.lookup("frappe.client.get_list", {"doctype": "User"})), frappe.PermissionError)
 	expect_throw("a payment is not written from Procurement", lambda: as_user(FIN_MANAGER, lambda: pp.save("Payment Entry", {"payment_type": "Pay"})), frappe.PermissionError)
 
@@ -206,6 +219,21 @@ def _run():
 	rec = as_user(FIN_OFFICER, lambda: pp.record("Bank Account", ba.name)) if officer is not None else None
 	if rec:
 		check("the record is masked too", rec["doc"]["bank_account_no"].endswith("9012") and "0123" not in rec["doc"]["bank_account_no"])
+		ba.reload()
+		ba.bank_account_no = "0123456789099"
+		ba.save(ignore_permissions=True)  # a change, so the history holds the old and new numbers
+		history = as_user(FIN_OFFICER, lambda: pp.record("Bank Account", ba.name))["timeline"]["versions"]
+		check("the history is masked as well", history and not any("0123456789" in (v.get("data") or "") for v in history), len(history))
+		expect_throw("a filter on the account number is refused", lambda: as_user(FIN_OFFICER, lambda: pp.records(
+			"Bank Account", filters=frappe.as_json([["Bank Account", "bank_account_no", "like", "01%"]]))), frappe.PermissionError)
+		try:
+			copied = as_user(FIN_OFFICER, lambda: pp.copy("Bank Account", ba.name))
+			check("a copy of a bank account carries no account number", not copied.get("bank_account_no"), copied.get("bank_account_no"))
+		except frappe.PermissionError:
+			check("a copy of a bank account carries no account number (not copyable for this reader)", True)
+	expect_throw("a new bank account from Procurement names its supplier", lambda: as_user(FIN_MANAGER, lambda: pp.save(
+		"Bank Account", {"account_name": "E2E Unnamed", "bank": BANK})), frappe.PermissionError)
+	expect_throw("a new contact from Procurement is linked to a supplier", lambda: as_user(MANAGER, lambda: pp.save("Contact", {"first_name": "E2E Loose"})), frappe.PermissionError)
 	buyer_bank = as_user(BUYER, lambda: pp.supplier_profile(SUPPLIER))["bank_accounts"]
 	check("a buyer without bank access gets no account numbers", buyer_bank is None or all("0123" not in (b["bank_account_no"] or "") for b in buyer_bank))
 	company_account = frappe.db.get_value("Bank Account", {"is_company_account": 1}, "name")
@@ -255,6 +283,28 @@ def _requisitions():
 	t = frappe.db.get_value("Material Request", templated, "title")
 	check("a templated title becomes what is being bought", "{" not in t and t, t)
 	frappe.db.set_value("Material Request", templated, "title", f"{MARK} templated")
+
+	print("\n--- who a requisition belongs to ---")
+	as_user(REQUESTER, lambda: pp.save("Material Request", {"owner": HOP, "modified": str(frappe.db.get_value("Material Request", name, "modified"))}, name))
+	check("an edit through the app does not change who it belongs to", frappe.db.get_value("Material Request", name, "owner") == REQUESTER)
+
+	def rest_put():
+		d = frappe.get_doc("Material Request", name)
+		d.owner = HOP
+		d.save()
+
+	expect_throw("nor does a save through Frappe's own API", lambda: as_user(REQUESTER, rest_put), frappe.PermissionError)
+
+	def rest_insert():
+		return frappe.get_doc({"doctype": "Material Request", **draft, "material_request_type": "Purchase", "title": f"{MARK} foreign", "owner": HOP}).insert().name
+
+	foreign = as_user(REQUESTER, rest_insert)
+	check("a requisition is raised in its raiser's own name, whatever the insert says", frappe.db.get_value("Material Request", foreign, "owner") == REQUESTER)
+	before_other = frappe.db.get_value("Material Request", templated, "folt_priority")
+	as_user(REQUESTER, lambda: pp.save("Material Request", {"name": templated, "folt_priority": "Low", "modified": str(frappe.db.get_value("Material Request", name, "modified"))}, name))
+	check("a name sent with a save does not point it at another requisition",
+	      frappe.db.get_value("Material Request", templated, "folt_priority") == before_other and frappe.db.get_value("Material Request", name, "folt_priority") == "Low")
+	frappe.db.set_value("Material Request", name, "folt_priority", "High")
 	check("the requester's department is filled", mr.folt_department == frappe.db.get_value("Employee", {"user_id": REQUESTER}, "department"), mr.folt_department)
 	project = frappe.db.get_value("Activity Requisition", activity, "project")
 	check("the activity's project fills the line", not project or mr.items[0].project == project, mr.items[0].project)
@@ -266,6 +316,7 @@ def _requisitions():
 	expect_throw("the requester cannot submit it around the workflow", lambda: as_user(REQUESTER, lambda: pp.act("Material Request", name, "submit")), frappe.PermissionError)
 	as_user(REQUESTER, lambda: pp.act("Material Request", name, "transition", "Submit for Review"))
 	check("submitted for review, it waits on the Head of Programs", frappe.db.get_value("Material Request", name, "workflow_state") == "Pending Head of Programs")
+	_doors("Material Request", name, (HOF, BUYER), "skip the Head of Programs")
 	expect_throw("the requester cannot approve it", lambda: as_user(REQUESTER, lambda: pp.act("Material Request", name, "transition", "Approve")))
 	bulk = as_user(HOP, lambda: pp.act_many([{"doctype": "Material Request", "name": name}], "Return for Revision"))
 	check("a return for revision is never done in bulk", not bulk["done"] and bulk["failed"], bulk["failed"])
@@ -283,6 +334,9 @@ def _requisitions():
 	done = frappe.get_doc("Material Request", name)
 	check("the Head of Finance's approval submits it", done.docstatus == 1 and done.workflow_state == "Approved", f"{done.docstatus} {done.workflow_state}")
 	check("ERPNext now has it pending an order", done.status == "Pending", done.status)
+	check("ERPNext's history names who changed it", frappe.db.exists("Version", {"ref_doctype": "Material Request", "docname": name, "owner": REQUESTER})
+	      and frappe.db.exists("Version", {"ref_doctype": "Material Request", "docname": name, "owner": HOF}))
+	_self_approval(item)
 	expect_throw("an approved requisition cannot be edited", lambda: as_user(REQUESTER, lambda: pp.save("Material Request", {"folt_justification": "changed"}, name)))
 
 	print("\n--- what it has become ---")
@@ -292,19 +346,85 @@ def _requisitions():
 	check("the context names the requisition workflow", ctx["workflows"].get("Material Request") == "FoLT Purchase Requisition Approval")
 	check("the requester's estimate survives the approvers' saves", flt(done.items[0].folt_estimated_rate) == 5000 and flt(done.folt_estimated_total) == 10000, f"{done.items[0].folt_estimated_rate} {done.folt_estimated_total}")
 	other = _other_employee()
-	if other:
-		expect_throw("another employee cannot open somebody else's requisition", lambda: as_user(other, lambda: pp.record("Material Request", name)), frappe.PermissionError)
-	else:
-		print("  SKIP  another employee cannot open somebody else's requisition -- no second Employee-only test login")
+	expect_throw("another employee cannot open somebody else's requisition", lambda: as_user(other, lambda: pp.record("Material Request", name)), frappe.PermissionError)
+	listed = as_user(other, lambda: pp.records("Material Request"))
+	check("nor sees it listed", all(r.get("name") != name for r in listed["rows"]), listed["total"])
+	expect_throw("nor takes it over by naming themselves its owner", lambda: as_user(other, lambda: pp.save("Material Request", {"owner": other}, name)), frappe.PermissionError)
+	activity = _approved_activity()
+	if activity and not as_user(other, lambda: frappe.has_permission("Activity Requisition", "read", activity)):
+		expect_throw("nor fills a requisition from an activity they cannot read", lambda: as_user(other, lambda: pp.preview(
+			"Material Request", {"company": COMPANY, "material_request_type": "Purchase", "folt_activity_requisition": activity, "items": []})), frappe.PermissionError)
 	return name
 
 
 def _other_employee():
+	"""A second Employee-only login: a seeded one, or a temporary one (removed by teardown)."""
 	staff = set(pp.STAFF)
 	for user in frappe.get_all("Has Role", filters={"role": "Employee", "parenttype": "User", "parent": ["like", "%.test@folt.test"]}, pluck="parent"):
 		if user != REQUESTER and not set(frappe.get_roles(user)) & staff:
 			return user
-	return None
+	frappe.set_user("Administrator")
+	if not frappe.db.exists("User", OTHER_REQUESTER):
+		u = frappe.get_doc({"doctype": "User", "email": OTHER_REQUESTER, "first_name": "E2E Other Requester", "user_type": "System User", "enabled": 1, "send_welcome_email": 0})
+		u.insert(ignore_permissions=True)
+		# ERPNext strips the Employee role from a login no Employee record names
+		# (employee.validate_employee_role), so the second requester is an employee too.
+		frappe.get_doc({
+			"doctype": "Employee", "first_name": "E2E", "last_name": "Other Requester", "gender": frappe.db.get_value("Gender", {}, "name"),
+			"date_of_birth": "1990-01-01", "date_of_joining": "2026-01-01", "company": COMPANY, "status": "Active", "user_id": OTHER_REQUESTER,
+		}).insert(ignore_permissions=True)
+		frappe.get_doc("User", OTHER_REQUESTER).add_roles("Employee")
+	check("the second requester holds Employee", "Employee" in frappe.get_roles(OTHER_REQUESTER), frappe.get_roles(OTHER_REQUESTER))
+	return OTHER_REQUESTER
+
+
+def _doors(doctype, name, users, what="its approval"):
+	"""Phase 8: the generic doors (REST, frappe.client.submit, run_doc_method) do not submit a
+	document that has an approval workflow; only its own transitions do."""
+	from folt_customizations.finance_approvals_e2e import method, request
+
+	for label, door in (
+		("frappe.client.submit", lambda: method("frappe.client.submit")),
+		("the REST API", lambda: request(f"/api/resource/{doctype}/{name}")),
+		("run_doc_method", lambda: method("run_doc_method", dt=doctype, dn=name, method="submit")),
+		# The four ways round the first version of the guard (security review, 2026-11-03).
+		("v2 frappe.client.submit", lambda: request("/api/v2/method/frappe.client.submit")),
+		("v2 with a misleading cmd", lambda: request("/api/v2/method/frappe.client.submit", cmd="frappe.ping")),
+		("v2 run_doc_method", lambda: request("/api/v2/method/run_doc_method", document={"doctype": doctype, "name": name}, method="submit")),
+		("frappe.handler.run_doc_method", lambda: method("frappe.handler.run_doc_method", dt=doctype, dn=name, method="submit")),
+		("the MCP endpoint", lambda: request("/api/v2/mcp")),
+	):
+		for user in users:
+
+			def attempt(door=door):
+				with door():
+					frappe.get_doc(doctype, name).submit()
+
+			expect_throw(f"{label} does not let {user.split('.')[0]} submit the {doctype} to {what}", lambda: as_user(user, attempt))
+			frappe.clear_last_message()
+	check(f"the {doctype} is still unsubmitted ({what})", frappe.db.get_value(doctype, name, "docstatus") == 0)
+
+
+def _self_approval(item):
+	"""Phase 8: a Head of Programs who raised a requisition cannot approve it (allow_self_approval 0)."""
+	draft = {
+		"title": f"{MARK} self", "company": COMPANY, "transaction_date": nowdate(), "schedule_date": add_days(nowdate(), 14),
+		"folt_justification": "Self-approval check.",
+		"items": [{"item_code": item, "qty": 1, "folt_estimated_rate": 100, "schedule_date": add_days(nowdate(), 14), "uom": frappe.db.get_value("Item", item, "stock_uom")}],
+	}
+	name = as_user(REQUESTER, lambda: pp.save("Material Request", draft))["name"]
+	frappe.db.set_value("Material Request", name, "owner", HOP, update_modified=False)  # as if the Head of Programs raised it
+	from frappe.model.workflow import apply_workflow
+
+	frappe.set_user("Administrator")
+	apply_workflow(frappe.get_doc("Material Request", name), "Submit for Review")
+	expect_throw("the Head of Programs cannot approve a requisition they raised", lambda: as_user(HOP, lambda: pp.act("Material Request", name, "transition", "Approve")))
+	moves = as_user(HOP, lambda: pp.record("Material Request", name))["workflow"]["transitions"]
+	check("and is not offered Approve on it", not any(m["action"] == "Approve" for m in moves), moves)
+	frappe.set_user("Administrator")
+	frappe.db.set_value("Material Request", name, "owner", HOF, update_modified=False)  # now as if the Head of Finance raised it
+	frappe.db.set_value("Material Request", name, "workflow_state", "Pending Head of Finance", update_modified=False)
+	_doors("Material Request", name, (HOF,), "approve their own requisition")
 
 
 def _sourcing(mr):
@@ -392,7 +512,9 @@ def _ordering(mr, quotes):
 		frappe.db.set_single_value("FoLT Procurement Settings", "po_ed_threshold", 1000)
 		as_user(BUYER, lambda: pp.save("Purchase Order", {"modified": str(frappe.db.get_value("Purchase Order", order, "modified"))}, order))
 		check("an order above the threshold needs the Executive Director", frappe.db.get_value("Purchase Order", order, "folt_approval_tier") == "Executive")
+		_doors("Purchase Order", order, (BUYER, MANAGER), "skip its approval")
 		as_user(BUYER, lambda: pp.act("Purchase Order", order, "transition", "Submit for approval"))
+		_doors("Purchase Order", order, (FIN_MANAGER,), "skip the Executive Director")
 		moves = as_user(FIN_MANAGER, lambda: pp.record("Purchase Order", order))["workflow"]["transitions"]
 		check("the Finance Manager is offered one Approve, onward to the Executive Director",
 		      [(m["action"], m["next_state"]) for m in moves if m["action"] == "Approve"] == [("Approve", "Pending Executive Director Approval")], moves)
@@ -430,6 +552,23 @@ def _ordering(mr, quotes):
 	check("the supplier acknowledges it on the portal", frappe.db.get_value("Purchase Order", order, "folt_supplier_acknowledged_by") == BIDDER_USER, ack)
 	again = as_user(BIDDER_USER, lambda: supplier_portal.acknowledge_order(order))
 	check("the first acknowledgement is the one kept", again["acknowledged_on"] == ack["acknowledged_on"])
+
+	def forge():
+		d = frappe.get_doc("Purchase Order", order)
+		d.folt_supplier_acknowledged_by = MANAGER
+		d.save()
+
+	try:
+		as_user(MANAGER, forge)
+	except Exception:  # noqa: BLE001 -- refused outright is as good as put back
+		frappe.clear_last_message()
+	check("nobody but the supplier writes the acknowledgement", frappe.db.get_value("Purchase Order", order, "folt_supplier_acknowledged_by") == BIDDER_USER)
+	expect_throw("an email from Procurement is about a document", lambda: as_user(MANAGER, lambda: pp.operate(
+		"frappe.core.doctype.communication.email.make", {"recipients": "someone@example.com", "subject": "Hello", "content": "Hi", "send_email": 0})), frappe.PermissionError)
+	as_user(MANAGER, lambda: pp.operate("frappe.core.doctype.communication.email.make", {"doctype": "Purchase Order", "name": order, "recipients": "orders@example.com",
+	                                                                                    "subject": f"Reminder {order}", "content": "Please deliver.", "send_email": 0, "sender": "ed.test@folt.test"}))
+	sender = frappe.db.get_value("Communication", {"reference_name": order, "subject": f"Reminder {order}"}, "sender")
+	check("and it goes as the person sending it, whatever sender is asked for", sender and MANAGER in sender and "ed.test" not in sender, sender)
 	view = as_user(BIDDER_USER, supplier_portal.portal_overview)
 	check("the portal shows it acknowledged", any(o["name"] == order and o["acknowledged_on"] for o in view["orders"]))
 	del other
@@ -500,6 +639,7 @@ def _receiving(order):
 	check("the order's chain holds its two receipts", sum(1 for d in f["documents"] if d["doctype"] == "Purchase Receipt") == 2)
 	_invoicing(order)
 	frappe.set_user("Administrator")
+	_drop_payments()
 	for pi in frappe.get_all("Purchase Invoice", filters={"supplier": ["in", BIDDERS]}, pluck="name", order_by="creation desc"):
 		_drop("Purchase Invoice", pi)
 	for pr in (second, first):
@@ -562,6 +702,13 @@ def _invoicing(order):
 	got = as_user(FIN_OFFICER, lambda: pp.match(odd))
 	check("a line on no order is flagged", any(f["kind"] == "unordered" for f in got["flags"]), got["flags"])
 	check("the flags are written on the invoice", frappe.db.get_value("Purchase Invoice", odd, "folt_match_status") == "Discrepancies")
+	def prefill():
+		d = frappe.get_doc("Purchase Invoice", odd)
+		d.folt_match_override_reason = "Typed in by whoever prepared it."
+		d.save()
+
+	as_user(FIN_OFFICER, prefill)
+	check("an override reason typed onto the invoice is not kept", not frappe.db.get_value("Purchase Invoice", odd, "folt_match_override_reason"))
 	as_user(FIN_OFFICER, lambda: pp.act("Purchase Invoice", odd, "transition", "Submit for approval"))
 	moves = as_user(HOF, lambda: pp.record("Purchase Invoice", odd))["workflow"]["transitions"]
 	check("approving it asks for a reason", any(mv["action"] == "Approve" and mv["needs_reason"] for mv in moves), moves)
@@ -571,6 +718,7 @@ def _invoicing(order):
 	check("with a reason it is approved and posted", inv.docstatus == 1 and inv.workflow_state == "Approved", f"{inv.docstatus} {inv.workflow_state}")
 	check("the reason stays on the invoice", "Delivery charge" in (inv.folt_match_override_reason or ""))
 	check("ERPNext shows what is owed", flt(inv.outstanding_amount) > 0 and inv.status in ("Unpaid", "Overdue"), f"{inv.status} {inv.outstanding_amount}")
+	_ledger_and_payment(inv, order)
 	check("a purchase manager, who cannot read invoices, is not offered the price variance", "Purchase Price Variance" not in as_user(MANAGER, pp.context)["reports"])
 	pv = as_user(HOF, lambda: pp.run_report("Purchase Price Variance", {"company": COMPANY, "from_date": add_days(nowdate(), -1), "to_date": nowdate()}))
 	check("the price variance report reads the posted invoice's lines", any(r.get("invoice") == odd for r in pv["result"]), len(pv["result"]))
@@ -584,6 +732,44 @@ def _invoicing(order):
 	check("billing again what is already billed is flagged against what was received", any(f["kind"] == "quantity" for f in got["flags"]), got["flags"])
 	f = as_user(BUYER, lambda: pp.flow("Purchase Order", order))
 	check("the order's chain holds its invoices", sum(1 for d in f["documents"] if d["doctype"] == "Purchase Invoice") >= 1)
+
+
+def _ledger_and_payment(inv, order):
+	"""Phase 8: the posted invoice is ERPNext's ledger, and Finance pays it through its own approval."""
+	print("\n--- the ledger, and paying it in Finance ---")
+	from folt_customizations import finance_portal as fp
+
+	def gl(voucher_type, name):
+		return frappe.get_all("GL Entry", filters={"voucher_type": voucher_type, "voucher_no": name, "is_cancelled": 0}, fields=["account", "debit", "credit", "party"])
+
+	rows = gl("Purchase Invoice", inv.name)
+	check("the invoice's ledger entries balance", rows and abs(sum(flt(r.debit) for r in rows) - sum(flt(r.credit) for r in rows)) < 0.01, rows)
+	owed = flt(inv.base_rounded_total or inv.base_grand_total)
+	payable = sum(flt(r.credit) - flt(r.debit) for r in rows if r.account == inv.credit_to)
+	check("the supplier's payable is credited with the invoice total", abs(payable - owed) < 0.01, f"{payable} vs {owed}")
+	check("the order is billed in full", flt(frappe.db.get_value("Purchase Order", order, "per_billed")) >= 100, frappe.db.get_value("Purchase Order", order, "per_billed"))
+
+	made = as_user(FIN_OFFICER, lambda: fp.lookup("erpnext.accounts.doctype.payment_entry.payment_entry.get_payment_entry", {"dt": "Purchase Invoice", "dn": inv.name}))
+	made = made.as_dict() if hasattr(made, "as_dict") else made
+	skip = ("name", "__islocal", "__unsaved", "docstatus", "owner", "creation", "modified", "workflow_state")
+	doc = {k: v for k, v in made.items() if k not in skip}
+	doc["references"] = [{k: v for k, v in r.items() if k not in ("name", "parent", "parenttype", "parentfield", "docstatus", "idx")} for r in made["references"]]
+	doc.update({"reference_no": f"E2E-PAY-{inv.name}", "reference_date": nowdate(), "posting_date": nowdate()})
+	pe = as_user(FIN_OFFICER, lambda: fp.save("Payment Entry", doc))["name"]
+	check("Finance prepares the payment from the invoice", frappe.db.get_value("Payment Entry", pe, ["docstatus", "workflow_state"]) == (0, "Draft"))
+	expect_throw("Procurement cannot approve a payment", lambda: as_user(MANAGER, lambda: pp.act("Payment Entry", pe, "transition", "Approve")))
+	as_user(FIN_OFFICER, lambda: fp.act("Payment Entry", pe, "transition", "Submit for approval"))
+	expect_throw("the preparer cannot approve it", lambda: as_user(FIN_OFFICER, lambda: fp.act("Payment Entry", pe, "transition", "Approve")))
+	as_user(FIN_MANAGER, lambda: fp.act("Payment Entry", pe, "transition", "Approve"))
+	check("the Finance Manager's approval posts it", frappe.db.get_value("Payment Entry", pe, ["docstatus", "workflow_state"]) == (1, "Approved"))
+	paid = frappe.get_doc("Purchase Invoice", inv.name)
+	check("ERPNext marks the invoice paid", flt(paid.outstanding_amount) == 0 and paid.status == "Paid", f"{paid.status} {paid.outstanding_amount}")
+	rows = gl("Payment Entry", pe)
+	check("the payment's ledger entries balance and clear the payable", abs(sum(flt(r.debit) for r in rows) - sum(flt(r.credit) for r in rows)) < 0.01
+	      and abs(sum(flt(r.debit) - flt(r.credit) for r in rows if r.account == inv.credit_to) - owed) < 0.01, rows)
+	f = as_user(FIN_MANAGER, lambda: pp.flow("Purchase Order", order))
+	check("the order's chain reaches the payment, for a reader of payments", any(d["doctype"] == "Payment Entry" and d["name"] == pe for d in f["documents"]), [d["doctype"] for d in f["documents"]])
+	frappe.set_user("Administrator")
 
 
 def _reporting(mr, quotes):

@@ -135,6 +135,10 @@ def run():
 		"Procurement Committee Evaluation": (4, ["Approved"]),
 		"Derogation Waiver Request": (4, ["Approved"]),
 		"Purchase Order": (3, ["Approved"]),
+		"Material Request": (4, ["Approved"]),
+		"Payment Entry": (3, ["Approved"]),
+		"Purchase Invoice": (3, ["Approved"]),
+		"Journal Entry": (3, ["Approved"]),
 		"Employee Advance": (6, ["Closed"]),
 		"Salary Slip": (3, ["Approved"]),
 		"Expense Claim": (5, ["Settled"]),
@@ -168,7 +172,15 @@ def run():
 			f"optional: {found}",
 		)
 
-	# The cycle. Left unhandled this is either an infinite loop or a chain with no end.
+	for doctype in ("Purchase Order", "Payment Entry", "Purchase Invoice", "Journal Entry"):
+		shaped = shape(doctype)
+		check(
+			f"{doctype}: Cancelled is where a cancelled document lives, not the last step",
+			(shaped["off_path"].get("Cancelled") or {}).get("kind") == "cancelled",
+			f"Cancelled: {shaped['off_path'].get('Cancelled')}",
+		)
+
+		# The cycle. Left unhandled this is either an infinite loop or a chain with no end.
 	prl = shape("Participant Reimbursement List")
 	check(
 		"a disputed reimbursement list is an excursion, not the last step",

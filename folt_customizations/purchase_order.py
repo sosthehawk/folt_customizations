@@ -241,7 +241,7 @@ def ensure_procurement_settings():
     if not frappe.db.exists("DocType", "FoLT Procurement Settings"):
         return
     meta = frappe.get_meta("FoLT Procurement Settings")
-    for field in ("po_ed_threshold", "match_price_tolerance"):
+    for field in ("po_ed_threshold", "match_price_tolerance", "reminder_days"):
         df = meta.get_field(field)
         if not df:
             continue

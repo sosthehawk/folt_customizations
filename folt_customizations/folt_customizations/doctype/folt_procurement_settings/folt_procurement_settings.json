@@ -9,7 +9,9 @@
   "approval_section",
   "po_ed_threshold",
   "match_section",
-  "match_price_tolerance"
+  "match_price_tolerance",
+  "reminders_section",
+  "reminder_days"
  ],
  "fields": [
   {
@@ -36,6 +38,19 @@
    "fieldname": "match_price_tolerance",
    "fieldtype": "Percent",
    "label": "Price tolerance",
+   "non_negative": 1
+  },
+  {
+   "fieldname": "reminders_section",
+   "fieldtype": "Section Break",
+   "label": "Reminders"
+  },
+  {
+   "default": "3",
+   "description": "How many days ahead the daily reminders warn of an RFQ deadline, a delivery or an invoice falling due. Overdue ones are reminded the day after, and then weekly.",
+   "fieldname": "reminder_days",
+   "fieldtype": "Int",
+   "label": "Remind this many days ahead",
    "non_negative": 1
   }
  ],

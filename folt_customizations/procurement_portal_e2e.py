@@ -128,7 +128,9 @@ def run():
 	teardown()
 	try:
 		_run()
-		_ordering(*_sourcing(_requisitions()))
+		mr, quotes = _sourcing(_requisitions())
+		_reporting(mr, quotes)
+		_ordering(mr, quotes)
 	finally:
 		teardown()
 	print(f"\n  {len(PASS)} passed, {len(FAIL)} failed")
@@ -569,6 +571,9 @@ def _invoicing(order):
 	check("with a reason it is approved and posted", inv.docstatus == 1 and inv.workflow_state == "Approved", f"{inv.docstatus} {inv.workflow_state}")
 	check("the reason stays on the invoice", "Delivery charge" in (inv.folt_match_override_reason or ""))
 	check("ERPNext shows what is owed", flt(inv.outstanding_amount) > 0 and inv.status in ("Unpaid", "Overdue"), f"{inv.status} {inv.outstanding_amount}")
+	check("a purchase manager, who cannot read invoices, is not offered the price variance", "Purchase Price Variance" not in as_user(MANAGER, pp.context)["reports"])
+	pv = as_user(HOF, lambda: pp.run_report("Purchase Price Variance", {"company": COMPANY, "from_date": add_days(nowdate(), -1), "to_date": nowdate()}))
+	check("the price variance report reads the posted invoice's lines", any(r.get("invoice") == odd for r in pv["result"]), len(pv["result"]))
 
 	# ERPNext's maker offers nothing more to bill on a fully billed order; a hand-made copy of the
 	# billed lines is what over-billing looks like, read unsaved.
@@ -579,3 +584,62 @@ def _invoicing(order):
 	check("billing again what is already billed is flagged against what was received", any(f["kind"] == "quantity" for f in got["flags"]), got["flags"])
 	f = as_user(BUYER, lambda: pp.flow("Purchase Order", order))
 	check("the order's chain holds its invoices", sum(1 for d in f["documents"] if d["doctype"] == "Purchase Invoice") >= 1)
+
+
+def _reporting(mr, quotes):
+	print("\n--- reports, settings, reminders ---")
+	window = {"company": COMPANY, "from_date": add_days(nowdate(), -1), "to_date": add_days(nowdate(), 1)}
+	ctx = as_user(MANAGER, pp.context)
+	check("the purchase manager is offered the FoLT reports", {"Purchase Requisition Register", "RFQ Register", "Supplier Performance"} <= set(ctx["reports"]), ctx["reports"])
+	check("and ERPNext's buying reports", "Purchase Order Analysis" in ctx["reports"])
+	expect_throw("a requester runs no procurement report", lambda: as_user(REQUESTER, lambda: pp.run_report("RFQ Register", window)), frappe.PermissionError)
+	expect_throw("a report off the list is refused", lambda: as_user(MANAGER, lambda: pp.run_report("Salary Register", {})), frappe.PermissionError)
+	reg = as_user(MANAGER, lambda: pp.run_report("Purchase Requisition Register", window))
+	check("the requisition register lists the requisition", any(r.get("name") == mr for r in reg["result"]), len(reg["result"]))
+	rfq = frappe.db.get_value("Request for Quotation", {"subject": RFQ_SUBJECT}, "name")
+	reg = as_user(MANAGER, lambda: pp.run_report("RFQ Register", window))
+	row = next((r for r in reg["result"] if r.get("name") == rfq), None)
+	check("the RFQ register counts its invited suppliers and bids, and names the lowest", row and row["invited"] == 2 and row["bids"] == 2 and row["lowest_supplier"], row)
+	comp = as_user(MANAGER, lambda: pp.run_report("Supplier Compliance", {}))
+	check("supplier compliance names each bidder's gaps", all(any(r.get("supplier") == b for r in comp["result"]) for b in BIDDERS))
+	for name in ("Procurement Spend by Dimension", "Procurement Cycle Time", "Supplier Performance", "Purchase Order Analysis"):
+		filters = {**window, "dimension": "Department", "basis": "Ordered"} if name == "Procurement Spend by Dimension" else window
+		if name == "Purchase Order Analysis":
+			filters = {"company": COMPANY, "from_date": window["from_date"], "to_date": window["to_date"]}
+		try:
+			out = as_user(MANAGER, lambda: pp.run_report(name, filters))
+			check(f"{name} runs", isinstance(out.get("result"), list), len(out.get("result") or []))
+		except Exception as e:  # noqa: BLE001
+			check(f"{name} runs", False, repr(e)[:160])
+	frappe.set_user("Administrator")
+
+	print("\n--- settings ---")
+	check("the purchase manager may change FoLT Procurement Settings", ctx["capabilities"]["FoLT Procurement Settings"]["write"])
+	before = frappe.db.get_single_value("FoLT Procurement Settings", "reminder_days")
+	try:
+		as_user(MANAGER, lambda: pp.save("FoLT Procurement Settings", {"reminder_days": 5}))
+		check("settings are saved from the app", frappe.db.get_single_value("FoLT Procurement Settings", "reminder_days") == 5)
+	finally:
+		frappe.db.set_single_value("FoLT Procurement Settings", "reminder_days", before)
+		# The test's own change is not the organisation's history: drop the Version it left.
+		for name in frappe.get_all("Version", filters={"ref_doctype": "FoLT Procurement Settings", "owner": MANAGER}, pluck="name"):
+			frappe.delete_doc("Version", name, force=True, ignore_permissions=True)
+	buying = as_user(MANAGER, lambda: pp.record("Buying Settings"))
+	check("ERPNext's buying settings are read here", buying["doc"].get("doctype") == "Buying Settings")
+	for dt in ("Terms and Conditions", "Payment Terms Template", "Supplier Scorecard Criteria", "Supplier Scorecard Standing"):
+		check(f"the purchase manager may change {dt}", ctx["capabilities"][dt]["write"] and ctx["capabilities"][dt]["create"])
+	requester_ctx = as_user(REQUESTER, pp.context)
+	check("a requester may not change the procurement settings", not requester_ctx["capabilities"].get("FoLT Procurement Settings", {}).get("write"))
+
+	print("\n--- reminders ---")
+	from frappe.utils import getdate
+
+	from folt_customizations import procurement_alerts as pa
+
+	today = getdate(nowdate())
+	check("a date entering the window is reminded", pa.due_today(add_days(today, 3), today, 3) == "soon")
+	check("the day after it is due, it is overdue", pa.due_today(add_days(today, -1), today, 3) == "overdue")
+	check("and then weekly, not daily", pa.due_today(add_days(today, -8), today, 3) == "overdue" and pa.due_today(add_days(today, -2), today, 3) is None)
+	frappe.db.set_value("Request for Quotation", rfq, "folt_quotation_deadline", f"{add_days(today, pa._lead_days())} 17:00:00", update_modified=False)
+	sent = pa.daily(today)
+	check("the daily run reminds the RFQ's owner of its deadline", sent["rfq"] >= 1, sent)

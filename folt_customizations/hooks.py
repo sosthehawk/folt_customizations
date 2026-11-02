@@ -331,6 +331,7 @@ doc_events = {
     # outright -- see procurement.withdraw_cancelled_quotation.
     "Supplier Quotation": {
         "validate": "folt_customizations.sourcing.validate_quotation",
+        "on_submit": "folt_customizations.procurement_alerts.bid_arrived",
         "on_cancel": "folt_customizations.procurement.withdraw_cancelled_quotation",
     },
     # A receipt that rejects goods says why, and the buyer is told (receiving.py).
@@ -393,6 +394,8 @@ scheduler_events = {
     "daily": [
         "folt_customizations.float_lifecycle.flag_overdue_floats",
         "folt_customizations.masterdata.flag_reporting_periods",
+        # RFQ deadlines, deliveries and supplier invoices falling due or overdue (ADR-008).
+        "folt_customizations.procurement_alerts.daily",
     ],
 }
 

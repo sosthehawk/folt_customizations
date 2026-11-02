@@ -75,6 +75,28 @@ DOCTYPES = {
 	"Payment Entry": ("invoices", ["posting_date", "party_name", "paid_amount", "mode_of_payment", "reference_no"], ["name", "party", "party_name", "reference_no"], "posting_date"),
 }
 
+DOCTYPES.update({
+	# settings (phase 7): ERPNext's own buying configuration and FoLT's, edited here by whoever
+	# Frappe lets write them.
+	"FoLT Procurement Settings": ("settings", [], [], None),
+	"Buying Settings": ("settings", [], [], None),
+	"Terms and Conditions": ("settings", ["title", "disabled", "buying"], ["name", "title"], None),
+	"Payment Terms Template": ("settings", ["template_name"], ["name"], None),
+	"Supplier Scorecard Criteria": ("settings", ["criteria_name", "max_score", "weight"], ["name", "criteria_name"], None),
+	"Supplier Scorecard Standing": ("settings", ["standing_name", "min_grade", "max_grade", "standing_color"], ["name", "standing_name"], None),
+})
+
+# The reports Procurement runs: ERPNext's own buying reports and FoLT's (folt_customizations/report).
+# A report the reader's roles do not open is not offered (context) and refused by Frappe if asked.
+REPORTS = (
+	"Purchase Order Analysis", "Purchase Order Trends", "Procurement Tracker", "Purchase Analytics", "Requested Items to Order and Receive",
+	"Material Requests for which Supplier Quotations are not created", "Supplier Quotation Comparison", "Purchase Receipt Trends",
+	"Received Items To Be Billed", "Purchase Register", "Purchase Invoice Trends", "Item-wise Purchase History", "Accounts Payable",
+	"Accounts Payable Summary", "Supplier Ledger Summary",
+	"Purchase Requisition Register", "RFQ Register", "Procurement Spend by Dimension", "Purchase Price Variance", "Procurement Cycle Time",
+	"Supplier Performance", "Supplier Compliance",
+)
+
 # Opened and listed here, written in Finance.
 READ_ONLY = {"Payment Entry", "Supplier Scorecard"}
 REQUESTER_DOCTYPES = {"Material Request"}
@@ -198,6 +220,7 @@ def context():
 		if doctype in READ_ONLY:
 			capabilities[doctype].update({"create": False, "write": False, "submit": False, "cancel": False, "delete": False})
 
+	reports = [r for r in REPORTS if staff and _may_run(r)]
 	employee = frappe.db.get_value("Employee", {"user_id": frappe.session.user, "status": "Active"}, ["name", "employee_name", "department", "company"], as_dict=True)
 	roles = _roles()
 	return {
@@ -206,6 +229,7 @@ def context():
 		"default_company": default_company,
 		"capabilities": capabilities,
 		"workflows": {dt: get_workflow_name(dt) for dt in visible if get_workflow_name(dt)},
+		"reports": reports,
 		"employee": employee,
 		"departments": frappe.get_list("Department", filters={"is_group": 0}, fields=["name", "department_name", "company"], order_by="department_name") if _may("Department") else [],
 		"roles": {
@@ -393,6 +417,38 @@ def lookup(method, args=None):
 	out = _common.call_allowed(method, args, LOOKUPS, _("{0} is not available from Procurement."))
 	# A maker answers an unsaved Document: the form takes it as plain values, dates as strings.
 	return out.as_dict(convert_dates_to_str=True) if hasattr(out, "as_dict") else out
+
+
+# --- reports ----------------------------------------------------------------------------------
+
+
+def _may_run(report) -> bool:
+	"""Whether the reader may run it: the report's roles, and report permission on what it reads
+	(frappe.desk.query_report checks both; offering one that would be refused helps nobody)."""
+	if not frappe.db.exists("Report", report):
+		return False
+	doc = frappe.get_cached_doc("Report", report)
+	return bool(doc.is_permitted() and (not doc.ref_doctype or frappe.has_permission(doc.ref_doctype, "report")))
+
+
+def _report(report):
+	if report not in REPORTS:
+		frappe.throw(_("{0} is not one of the Procurement reports.").format(report), frappe.PermissionError)
+	if not _is_staff():
+		frappe.throw(_("Reports are for the procurement roles."), frappe.PermissionError)
+	return report
+
+
+@frappe.whitelist(methods=["POST"])
+def run_report(report, filters=None):
+	"""A native or FoLT report, run as the person asking, exactly as the Desk runs it."""
+	return _common.report_view(_common.run_report(_report(report), filters))
+
+
+@frappe.whitelist()
+def export_report(report, filters=None, file_format="xlsx"):
+	"""The same report as a spreadsheet: its own rows and columns, nothing recomputed."""
+	_common.export_report(report, _common.run_report(_report(report), filters), file_format)
 
 
 # --- suppliers --------------------------------------------------------------------------------

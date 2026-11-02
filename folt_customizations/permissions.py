@@ -249,6 +249,13 @@ PROCUREMENT_PERMISSIONS = {
 		"Head of Programs": ("read", "write"),
 		"Head of Finance": ("read", "write", "submit"),
 	},
+	# Procurement's settings screen (ADR-008 phase 7) is the Purchase Manager's: ERPNext gives them
+	# Buying Settings but keeps the buying terms, payment terms and the scorecard's criteria and
+	# standings for the System Manager (and the accounting roles). Purchase User reads them to pick.
+	**{
+		doctype: {"Purchase Manager": ("read", "write", "create"), "Purchase User": ("read",)}
+		for doctype in ("Terms and Conditions", "Payment Terms Template", "Supplier Scorecard Criteria", "Supplier Scorecard Standing")
+	},
 }
 
 # Rows that hold only on the documents the person created themselves (Custom DocPerm if_owner).

@@ -33,6 +33,7 @@ from frappe.model.workflow import get_workflow
 from frappe.utils import add_days, nowdate
 
 from folt_customizations import spa, step_forms
+from folt_customizations.activity_planning_e2e import planning_documents
 from folt_customizations.workflow import roles_the_owner_can_move
 
 ACTIVITY = "E2E SPA Borehole Committee Training"
@@ -119,6 +120,7 @@ def requisition_values(activity):
 		"float_required": 1,
 		"float_amount": 60000,
 		"description": "E2E: training for borehole committees",
+		**planning_documents(),
 	}
 
 

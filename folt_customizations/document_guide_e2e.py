@@ -31,6 +31,7 @@ from frappe.model.workflow import apply_workflow
 from frappe.utils import add_days, nowdate
 
 from folt_customizations import activity_chain, document_guide
+from folt_customizations.activity_planning_e2e import planning_documents
 from folt_customizations.document_guide import DOCUMENTS, get_guide
 from folt_customizations.folt_customizations.page.folt_tasks.folt_tasks import my_tasks
 from folt_customizations.workflow import get_approvers_for_state
@@ -188,6 +189,7 @@ def make_requisition():
 			"budget_line": BUDGET_LINE,
 			"float_required": 0,
 			"description": "E2E guide: attendance register for a water point rehabilitation",
+			**planning_documents(),
 		}
 	).insert()
 

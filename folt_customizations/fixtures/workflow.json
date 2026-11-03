@@ -217,7 +217,7 @@
   "document_type": "Activity Requisition",
   "enable_action_confirmation": 0,
   "is_active": 1,
-  "modified": "2026-07-23 19:15:01.764233",
+  "modified": "2026-11-03 12:00:00.000000",
   "name": "Activity Requisition Approval",
   "override_status": 0,
   "send_email_alert": 1,
@@ -307,7 +307,7 @@
    },
    {
     "action": "Approve",
-    "allow_self_approval": 1,
+    "allow_self_approval": 0,
     "allowed": "Head of Programs",
     "condition": null,
     "next_state": "Pending Head of Finance",
@@ -317,8 +317,19 @@
     "workflow_builder_id": null
    },
    {
+    "action": "Return for Revision",
+    "allow_self_approval": 0,
+    "allowed": "Head of Programs",
+    "condition": null,
+    "next_state": "Draft",
+    "send_email_to_creator": 0,
+    "state": "Pending Head of Programs",
+    "transition_tasks": null,
+    "workflow_builder_id": null
+   },
+   {
     "action": "Reject",
-    "allow_self_approval": 1,
+    "allow_self_approval": 0,
     "allowed": "Head of Programs",
     "condition": null,
     "next_state": "Rejected",
@@ -329,7 +340,7 @@
    },
    {
     "action": "Approve",
-    "allow_self_approval": 1,
+    "allow_self_approval": 0,
     "allowed": "Head of Finance",
     "condition": null,
     "next_state": "Approved",
@@ -339,8 +350,19 @@
     "workflow_builder_id": null
    },
    {
+    "action": "Return for Revision",
+    "allow_self_approval": 0,
+    "allowed": "Head of Finance",
+    "condition": null,
+    "next_state": "Draft",
+    "send_email_to_creator": 0,
+    "state": "Pending Head of Finance",
+    "transition_tasks": null,
+    "workflow_builder_id": null
+   },
+   {
     "action": "Reject",
-    "allow_self_approval": 1,
+    "allow_self_approval": 0,
     "allowed": "Head of Finance",
     "condition": null,
     "next_state": "Rejected",

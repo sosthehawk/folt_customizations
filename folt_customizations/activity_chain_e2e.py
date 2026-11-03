@@ -19,6 +19,7 @@ from frappe.model.workflow import apply_workflow
 from frappe.utils import add_days, flt, getdate, nowdate
 
 from folt_customizations import activity_chain
+from folt_customizations.activity_planning_e2e import planning_documents
 from folt_customizations.float_lifecycle import RETIREMENT_DAYS, sync_float_state
 
 ACTIVITY = "E2E Chain Public Participation on Gender Budgeting"
@@ -149,6 +150,7 @@ def make_requisition(holder):
 			"float_holder": holder,
 			"float_amount": FLOAT,
 			"description": "E2E chain: transport reimbursement for public participation",
+			**planning_documents(),
 		}
 	).insert()
 

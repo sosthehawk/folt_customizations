@@ -23,6 +23,8 @@ import frappe
 from frappe.model.workflow import apply_workflow
 from frappe.utils import nowdate
 
+from folt_customizations.activity_planning_e2e import planning_documents
+
 from folt_customizations.workflow_access import (
 	REJECTION_REASON_FIELD,
 	audit,
@@ -129,6 +131,7 @@ def make_requisition(budget):
 			"budget_amount": budget,
 			"budget_line": "2.2.2",
 			"float_required": 0,
+			**planning_documents(),
 		}
 	).insert()
 

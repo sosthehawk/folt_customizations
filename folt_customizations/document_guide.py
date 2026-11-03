@@ -21,7 +21,7 @@ is missing and that it will be needed; DOCUMENTS below is what lets it say so fi
 whole of the difference between a rule and a rule somebody can plan around.
 
 DOCUMENTS also carries evidence that is expected but gates nothing -- the attendance register's
-signed sheet, a requisition's concept note. Those have an empty `required_at`, and the checklist
+signed sheet. Such entries have an empty `required_at`, and the checklist
 asks for them without ever claiming they block anything, which is the only honest way to list a
 document whose absence stops nothing.
 
@@ -91,11 +91,19 @@ DOCUMENTS: dict[str, list[RequiredDoc]] = {
 		),
 	],
 	"Activity Requisition": [
-		# Expected with a requisition and gated on nothing, which is the honest status of it
-		# today. Listed anyway so the checklist can ask for it; an empty `required_at` is the
-		# difference between "bring this" and "you cannot proceed without this", and claiming the
-		# second when only the first is true would be the checklist lying about the rules.
-		RequiredDoc(fieldname="concept_note", required_at=(), enforced_by=None),
+		# SOP step 1: Finance receives the requisition, the budget and the concept note together,
+		# so neither attachment may be missing once the requisition leaves Draft. Enforced in the
+		# controller (ActivityRequisition.require_planning_documents, called from validate).
+		RequiredDoc(
+			fieldname="concept_note",
+			required_at=("Pending Head of Programs", "Pending Head of Finance", "Approved"),
+			enforced_by="validate",
+		),
+		RequiredDoc(
+			fieldname="budget_document",
+			required_at=("Pending Head of Programs", "Pending Head of Finance", "Approved"),
+			enforced_by="validate",
+		),
 	],
 }
 

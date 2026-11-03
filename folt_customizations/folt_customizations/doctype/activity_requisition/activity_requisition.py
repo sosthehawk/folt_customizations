@@ -1,7 +1,21 @@
 import frappe
 from frappe import _
 from frappe.model.document import Document
-from frappe.utils import flt, getdate
+from frappe.utils import flt, getdate, now_datetime
+
+# The workflow's states, named once. "Activity Requisition Approval" in fixtures/workflow.json is
+# the authority on how they connect; these are only the names the controller reacts to.
+DRAFT = "Draft"
+PROGRAMS_REVIEW = "Pending Head of Programs"
+FINANCE_REVIEW = "Pending Head of Finance"
+APPROVED = "Approved"
+
+# SOP step 1: Finance receives "the approved Requisition, Budget and Activity Concept Note from the
+# Program Department". The requisition is this document; the other two are these attachments, and
+# none of the three may go forward without the others. document_guide.DOCUMENTS lists the same
+# fields at the same states so the form says so before the button is pressed.
+PLANNING_DOCUMENTS = ("concept_note", "budget_document")
+NEEDS_PLANNING_DOCUMENTS = (PROGRAMS_REVIEW, FINANCE_REVIEW, APPROVED)
 
 
 class ActivityRequisition(Document):
@@ -18,6 +32,63 @@ class ActivityRequisition(Document):
 		self.set_defaults()
 		self.validate_dates()
 		self.validate_float()
+		self.track_approvals()
+
+	def track_approvals(self):
+		"""Hold the requisition to SOP step 1 as it moves: documents in, two separate sign-offs.
+
+		Runs on the save that makes each transition (apply_workflow saves, and the final Approve
+		submits, and both run validate), so every check below is about the move being made now,
+		not the state the document happens to be sitting in. A requisition already at a review step
+		without its attachments can still be returned or rejected; it just cannot be moved on.
+		"""
+		before = self.get_doc_before_save()
+		from_state = before.get("workflow_state") if before else None
+		to_state = self.get("workflow_state")
+		if not to_state or from_state == to_state:
+			return
+
+		if to_state in NEEDS_PLANNING_DOCUMENTS:
+			self.require_planning_documents(to_state)
+
+		user = frappe.session.user
+		if from_state == PROGRAMS_REVIEW and to_state == FINANCE_REVIEW:
+			self.programs_approved_by = user
+			self.programs_approved_on = now_datetime()
+		elif from_state == FINANCE_REVIEW and to_state == APPROVED:
+			self.require_a_second_approver(user)
+			self.finance_approved_by = user
+			self.finance_approved_on = now_datetime()
+		elif to_state == DRAFT:
+			# Returned for revision: what comes back has to be approved again, by both heads.
+			for field in ("programs_approved_by", "programs_approved_on", "finance_approved_by", "finance_approved_on"):
+				self.set(field, None)
+
+	def require_planning_documents(self, to_state):
+		missing = [self.meta.get_label(field) for field in PLANNING_DOCUMENTS if not self.get(field)]
+		if missing:
+			frappe.throw(
+				_("{0} cannot go to {1} without: {2}. The Program Department sends Finance the requisition, the activity budget and the concept note together.").format(
+					frappe.bold(self.name), frappe.bold(_(to_state)), ", ".join(frappe.bold(label) for label in missing)
+				),
+				title=_("Attach the planning documents"),
+			)
+
+	def require_a_second_approver(self, user):
+		"""Programs and Finance each approve; one person holding both roles does not make two.
+
+		Frappe's allow_self_approval only protects the document's owner. Administrator is exempt
+		here for the same reason frappe exempts it there: setup scripts act as it, people do not.
+		"""
+		if user == "Administrator" or not self.programs_approved_by:
+			return
+		if self.programs_approved_by == user:
+			frappe.throw(
+				_("You approved {0} for Programs. The Head of Finance's approval has to come from somebody else.").format(
+					frappe.bold(self.name)
+				),
+				title=_("A second approver is needed"),
+			)
 
 	def before_submit(self):
 		"""Approval is what turns a requisition into an activity everything else can point at.

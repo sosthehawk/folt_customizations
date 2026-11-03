@@ -97,6 +97,7 @@ _REQUISITION = (
 	"float_amount",
 	"description",
 	"concept_note",
+	"budget_document",
 )
 # The float fields mean nothing on an activity with no cash component. company, requested_by and
 # project are filled by the controller (set_defaults / before_submit) and are not offered.

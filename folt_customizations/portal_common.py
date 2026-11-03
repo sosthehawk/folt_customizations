@@ -236,6 +236,43 @@ def list_view(doctype, wanted, search, q=None, raw_filters=None, order_by=None, 
 	}
 
 
+def complete_item_rows(doc):
+	"""What the Desk's form fills in the browser as an item is picked, and a save from the app does not.
+
+	The Desk gets a line's stock UOM, UOM and conversion factor from get_item_details when the item
+	is chosen; the server-side controllers of most buying documents set a missing factor, but
+	Request for Quotation's does not, so a line saved from the app came back "UOM Conversion Factor
+	is mandatory". Any child table with an item and a conversion factor is completed here, only
+	where a value is missing, so nothing the person chose is overwritten. The factor is ERPNext's
+	own (the item's UOM table, its template's, then the global UOM conversions), 1 when none is set,
+	which is what the buying controllers fall back to as well.
+	"""
+	from erpnext.stock.get_item_details import get_conversion_factor
+
+	for df in doc.meta.get_table_fields():
+		child = frappe.get_meta(df.options)
+		if not (child.has_field("item_code") and child.has_field("conversion_factor")):
+			continue
+		for row in doc.get(df.fieldname) or []:
+			if not row.get("item_code"):
+				continue
+			item = frappe.get_cached_value("Item", row.item_code, ["stock_uom", "purchase_uom", "item_name", "description"], as_dict=True)
+			if not item:
+				continue
+			if child.has_field("stock_uom") and not row.get("stock_uom"):
+				row.stock_uom = item.stock_uom
+			if child.has_field("uom") and not row.get("uom"):
+				row.uom = item.purchase_uom or item.stock_uom
+			if not row.get("conversion_factor"):
+				row.conversion_factor = get_conversion_factor(row.item_code, row.get("uom") or item.stock_uom).get("conversion_factor") or 1
+			if child.has_field("item_name") and not row.get("item_name"):
+				row.item_name = item.item_name
+			if child.has_field("description") and not row.get("description"):
+				row.description = item.description or item.item_name
+			if child.has_field("schedule_date") and not row.get("schedule_date") and doc.get("schedule_date"):
+				row.schedule_date = doc.schedule_date
+
+
 def save_doc(doctype, doc, name=None, protected=PROTECTED):
 	"""Save a draft (new or existing), or a single settings record. Never submits.
 
@@ -269,6 +306,7 @@ def save_doc(doctype, doc, name=None, protected=PROTECTED):
 		if target.docstatus == 2:
 			frappe.throw(_("{0} is cancelled. Amend it to make a new version.").format(name))
 		target.update(values)
+		complete_item_rows(target)
 		template_taxes(target, m)
 		target.save()
 	else:
@@ -282,6 +320,7 @@ def save_doc(doctype, doc, name=None, protected=PROTECTED):
 			if not new_name:
 				frappe.throw(_("Give the new {0} a name.").format(_(doctype)))
 			target.name = new_name
+		complete_item_rows(target)
 		template_taxes(target, m)
 		target.insert()
 	return target
@@ -315,6 +354,7 @@ def preview_doc(doctype, doc, methods, after=None):
 	values.pop("docstatus", None)
 	draft = frappe.get_doc({"doctype": doctype, **values})
 	draft.docstatus = 0
+	complete_item_rows(draft)
 	for method in methods:
 		fn = getattr(draft, method, None)
 		if not callable(fn):

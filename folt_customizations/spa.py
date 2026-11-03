@@ -43,6 +43,7 @@ from frappe.sessions import get_csrf_token
 from frappe.utils import cint, flt, getdate
 
 from folt_customizations import activity_chain, masterdata, procurement_chain, step_forms, workflow_shape
+from folt_customizations.portal_common import complete_item_rows
 from folt_customizations.document_guide import _documents, get_guide, guide_map
 from folt_customizations.folt_customizations.page.folt_tasks.folt_tasks import _fields, _row
 from folt_customizations.float_lifecycle import FUNDED_FLOAT_STATES
@@ -676,21 +677,10 @@ def _complete(doc):
 	"""
 	if doc.doctype != "Request for Quotation":
 		return
+	complete_item_rows(doc)
 	for row in doc.get("items") or []:
-		if not row.item_code:
-			continue
-		item = frappe.get_cached_value("Item", row.item_code, ["stock_uom", "purchase_uom", "item_name", "description"], as_dict=True)
-		if not item:
-			continue
-		row.stock_uom = row.stock_uom or item.stock_uom
-		row.uom = row.uom or item.purchase_uom or item.stock_uom
-		if not row.conversion_factor:
-			row.conversion_factor = 1 if row.uom == row.stock_uom else (
-				frappe.db.get_value("UOM Conversion Detail", {"parent": row.item_code, "uom": row.uom}, "conversion_factor") or 1
-			)
-		row.item_name = row.item_name or item.item_name
-		row.description = row.description or item.description or item.item_name
-		row.schedule_date = row.schedule_date or doc.schedule_date or doc.transaction_date
+		if row.item_code and not row.schedule_date:
+			row.schedule_date = doc.transaction_date
 	for row in doc.get("suppliers") or []:
 		if row.supplier and not row.contact:
 			row.contact = frappe.db.get_value("Supplier", row.supplier, "supplier_primary_contact") or frappe.db.get_value(

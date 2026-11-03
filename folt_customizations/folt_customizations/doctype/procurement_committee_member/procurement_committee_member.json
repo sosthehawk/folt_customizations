@@ -7,10 +7,34 @@
   "sort_field": "modified",
   "sort_order": "DESC",
   "fields": [
-    { "fieldname": "member", "fieldtype": "Link", "options": "User", "label": "Member", "reqd": 1, "in_list_view": 1 },
-    { "fieldname": "reviewed", "fieldtype": "Check", "label": "Reviewed / Signed", "in_list_view": 1 },
-    { "fieldname": "score", "fieldtype": "Float", "label": "Score", "in_list_view": 1 },
-    { "fieldname": "comments", "fieldtype": "Small Text", "label": "Comments", "in_list_view": 1 }
+    {
+      "fieldname": "member",
+      "fieldtype": "Link",
+      "options": "User",
+      "label": "Member",
+      "reqd": 1,
+      "in_list_view": 1,
+      "read_only": 1
+    },
+    {
+      "fieldname": "reviewed",
+      "fieldtype": "Check",
+      "label": "Reviewed / Signed",
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "score",
+      "fieldtype": "Float",
+      "label": "Score",
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "comments",
+      "fieldtype": "Small Text",
+      "label": "Comments",
+      "in_list_view": 1
+    }
   ],
-  "permissions": []
+  "permissions": [],
+  "modified": "2026-11-03 10:00:00.000000"
 }

@@ -257,7 +257,7 @@ def ensure_procurement_settings():
     if not frappe.db.exists("DocType", "FoLT Procurement Settings"):
         return
     meta = frappe.get_meta("FoLT Procurement Settings")
-    for field in ("po_ed_threshold", "match_price_tolerance", "reminder_days"):
+    for field in ("po_ed_threshold", "match_price_tolerance", "reminder_days", "committee_size"):
         df = meta.get_field(field)
         if not df:
             continue
@@ -265,6 +265,12 @@ def ensure_procurement_settings():
         if stored and stored[0][0] not in (None, ""):
             continue
         frappe.db.set_single_value("FoLT Procurement Settings", field, float(df.default or 0))
+    # The Programs Department the committee's representative comes from (committee.py), once.
+    if meta.get_field("program_department") and not frappe.db.get_single_value("FoLT Procurement Settings", "program_department"):
+        from folt_customizations.committee import DEFAULT_PROGRAM_DEPARTMENT
+
+        if frappe.db.exists("Department", DEFAULT_PROGRAM_DEPARTMENT):
+            frappe.db.set_single_value("FoLT Procurement Settings", "program_department", DEFAULT_PROGRAM_DEPARTMENT)
     if not frappe.db.get_global("folt_supplier_invoice_uniq_seeded"):
         frappe.db.set_single_value("Accounts Settings", "check_supplier_invoice_uniqueness", 1)
         frappe.db.set_global("folt_supplier_invoice_uniq_seeded", "1")

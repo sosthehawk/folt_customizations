@@ -2,6 +2,7 @@ import frappe
 from frappe.model.document import Document
 from frappe.utils import flt
 
+from folt_customizations import committee
 from folt_customizations.notifications import notify_committee_members
 from folt_customizations.procurement import COMMITTEE_REVIEW_STATE, rfq_quotations
 
@@ -21,6 +22,7 @@ SELF_ONLY_FIELDS = {
 
 class ProcurementCommitteeEvaluation(Document):
 	def validate(self):
+		self.constitute_committee()
 		self.enforce_conflict_of_interest()
 		self.enforce_committee_composition()
 		self.sync_quotation_scores()
@@ -35,6 +37,36 @@ class ProcurementCommitteeEvaluation(Document):
 		# otherwise a member saving their own score re-notifies the rest of the committee.
 		if self.workflow_state == COMMITTEE_REVIEW_STATE and self.has_value_changed("workflow_state"):
 			notify_committee_members(self)
+
+	def constitute_committee(self):
+		"""The committee is drawn at random by the system, on the way into Committee Reviewing.
+
+		FoLT's procurement workflow, step 3: the committee is constituted on a random basis, never
+		includes the officer who requested the quotations, and always has a Program Department
+		member. See committee.py for the draw. Nobody but Administrator may name members by hand
+		(and an appointed committee is marked as such); whichever way it was constituted, the
+		committee must meet the rules before it starts evaluating.
+		"""
+		self.set("members", [row for row in self.members or [] if row.member])
+		before = self.get_doc_before_save()
+		was = [row.member for row in (before.get("members") if before else None) or []]
+		now = [row.member for row in self.members]
+
+		if was != now and not self.flags.folt_committee_drawn:
+			if frappe.session.user != "Administrator":
+				frappe.throw(
+					frappe._("The committee is drawn at random by the system when the evaluation is sent to the committee. Members cannot be chosen or changed by hand."),
+					title=frappe._("Committee is drawn at random"),
+				)
+			self.folt_constitution = committee.APPOINTED if now else None
+
+		entering_review = self.workflow_state == COMMITTEE_REVIEW_STATE and (
+			not before or before.get("workflow_state") != COMMITTEE_REVIEW_STATE
+		)
+		if entering_review:
+			if not self.members:
+				committee.draw(self)
+			committee.check_composition(self)
 
 	def enforce_conflict_of_interest(self):
 		"""FoLT rule: the requester may not sit on the committee that evaluates their RFQ."""

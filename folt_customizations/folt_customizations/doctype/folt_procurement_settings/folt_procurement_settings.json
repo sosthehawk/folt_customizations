@@ -8,6 +8,9 @@
  "field_order": [
   "approval_section",
   "po_ed_threshold",
+  "committee_section",
+  "committee_size",
+  "program_department",
   "match_section",
   "match_price_tolerance",
   "reminders_section",
@@ -26,6 +29,27 @@
    "fieldtype": "Currency",
    "label": "Executive Director approves orders above",
    "non_negative": 1
+  },
+  {
+   "fieldname": "committee_section",
+   "fieldtype": "Section Break",
+   "label": "Procurement committee",
+   "description": "The committee that evaluates a competitive bid is drawn at random by the system when the evaluation is sent to it, from the users holding the Procurement Committee role. The officer who requested the quotations is never drawn."
+  },
+  {
+   "default": "3",
+   "description": "How many members the system draws for each committee. At least one of them is always from the Programs Department below.",
+   "fieldname": "committee_size",
+   "fieldtype": "Int",
+   "label": "Members per committee",
+   "non_negative": 1
+  },
+  {
+   "fieldname": "program_department",
+   "fieldtype": "Link",
+   "options": "Department",
+   "label": "Programs Department",
+   "description": "A user counts as a Programs Department representative when their active Employee record is in this department or one under it."
   },
   {
    "fieldname": "match_section",
@@ -55,7 +79,7 @@
   }
  ],
  "issingle": 1,
- "modified": "2026-11-02 17:00:00.000000",
+ "modified": "2026-11-03 10:00:00.000000",
  "modified_by": "Administrator",
  "module": "Folt Customizations",
  "name": "FoLT Procurement Settings",

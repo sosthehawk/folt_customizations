@@ -9,28 +9,164 @@
   "sort_order": "DESC",
   "track_changes": 1,
   "fields": [
-    { "fieldname": "request_for_quotation", "fieldtype": "Link", "options": "Request for Quotation", "label": "Request for Quotation", "in_list_view": 1 },
-    { "fieldname": "activity_requisition", "fieldtype": "Link", "options": "Activity Requisition", "label": "Activity Requisition" },
-    { "fieldname": "column_break_head", "fieldtype": "Column Break" },
-    { "fieldname": "requested_by", "fieldtype": "Link", "options": "User", "label": "Requested By (excluded from committee)", "reqd": 1, "description": "Conflict-of-interest subject: this user must not appear in the committee." },
-    { "fieldname": "quorum", "fieldtype": "Int", "label": "Quorum (0 = all members)", "default": "0" },
-    { "fieldname": "section_break_members", "fieldtype": "Section Break", "label": "Committee Members" },
-    { "fieldname": "members", "fieldtype": "Table", "options": "Procurement Committee Member", "label": "Members" },
-    { "fieldname": "section_break_quotations", "fieldtype": "Section Break", "label": "Quotation Evaluation", "depends_on": "eval:doc.request_for_quotation" },
-    { "fieldname": "quotation_scores", "fieldtype": "Table", "options": "Procurement Committee Quotation Score", "label": "Scores by Member and Quotation", "description": "One row per member per quotation received against the RFQ. Filled in from the RFQ \u2014 rows added by hand are dropped on save." },
-    { "fieldname": "section_break_award", "fieldtype": "Section Break", "label": "Award Recommendation" },
-    { "fieldname": "recommended_supplier", "fieldtype": "Link", "options": "Supplier", "label": "Recommended Supplier" },
-    { "fieldname": "recommended_supplier_quotation", "fieldtype": "Link", "options": "Supplier Quotation", "label": "Winning Supplier Quotation" },
-    { "fieldname": "recommendation_notes", "fieldtype": "Text", "label": "Recommendation Notes" },
-    { "fieldname": "section_break_status", "fieldtype": "Section Break" },
-    { "fieldname": "workflow_state", "fieldtype": "Link", "options": "Workflow State", "label": "Workflow State", "read_only": 1, "no_copy": 1, "in_standard_filter": 1 },
-    { "fieldname": "folt_rejection_reason", "fieldtype": "Small Text", "label": "Rejection Reason", "read_only": 1, "no_copy": 1, "allow_on_submit": 1, "depends_on": "eval:doc.folt_rejection_reason", "description": "Why this was rejected or returned. Written when a document is turned down and cleared when it goes back for another attempt -- the wording of each one is kept in the timeline." }
+    {
+      "fieldname": "request_for_quotation",
+      "fieldtype": "Link",
+      "options": "Request for Quotation",
+      "label": "Request for Quotation",
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "activity_requisition",
+      "fieldtype": "Link",
+      "options": "Activity Requisition",
+      "label": "Activity Requisition"
+    },
+    {
+      "fieldname": "column_break_head",
+      "fieldtype": "Column Break"
+    },
+    {
+      "fieldname": "requested_by",
+      "fieldtype": "Link",
+      "options": "User",
+      "label": "Requested By (excluded from committee)",
+      "reqd": 1,
+      "description": "Conflict-of-interest subject: this user must not appear in the committee."
+    },
+    {
+      "fieldname": "quorum",
+      "fieldtype": "Int",
+      "label": "Quorum (0 = all members)",
+      "default": "0"
+    },
+    {
+      "fieldname": "section_break_members",
+      "fieldtype": "Section Break",
+      "label": "Committee Members"
+    },
+    {
+      "fieldname": "members",
+      "fieldtype": "Table",
+      "options": "Procurement Committee Member",
+      "label": "Members",
+      "description": "Drawn at random by the system when the evaluation is sent to the committee: never the officer who requested the quotations, and always at least one Programs Department member."
+    },
+    {
+      "fieldname": "folt_constitution",
+      "fieldtype": "Select",
+      "label": "How the committee was constituted",
+      "options": "\nRandom draw\nAppointed by administrator",
+      "read_only": 1
+    },
+    {
+      "fieldname": "folt_drawn_on",
+      "fieldtype": "Datetime",
+      "label": "Drawn on",
+      "read_only": 1,
+      "depends_on": "eval:doc.folt_constitution=='Random draw'"
+    },
+    {
+      "fieldname": "folt_draw_pool",
+      "fieldtype": "Small Text",
+      "label": "Drawn from",
+      "read_only": 1,
+      "depends_on": "eval:doc.folt_constitution=='Random draw'",
+      "description": "The eligible users the draw was made from."
+    },
+    {
+      "fieldname": "section_break_quotations",
+      "fieldtype": "Section Break",
+      "label": "Quotation Evaluation",
+      "depends_on": "eval:doc.request_for_quotation"
+    },
+    {
+      "fieldname": "quotation_scores",
+      "fieldtype": "Table",
+      "options": "Procurement Committee Quotation Score",
+      "label": "Scores by Member and Quotation",
+      "description": "One row per member per quotation received against the RFQ. Filled in from the RFQ \u2014 rows added by hand are dropped on save."
+    },
+    {
+      "fieldname": "section_break_award",
+      "fieldtype": "Section Break",
+      "label": "Award Recommendation"
+    },
+    {
+      "fieldname": "recommended_supplier",
+      "fieldtype": "Link",
+      "options": "Supplier",
+      "label": "Recommended Supplier"
+    },
+    {
+      "fieldname": "recommended_supplier_quotation",
+      "fieldtype": "Link",
+      "options": "Supplier Quotation",
+      "label": "Winning Supplier Quotation"
+    },
+    {
+      "fieldname": "recommendation_notes",
+      "fieldtype": "Text",
+      "label": "Recommendation Notes"
+    },
+    {
+      "fieldname": "section_break_status",
+      "fieldtype": "Section Break"
+    },
+    {
+      "fieldname": "workflow_state",
+      "fieldtype": "Link",
+      "options": "Workflow State",
+      "label": "Workflow State",
+      "read_only": 1,
+      "no_copy": 1,
+      "in_standard_filter": 1
+    },
+    {
+      "fieldname": "folt_rejection_reason",
+      "fieldtype": "Small Text",
+      "label": "Rejection Reason",
+      "read_only": 1,
+      "no_copy": 1,
+      "allow_on_submit": 1,
+      "depends_on": "eval:doc.folt_rejection_reason",
+      "description": "Why this was rejected or returned. Written when a document is turned down and cleared when it goes back for another attempt -- the wording of each one is kept in the timeline."
+    }
   ],
   "permissions": [
-    { "role": "System Manager", "read": 1, "write": 1, "create": 1, "delete": 1, "submit": 1, "cancel": 1, "amend": 1 },
-    { "role": "Purchase User", "read": 1, "write": 1, "create": 1 },
-    { "role": "Purchase Manager", "read": 1, "write": 1, "create": 1 },
-    { "role": "Procurement Committee", "read": 1, "write": 1 },
-    { "role": "Head of Finance", "read": 1, "write": 1, "submit": 1 }
-  ]
+    {
+      "role": "System Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "delete": 1,
+      "submit": 1,
+      "cancel": 1,
+      "amend": 1
+    },
+    {
+      "role": "Purchase User",
+      "read": 1,
+      "write": 1,
+      "create": 1
+    },
+    {
+      "role": "Purchase Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1
+    },
+    {
+      "role": "Procurement Committee",
+      "read": 1,
+      "write": 1
+    },
+    {
+      "role": "Head of Finance",
+      "read": 1,
+      "write": 1,
+      "submit": 1
+    }
+  ],
+  "modified": "2026-11-03 10:00:00.000000"
 }

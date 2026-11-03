@@ -24,6 +24,7 @@ from frappe.utils import add_days, flt, nowdate
 
 from folt_customizations import document_guide, procurement_chain
 from folt_customizations.procurement import AUTHORISED, EVALUATION_DOCTYPE, WAIVER_DOCTYPE
+from folt_customizations.procurement_e2e_support import approved_requisition, ensure_program_member, rfq_lines
 
 ITEM = "E2E Route Service"
 # The competition: two bidders in the register's ICT category, cheapest second so the award is
@@ -63,7 +64,7 @@ def expect_throw(label, fn):
 
 
 def teardown():
-	for doctype in ("Purchase Order", EVALUATION_DOCTYPE, WAIVER_DOCTYPE, "Supplier Quotation", "Request for Quotation"):
+	for doctype in ("Purchase Order", EVALUATION_DOCTYPE, WAIVER_DOCTYPE, "Supplier Quotation", "Request for Quotation", "Material Request"):
 		for name in frappe.get_all(doctype, filters={"docstatus": ["<", 2]}, pluck="name"):
 			doc = frappe.get_doc(doctype, name)
 			if not _is_ours(doc):
@@ -79,6 +80,8 @@ def teardown():
 		frappe.delete_doc("Item", ITEM, force=True, ignore_permissions=True)
 
 	for user in (BUYER, *MEMBERS):
+		for name in frappe.get_all("Employee", filters={"user_id": user}, pluck="name"):
+			frappe.delete_doc("Employee", name, force=True, ignore_permissions=True)
 		for name in frappe.get_all("Notification Log", filters={"for_user": user}, pluck="name"):
 			frappe.delete_doc("Notification Log", name, force=True, ignore_permissions=True)
 		if frappe.db.exists("User", user):
@@ -143,6 +146,8 @@ def make_fixtures(company):
 	make_user(BUYER, "E2E Route Buyer", ["Purchase User"])
 	for index, member in enumerate(MEMBERS, start=1):
 		make_user(member, f"E2E Route Member {index}", ["Procurement Committee"])
+	# The committee must seat a Program Department member (committee.check_composition).
+	ensure_program_member(MEMBERS[0], company)
 
 
 def make_rfq(company, suppliers):
@@ -155,7 +160,8 @@ def make_rfq(company, suppliers):
 			"subject": "E2E procurement route",
 			"message_for_supplier": "E2E: please quote.",
 			"suppliers": [{"supplier": supplier} for supplier in suppliers],
-			"items": [_line(qty=1, schedule=True)],
+			# From an approved requisition: an RFQ is sent only on one (sourcing.before_submit_rfq).
+			"items": rfq_lines(approved_requisition(company, ITEM, schedule_date=add_days(nowdate(), 14)), add_days(nowdate(), 14)),
 		}
 	)
 	doc.insert(ignore_permissions=True)

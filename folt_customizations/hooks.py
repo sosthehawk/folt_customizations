@@ -361,8 +361,11 @@ doc_events = {
         "on_submit": "folt_customizations.receiving.on_submit",
     },
     # An RFQ's quotation deadline, and the bids dated after it (sourcing.py).
+    # ...and, when it is sent, an approved requisition behind every line and only pre-qualified
+    # suppliers (procurement workflow: initiation and step 1).
     "Request for Quotation": {
         "validate": "folt_customizations.sourcing.validate_rfq",
+        "before_submit": "folt_customizations.sourcing.before_submit_rfq",
     },
     # Notify the role that can make the next move whenever a document enters a state that
     # waits on somebody. Frappe writes one Workflow Action per transition, so hooking its
@@ -397,7 +400,12 @@ doc_events = {
     "Purchase Invoice": {
         # Three-way match against the order and the receipt; a discrepancy is approved only with
         # the approver's reason (match.py, ADR-008).
-        "validate": "folt_customizations.match.validate",
+        "validate": [
+            "folt_customizations.match.validate",
+            # The Finance Assistant's review before an invoice is forwarded for approval, and the
+            # reviewer never approving it (invoice_review.py, procurement workflow step 5).
+            "folt_customizations.invoice_review.validate",
+        ],
         "before_submit": "folt_customizations.finance_approvals.refuse_direct_submit",
         "before_cancel": "folt_customizations.finance_approvals.refuse_direct_submit",
     },

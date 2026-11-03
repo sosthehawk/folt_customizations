@@ -17,6 +17,7 @@ from frappe.model.workflow import apply_workflow
 from frappe.utils import add_days, nowdate
 
 from folt_customizations.procurement import COMMITTEE_REVIEW_STATE
+from folt_customizations.procurement_e2e_support import approved_requisition, ensure_program_member, rfq_lines
 
 ITEM = "E2E Bid Service"
 SUPPLIERS = ("E2E Alpha Supplies", "E2E Beta Traders", "E2E Gamma Logistics")
@@ -61,7 +62,7 @@ def teardown():
 				doc.cancel()
 			doc.delete(force=True)
 
-	for doctype in ("Supplier Quotation", "Request for Quotation"):
+	for doctype in ("Supplier Quotation", "Request for Quotation", "Material Request"):
 		for name in frappe.get_all(doctype, filters={"docstatus": ["<", 2]}, pluck="name"):
 			doc = frappe.get_doc(doctype, name)
 			if any(row.item_code == ITEM for row in doc.items):
@@ -76,6 +77,8 @@ def teardown():
 		frappe.delete_doc("Item", ITEM, force=True, ignore_permissions=True)
 
 	for user in (*MEMBERS, BUYER, OUTSIDER):
+		for name in frappe.get_all("Employee", filters={"user_id": user}, pluck="name"):
+			frappe.delete_doc("Employee", name, force=True, ignore_permissions=True)
 		# Notification Logs are not children of the evaluation, so deleting the document leaves
 		# them behind -- and a stale one would make the notification checks below pass for the
 		# wrong reason.
@@ -139,17 +142,8 @@ def make_rfq(company):
 			# All three invited suppliers, including the one that quotes late: ERPNext refuses a
 			# Supplier Quotation from a supplier the RFQ never invited.
 			"suppliers": [{"supplier": supplier} for supplier in (*BIDS, *LATE_BID)],
-			"items": [
-				{
-					"item_code": ITEM,
-					"item_name": ITEM,
-					"description": ITEM,
-					"uom": "Nos",
-					"conversion_factor": 1,
-					"qty": 1,
-					"schedule_date": add_days(nowdate(), 7),
-				}
-			],
+			# From an approved requisition: an RFQ is sent only on one (sourcing.before_submit_rfq).
+			"items": rfq_lines(approved_requisition(company, ITEM, schedule_date=add_days(nowdate(), 7)), add_days(nowdate(), 7)),
 		}
 	)
 	doc.insert(ignore_permissions=True)
@@ -238,6 +232,8 @@ def run():
 	for i, member in enumerate(MEMBERS, start=1):
 		make_user(member, f"E2E Member {i}", ["Procurement Committee"])
 	make_user(OUTSIDER, "E2E Outsider", ["Procurement Committee"])
+	# The committee must seat a Program Department member (committee.check_composition).
+	ensure_program_member(MEMBERS[0], company)
 
 	rfq = make_rfq(company)
 	quotations = {supplier: make_quotation(rfq, supplier, rate) for supplier, rate in BIDS.items()}

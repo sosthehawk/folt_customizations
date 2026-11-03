@@ -28,6 +28,7 @@ BUYER = "purchaser.test@folt.test"  # Purchase User
 MANAGER = "procmanager.test@folt.test"  # Purchase Manager
 FIN_MANAGER = "finmanager.test@folt.test"  # Finance Manager + Accounts User + Accounts Manager
 FIN_OFFICER = "finofficer.test@folt.test"  # Finance Officer + Accounts User
+FIN_ASSISTANT = "finassistant.test@folt.test"  # Finance Assistant + Accounts User
 AUDITOR = "ed.test@folt.test"  # Executive Director + Auditor
 HOP = "hop.test@folt.test"  # Head of Programs
 RECEIVER = "receiver.test@folt.test"  # Stock User
@@ -709,7 +710,15 @@ def _invoicing(order):
 
 	as_user(FIN_OFFICER, prefill)
 	check("an override reason typed onto the invoice is not kept", not frappe.db.get_value("Purchase Invoice", odd, "folt_match_override_reason"))
-	as_user(FIN_OFFICER, lambda: pp.act("Purchase Invoice", odd, "transition", "Submit for approval"))
+	# Procurement workflow step 5: the Finance Assistant reviews the supplier's invoice for accuracy
+	# and completeness before forwarding it for approval (invoice_review.py).
+	expect_throw("an invoice is forwarded only by the Finance Assistant", lambda: as_user(FIN_OFFICER, lambda: pp.act("Purchase Invoice", odd, "transition", "Submit for approval")))
+	expect_throw("and not before the supplier's invoice is attached", lambda: as_user(FIN_ASSISTANT, lambda: pp.act("Purchase Invoice", odd, "transition", "Submit for approval")))
+	from folt_customizations.procurement_e2e_support import attach_supplier_invoice
+
+	attach_supplier_invoice(odd)
+	as_user(FIN_ASSISTANT, lambda: pp.act("Purchase Invoice", odd, "transition", "Submit for approval"))
+	check("the review is recorded on the invoice", frappe.db.get_value("Purchase Invoice", odd, "folt_reviewed_by") == FIN_ASSISTANT)
 	moves = as_user(HOF, lambda: pp.record("Purchase Invoice", odd))["workflow"]["transitions"]
 	check("approving it asks for a reason", any(mv["action"] == "Approve" and mv["needs_reason"] for mv in moves), moves)
 	expect_throw("it is not approved without one", lambda: as_user(HOF, lambda: pp.act("Purchase Invoice", odd, "transition", "Approve")))

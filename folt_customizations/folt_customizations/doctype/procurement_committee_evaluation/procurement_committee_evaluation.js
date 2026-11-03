@@ -137,7 +137,7 @@ async function sync_quotation_scores(frm, { announce = false } = {}) {
 		});
 	} else if (!members.length) {
 		frappe.show_alert({
-			message: __("{0} quotation(s) received — add the committee members to score them.", [
+			message: __("{0} quotation(s) received — the committee is drawn at random when you send this to the committee.", [
 				quotations.length,
 			]),
 			indicator: "blue",

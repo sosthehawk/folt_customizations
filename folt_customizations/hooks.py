@@ -205,6 +205,8 @@ after_install = [
     "folt_customizations.workspaces.sync_workspace_sidebars",
     "folt_customizations.workspaces.set_landing_page",
     "folt_customizations.permissions.apply_role_permissions",
+    # HR settings: HR Manager changes them, HR User reads them (ADR-009).
+    "folt_customizations.permissions.apply_read_only",
     "folt_customizations.access.apply_module_access",
     "folt_customizations.print_formats.apply_print_formats",
     "folt_customizations.supplier_portal.link_portal_users",
@@ -220,6 +222,8 @@ after_migrate = [
     "folt_customizations.workspaces.sync_workspace_sidebars",
     "folt_customizations.workspaces.set_landing_page",
     "folt_customizations.permissions.apply_role_permissions",
+    # HR settings: HR Manager changes them, HR User reads them (ADR-009).
+    "folt_customizations.permissions.apply_read_only",
     "folt_customizations.access.apply_module_access",
     "folt_customizations.print_formats.apply_print_formats",
     "folt_customizations.supplier_portal.link_portal_users",

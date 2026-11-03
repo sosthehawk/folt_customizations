@@ -258,6 +258,54 @@ PROCUREMENT_PERMISSIONS = {
 	},
 }
 
+# HR settings (ADR-009): HR Manager changes them, HR User reads them (the user's choice,
+# 2026-11-03). ERPNext ships the opposite for most: HR User writes leave types, policies, salary
+# components, structures and assignments, and cannot read Payroll Settings or Holiday Lists at all.
+# These are the reads HR User lacks; HR_READ_ONLY below takes the writes away.
+HR_SETTINGS_PERMISSIONS = {
+	"Payroll Settings": {"HR User": ("read",)},
+	"Holiday List": {"HR User": ("read",)},
+	"Holiday List Assignment": {"HR User": ("read",)},
+}
+
+# Doctypes HR User may read but not change: every HR setting the HR settings area keeps (the
+# hr_settings_portal allow-list), whatever ERPNext grants. apply_read_only takes the writes away on
+# every migrate, unless an administrator gave one back on purpose in Settings > Permissions (the
+# overrides store records that as 1, and it is respected).
+HR_READ_ONLY = {
+	doctype: ("HR User",)
+	for doctype in (
+		"HR Settings", "Payroll Settings", "Department", "Designation", "Employment Type", "Branch", "Employee Grade",
+		"Holiday List", "Holiday List Assignment", "Leave Type", "Leave Period", "Leave Policy", "Leave Policy Assignment",
+		"Leave Allocation", "Leave Control Panel", "Salary Component", "Salary Structure", "Salary Structure Assignment",
+		"Bulk Salary Structure Assignment", "Income Tax Slab", "Payroll Period", "Shift Type", "Employee Onboarding Template",
+	)
+}
+READ_ONLY_PTYPES = ("write", "create", "delete", "submit", "cancel", "amend", "import")
+
+
+def apply_read_only():
+	"""Take the writes in HR_READ_ONLY away. Idempotent; hooked after apply_role_permissions."""
+	from frappe.permissions import setup_custom_perms
+
+	changed = False
+	for doctype, roles in HR_READ_ONLY.items():
+		if not frappe.db.exists("DocType", doctype):
+			continue
+		for role in roles:
+			for permlevel in sorted({p.permlevel for p in frappe.get_meta(doctype).permissions if p.role == role and not p.if_owner}):
+				for ptype in READ_ONLY_PTYPES:
+					kept = permission_overrides().get(doctype, {}).get(role, {}).get(str(permlevel), {}).get(ptype) == 1
+					if kept or not _has_perm(doctype, role, ptype, permlevel):
+						continue
+					setup_custom_perms(doctype)
+					update_permission_property(doctype, role, permlevel, ptype, 0)
+					frappe.clear_cache(doctype=doctype)
+					changed = True
+	if changed:
+		frappe.clear_cache()
+
+
 # Rows that hold only on the documents the person created themselves (Custom DocPerm if_owner).
 # Kept apart from the maps above because _grant resolves one row per role and permlevel and an
 # owner-only row is a second, narrower row for the same role.
@@ -277,6 +325,7 @@ def _maps():
 		(MASTER_DATA_PERMISSIONS, 0),
 		(ADMIN_PERMISSIONS, 0),
 		(PROCUREMENT_PERMISSIONS, 0),
+		(HR_SETTINGS_PERMISSIONS, 0),
 		(PERMLEVEL_1_PERMISSIONS, 1),
 	)
 

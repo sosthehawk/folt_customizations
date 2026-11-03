@@ -11,8 +11,9 @@ on every migrate -- and it is asked again here, so a write from HR User is refus
 on a site where an administrator gave a permission back.
 
 DOCTYPES grows by phase: phase 1 is the general settings and the organisation lists HR keeps;
-holidays (phase 2) are the holiday lists and who each applies to; leave, pay set-up and onboarding
-come after.
+holidays (phase 2) are the holiday lists and who each applies to; leave (phase 3) is leave types,
+periods, policies, their assignment and allocations, with the Leave Control Panel's bulk allocation;
+pay set-up and onboarding come after.
 """
 
 import frappe
@@ -37,6 +38,12 @@ DOCTYPES = {
 	# holidays (phase 2)
 	"Holiday List": ("holidays", ["holiday_list_name", "from_date", "to_date", "weekly_off", "total_holidays"], ["name", "holiday_list_name"]),
 	"Holiday List Assignment": ("holidays", ["applicable_for", "assigned_to", "employee_name", "holiday_list", "from_date"], ["name", "assigned_to", "employee_name", "holiday_list"]),
+	# leave (phase 3)
+	"Leave Type": ("leave", ["max_leaves_allowed", "is_lwp", "is_carry_forward", "include_holiday", "is_earned_leave", "allow_encashment"], ["name", "leave_type_name"]),
+	"Leave Period": ("leave", ["from_date", "to_date", "company", "is_active"], ["name"]),
+	"Leave Policy": ("leave", ["title"], ["name", "title"]),
+	"Leave Policy Assignment": ("leave", ["employee", "employee_name", "leave_policy", "effective_from", "effective_to", "leaves_allocated"], ["name", "employee", "employee_name", "leave_policy"]),
+	"Leave Allocation": ("leave", ["employee", "employee_name", "leave_type", "from_date", "to_date", "total_leaves_allocated", "leave_policy"], ["name", "employee", "employee_name", "leave_type"]),
 }
 
 # How many days ahead the hub warns that a company's holiday list is running out.
@@ -116,7 +123,30 @@ def context():
 		"workflows": {},
 		"roles": {"editor": editor},
 		"holidays": _company_holidays([c.name for c in companies]),
+		"leave_periods": _company_leave_periods([c.name for c in companies]),
 	}
+
+
+def _company_leave_periods(companies):
+	"""Each company's active leave period covering today, if any: what HRMS's leave allocation and
+	the Leave Control Panel take their dates from."""
+	from frappe.utils import nowdate
+
+	today = nowdate()
+	out = []
+	for company in companies:
+		row = frappe.get_all(
+			"Leave Period",
+			filters={"company": company, "is_active": 1, "from_date": ["<=", today], "to_date": [">=", today]},
+			fields=["name", "from_date", "to_date"],
+			order_by="from_date desc",
+			limit=1,
+		)
+		out.append(
+			{"company": company, "leave_period": row[0].name if row else None,
+			 "from_date": str(row[0].from_date) if row else None, "to_date": str(row[0].to_date) if row else None}
+		)
+	return out
 
 
 def _company_holidays(companies):
@@ -249,6 +279,92 @@ def fill_holidays(doc, kind):
 		],
 		"added": max(len(draft.holidays) - before, 0),
 	}
+
+
+# --- leave (phase 3): bulk allocation, as the Leave Control Panel does it ------------------------
+
+_PANEL_FIELDS = (
+	"dates_based_on", "leave_period", "from_date", "to_date", "carry_forward", "allocate_based_on_leave_policy",
+	"leave_policy", "leave_type", "no_of_days", "company", "branch", "department", "employment_type", "designation",
+	"employee_grade",
+)
+
+
+def _panel(spec):
+	"""An in-memory Leave Control Panel from the screen's choices: HRMS's own rules for which employees
+	qualify and which fields each way of allocating needs. Never saved."""
+	values = _common.parse_json(spec, {}) or {}
+	unknown = set(values) - set(_PANEL_FIELDS)
+	if unknown:
+		frappe.throw(_("Unknown allocation fields: {0}.").format(", ".join(sorted(unknown))))
+	if values.get("dates_based_on") not in ("Leave Period", "Joining Date", "Custom Range"):
+		frappe.throw(_("Choose what the dates are based on: a leave period, the joining date, or a custom range."))
+	panel = frappe.get_doc({"doctype": "Leave Control Panel", **values})
+	panel.allocate_based_on_leave_policy = 1 if values.get("allocate_based_on_leave_policy") else 0
+	return panel
+
+
+@frappe.whitelist(methods=["POST"])
+def leave_candidates(spec):
+	"""The employees the allocation would cover: those matching the filters who have no leave
+	allocation in the dates yet (HRMS's own Leave Control Panel.get_employees)."""
+	_writable("Leave Allocation")
+	panel = _panel(spec)
+	rows = panel.get_employees([]) or []
+	return [
+		{"employee": r.get("employee") or r.get("name"), "employee_name": r.get("employee_name"), "department": r.get("department"),
+		 "date_of_joining": str(r.get("date_of_joining")) if r.get("date_of_joining") else None}
+		for r in rows
+	]
+
+
+@frappe.whitelist(methods=["POST"])
+def allocate_leave(spec, employees):
+	"""Allocate to the chosen employees, one savepoint each, exactly as the Leave Control Panel does
+	(a Leave Policy Assignment per employee when allocating by policy, else a Leave Allocation of the
+	leave type) -- but answering who succeeded and why anyone failed, where the panel only publishes
+	a realtime message. Submits what it makes."""
+	from frappe.utils import cint, flt
+
+	_writable("Leave Allocation")
+	_writable("Leave Policy Assignment")
+	panel = _panel(spec)
+	employees = _common.parse_json(employees, []) or []
+	if not employees:
+		frappe.throw(_("Choose at least one employee."))
+	if len(employees) > 500:
+		frappe.throw(_("At most 500 employees in one allocation."))
+	panel.validate_fields(employees)
+	from_date, to_date = panel.get_from_to_date()
+	by_policy = cint(panel.allocate_based_on_leave_policy)
+	done, failed = [], []
+	for employee in employees:
+		savepoint = "folt_bulk_leave"
+		frappe.db.savepoint(savepoint)
+		try:
+			start = from_date or frappe.db.get_value("Employee", employee, "date_of_joining")
+			if by_policy:
+				doc = frappe.new_doc("Leave Policy Assignment")
+				doc.update({
+					"employee": employee,
+					"assignment_based_on": None if panel.dates_based_on == "Custom Range" else panel.dates_based_on,
+					"leave_policy": panel.leave_policy, "effective_from": start, "effective_to": to_date,
+					"leave_period": panel.get("leave_period"), "carry_forward": panel.carry_forward,
+				})
+			else:
+				doc = frappe.new_doc("Leave Allocation")
+				doc.update({
+					"employee": employee, "leave_type": panel.leave_type, "from_date": start, "to_date": to_date,
+					"carry_forward": cint(panel.carry_forward), "new_leaves_allocated": flt(panel.no_of_days),
+				})
+			doc.insert()
+			doc.submit()
+			done.append({"employee": employee, "doctype": doc.doctype, "name": doc.name})
+		except Exception as e:  # noqa: BLE001 -- one employee's refusal must not stop the rest
+			frappe.db.rollback(save_point=savepoint)
+			failed.append({"employee": employee, "message": frappe.utils.strip_html(str(e)).strip()[:300] or type(e).__name__})
+		frappe.clear_messages()
+	return {"done": done, "failed": failed}
 
 
 @frappe.whitelist()

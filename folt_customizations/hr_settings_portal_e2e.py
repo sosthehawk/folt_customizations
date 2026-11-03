@@ -11,6 +11,9 @@ Claims:
 - Holidays (phase 2): ERPNext's own fill helpers run on an unsaved list and write nothing; a list is
   made and assigned to the company from a later date; the context names the list in force, the days
   it has left and the next assignment.
+- Leave (phase 3): leave types, periods and policies kept by HR Manager; the Leave Control Panel's
+  candidates (HRMS's own query) and bulk allocation by policy and by leave type, one employee's
+  refusal not stopping the rest.
 
 Runs in one transaction and rolls it back; the one stored default it touches (the overrides store)
 is put back by hand and the cache cleared, because a rollback does not reach Redis. Run with
@@ -178,6 +181,51 @@ def holidays():
 	as_user(HR_MANAGER, flow)
 
 
+def leave():
+	print("Leave")
+	ctx = as_user(HR_MANAGER, hs.context)
+	spec_now = {"dates_based_on": "Custom Range", "from_date": "2026-07-01", "to_date": "2027-06-30", "allocate_based_on_leave_policy": 0,
+	            "leave_type": "Annual Leave", "no_of_days": 21, "company": COMPANY}
+	expect_throw("an HR User cannot look up candidates", lambda: as_user(HR_USER, lambda: hs.leave_candidates(json.dumps(spec_now))), frappe.PermissionError)
+	expect_throw("an HR User cannot allocate", lambda: as_user(HR_USER, lambda: hs.allocate_leave(json.dumps(spec_now), json.dumps(["HR-EMP-00001"]))), frappe.PermissionError)
+	check("the context reports the leave year per company", any(p["company"] == COMPANY for p in ctx["leave_periods"]), ctx["leave_periods"])
+
+	def flow():
+		lt = hs.save("Leave Type", json.dumps({"leave_type_name": "E2E HR Settings Leave", "max_leaves_allowed": 5}))
+		check("an HR Manager adds a leave type", frappe.db.exists("Leave Type", lt["name"]))
+		period = hs.save("Leave Period", json.dumps({"from_date": "2026-07-01", "to_date": "2027-06-30", "company": COMPANY, "is_active": 1}))
+		now = next(p for p in hs.context()["leave_periods"] if p["company"] == COMPANY)
+		check("the context names the active leave period covering today", now["leave_period"] == period["name"], now)
+		policy = hs.save("Leave Policy", json.dumps({"title": "E2E HR Settings Policy", "leave_policy_details": [
+			{"leave_type": "Annual Leave", "annual_allocation": 21}, {"leave_type": "Sick Leave", "annual_allocation": 7}]}))
+		hs.act("Leave Policy", policy["name"], "submit")
+		check("the policy is submitted", frappe.db.get_value("Leave Policy", policy["name"], "docstatus") == 1)
+		check("nobody is a candidate where everyone has an allocation", hs.leave_candidates(json.dumps(spec_now)) == [])
+		spec = {"dates_based_on": "Custom Range", "from_date": "2027-07-01", "to_date": "2028-06-30", "allocate_based_on_leave_policy": 1,
+		        "leave_policy": policy["name"], "company": COMPANY}
+		people = hs.leave_candidates(json.dumps(spec))
+		active = frappe.db.count("Employee", {"company": COMPANY, "status": "Active"})
+		check("every active employee is a candidate for the next year", len(people) == active, f"{len(people)} of {active}")
+		pick = [p["employee"] for p in people[:2]]
+		done = hs.allocate_leave(json.dumps(spec), json.dumps(pick))
+		check("allocating by policy makes a submitted assignment each", len(done["done"]) == 2 and not done["failed"]
+		      and all(frappe.db.get_value("Leave Policy Assignment", d["name"], "docstatus") == 1 for d in done["done"]))
+		made = frappe.get_all("Leave Allocation", filters={"employee": pick[0], "from_date": "2027-07-01", "docstatus": 1}, fields=["leave_type", "new_leaves_allocated"])
+		check("the assignment made the allocations (Annual 21, Sick 7)", sorted((a.leave_type, a.new_leaves_allocated) for a in made) == [("Annual Leave", 21.0), ("Sick Leave", 7.0)], made)
+		check("they are no longer candidates", len(hs.leave_candidates(json.dumps(spec))) == active - 2)
+		again = hs.allocate_leave(json.dumps(spec), json.dumps([pick[0], people[2]["employee"]]))
+		check("a duplicate is refused by HRMS and the other still allocated", len(again["done"]) == 1 and len(again["failed"]) == 1, again["failed"])
+		by_type = {"dates_based_on": "Custom Range", "from_date": "2027-07-01", "to_date": "2028-06-30", "allocate_based_on_leave_policy": 0,
+		           "leave_type": lt["name"], "no_of_days": 3, "company": COMPANY}
+		typed = hs.allocate_leave(json.dumps(by_type), json.dumps([pick[0]]))
+		check("allocating one leave type makes a submitted allocation", len(typed["done"]) == 1 and typed["done"][0]["doctype"] == "Leave Allocation"
+		      and frappe.db.get_value("Leave Allocation", typed["done"][0]["name"], "new_leaves_allocated") == 3)
+		expect_throw("an unknown allocation field is refused", lambda: hs.leave_candidates(json.dumps({**spec, "naming_series": "X"})))
+		expect_throw("a policy allocation needs its policy (HRMS)", lambda: hs.allocate_leave(json.dumps({**spec, "leave_policy": None}), json.dumps(pick)))
+
+	as_user(HR_MANAGER, flow)
+
+
 def run():
 	frappe.db.commit()  # start clean: everything below is rolled back
 	try:
@@ -186,6 +234,7 @@ def run():
 		read_only_pass()
 		hr_manager_keeps_settings()
 		holidays()
+		leave()
 	finally:
 		frappe.db.rollback()
 		frappe.clear_cache()

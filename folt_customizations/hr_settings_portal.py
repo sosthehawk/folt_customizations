@@ -11,7 +11,8 @@ on every migrate -- and it is asked again here, so a write from HR User is refus
 on a site where an administrator gave a permission back.
 
 DOCTYPES grows by phase: phase 1 is the general settings and the organisation lists HR keeps;
-holidays, leave, pay set-up and onboarding come after.
+holidays (phase 2) are the holiday lists and who each applies to; leave, pay set-up and onboarding
+come after.
 """
 
 import frappe
@@ -33,7 +34,13 @@ DOCTYPES = {
 	"Employment Type": ("organisation", ["employee_type_name"], ["name", "employee_type_name"]),
 	"Branch": ("organisation", ["branch"], ["name", "branch"]),
 	"Employee Grade": ("organisation", ["default_salary_structure", "currency", "default_base_pay"], ["name"]),
+	# holidays (phase 2)
+	"Holiday List": ("holidays", ["holiday_list_name", "from_date", "to_date", "weekly_off", "total_holidays"], ["name", "holiday_list_name"]),
+	"Holiday List Assignment": ("holidays", ["applicable_for", "assigned_to", "employee_name", "holiday_list", "from_date"], ["name", "assigned_to", "employee_name", "holiday_list"]),
 }
+
+# How many days ahead the hub warns that a company's holiday list is running out.
+HOLIDAY_LIST_WARN_DAYS = 60
 
 # The setters a controller's own validate() runs, for a preview of an unsaved form. Nothing in
 # phase 1 computes anything, so every doctype gets ERPNext's set_missing_values if it has one.
@@ -108,7 +115,48 @@ def context():
 		"counts": counts,
 		"workflows": {},
 		"roles": {"editor": editor},
+		"holidays": _company_holidays([c.name for c in companies]),
 	}
+
+
+def _company_holidays(companies):
+	"""Each company's holiday list today: the latest submitted Holiday List Assignment for the company
+	that has started -- what HRMS 16 itself reads (hrms.utils.holiday_list), not the Company's
+	default_holiday_list -- and how many days it has left, so the hub can warn before it runs out."""
+	from frappe.utils import date_diff, getdate, nowdate
+
+	today = getdate(nowdate())
+	out = []
+	for company in companies:
+		row = frappe.get_all(
+			"Holiday List Assignment",
+			filters={"applicable_for": "Company", "assigned_to": company, "docstatus": 1, "from_date": ["<=", today]},
+			fields=["holiday_list", "from_date"],
+			order_by="from_date desc",
+			limit=1,
+		)
+		if not row:
+			out.append({"company": company, "holiday_list": None, "from_date": None, "to_date": None, "days_left": None, "next": None})
+			continue
+		to_date = frappe.db.get_value("Holiday List", row[0].holiday_list, "to_date")
+		upcoming = frappe.get_all(
+			"Holiday List Assignment",
+			filters={"applicable_for": "Company", "assigned_to": company, "docstatus": 1, "from_date": [">", today]},
+			fields=["holiday_list", "from_date"],
+			order_by="from_date asc",
+			limit=1,
+		)
+		out.append(
+			{
+				"company": company,
+				"holiday_list": row[0].holiday_list,
+				"from_date": str(row[0].from_date),
+				"to_date": str(to_date) if to_date else None,
+				"days_left": date_diff(to_date, today) if to_date else None,
+				"next": {"holiday_list": upcoming[0].holiday_list, "from_date": str(upcoming[0].from_date)} if upcoming else None,
+			}
+		)
+	return out
 
 
 # --- lists and records ------------------------------------------------------------------------
@@ -169,6 +217,38 @@ def attach(doctype, docname):
 	"""Frappe's own upload_file, private, onto a settings record; Frappe checks the write right."""
 	_writable(doctype)
 	return _common.attach_file(doctype, docname)
+
+
+# --- holidays (phase 2) --------------------------------------------------------------------------
+
+FILL_KINDS = {"weekly_off": "get_weekly_off_dates", "local": "get_local_holidays", "clear": "clear_table"}
+
+
+@frappe.whitelist(methods=["POST"])
+def fill_holidays(doc, kind):
+	"""ERPNext's own Holiday List helpers on an unsaved form: add the weekly offs between the dates,
+	add the country's public holidays (the `holidays` package), or clear the table. Writes nothing --
+	the form shows the rows and the person saves them. Answers the holidays table, sorted, and how
+	many rows were added."""
+	_writable("Holiday List")
+	if kind not in FILL_KINDS:
+		frappe.throw(_("Unknown holiday helper {0}.").format(kind))
+	values = _common.parse_json(doc, {}) or {}
+	for field in _common.PROTECTED:
+		values.pop(field, None)
+	draft = frappe.get_doc({"doctype": "Holiday List", **values})
+	if kind != "clear" and not (draft.from_date and draft.to_date):
+		frappe.throw(_("Set the list's From and To dates first."))
+	before = len(draft.holidays)
+	getattr(draft, FILL_KINDS[kind])()
+	draft.sort_holidays()
+	return {
+		"holidays": [
+			{k: (str(v) if k == "holiday_date" and v else v) for k, v in row.as_dict().items() if k in ("holiday_date", "description", "weekly_off", "is_half_day")}
+			for row in draft.holidays
+		],
+		"added": max(len(draft.holidays) - before, 0),
+	}
 
 
 @frappe.whitelist()

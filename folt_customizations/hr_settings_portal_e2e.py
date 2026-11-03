@@ -8,6 +8,9 @@ Claims:
   permission an administrator gave back on purpose (the overrides store).
 - HR Manager keeps the organisation lists and the single settings records through the edge: create,
   read, update with the version check, delete.
+- Holidays (phase 2): ERPNext's own fill helpers run on an unsaved list and write nothing; a list is
+  made and assigned to the company from a later date; the context names the list in force, the days
+  it has left and the next assignment.
 
 Runs in one transaction and rolls it back; the one stored default it touches (the overrides store)
 is put back by hand and the cache cleared, because a rollback does not reach Redis. Run with
@@ -27,6 +30,8 @@ HR_MANAGER = "hrmanager.test@folt.test"
 EMPLOYEE = "requester.test@folt.test"
 FINANCE = "finofficer.test@folt.test"
 BRANCH = "E2E HR Settings Branch"
+COMPANY = "FRIENDS of LAKE TURKANA"
+HOLIDAYS = "E2E HR Settings Holidays"
 
 PASS, FAIL = [], []
 
@@ -131,6 +136,48 @@ def hr_manager_keeps_settings():
 	as_user(HR_MANAGER, flow)
 
 
+def holidays():
+	print("Holidays")
+	from frappe.utils import add_days, add_years, getdate
+
+	current = as_user(HR_MANAGER, hs.context)["holidays"]
+	mine = next((h for h in current if h["company"] == COMPANY), None)
+	check("the context names the company's list in force", bool(mine and mine["holiday_list"]), mine and f"{mine['holiday_list']}, {mine['days_left']} days left")
+	start = str(add_days(getdate(mine["to_date"]), 1)) if mine and mine["to_date"] else "2030-07-01"
+	end = str(add_days(add_years(getdate(start), 1), -1))
+	draft = {"holiday_list_name": HOLIDAYS, "from_date": start, "to_date": end, "weekly_off": "Sunday", "country": "KE"}
+	expect_throw("an HR User cannot fill a list", lambda: as_user(HR_USER, lambda: hs.fill_holidays(json.dumps(draft), "weekly_off")), frappe.PermissionError)
+
+	def flow():
+		before = frappe.db.count("Holiday List")
+		local = hs.fill_holidays(json.dumps(draft), "local")
+		check("public holidays come from ERPNext's helper", local["added"] >= 10 and all(not r["weekly_off"] for r in local["holidays"]), local["added"])
+		both = hs.fill_holidays(json.dumps({**draft, "holidays": local["holidays"]}), "weekly_off")
+		dates = [r["holiday_date"] for r in both["holidays"]]
+		sundays = {str(add_days(getdate(start), i)) for i in range((getdate(end) - getdate(start)).days + 1) if add_days(getdate(start), i).weekday() == 6}
+		already = sundays & {r["holiday_date"] for r in local["holidays"]}
+		# Every Sunday once: those already in the list as a public holiday are kept, not doubled.
+		check("weekly offs are added, nothing doubled, sorted", both["added"] == len(sundays - already) and dates == sorted(dates) and len(dates) == len(set(dates)),
+		      f"{both['added']} added = {len(sundays)} Sundays - {len(already)} already public holidays")
+		check("filling saves nothing", frappe.db.count("Holiday List") == before)
+		cleared = hs.fill_holidays(json.dumps({**draft, "holidays": both["holidays"]}), "clear")
+		check("clear empties the table", cleared["holidays"] == [])
+		expect_throw("a fill needs the list's dates", lambda: hs.fill_holidays(json.dumps({"weekly_off": "Sunday"}), "weekly_off"))
+		made = hs.save("Holiday List", json.dumps({**draft, "holidays": both["holidays"]}))
+		check("the filled list saves", frappe.db.get_value("Holiday List", made["name"], "total_holidays") == len(both["holidays"]), made["name"])
+		assigned = hs.save("Holiday List Assignment", json.dumps({"applicable_for": "Company", "assigned_to": COMPANY, "holiday_list": made["name"], "from_date": start}))
+		hs.act("Holiday List Assignment", assigned["name"], "submit")
+		check("the list is assigned to the company and submitted", frappe.db.get_value("Holiday List Assignment", assigned["name"], "docstatus") == 1)
+		after = next(h for h in hs.context()["holidays"] if h["company"] == COMPANY)
+		check("the context shows it as the next list", (after.get("next") or {}).get("holiday_list") == made["name"], after.get("next"))
+		expect_throw(
+			"a second assignment from the same date is refused (HRMS)",
+			lambda: hs.act("Holiday List Assignment", hs.save("Holiday List Assignment", json.dumps({"applicable_for": "Company", "assigned_to": COMPANY, "holiday_list": made["name"], "from_date": start}))["name"], "submit"),
+		)
+
+	as_user(HR_MANAGER, flow)
+
+
 def run():
 	frappe.db.commit()  # start clean: everything below is rolled back
 	try:
@@ -138,6 +185,7 @@ def run():
 		hr_user_reads_only()
 		read_only_pass()
 		hr_manager_keeps_settings()
+		holidays()
 	finally:
 		frappe.db.rollback()
 		frappe.clear_cache()

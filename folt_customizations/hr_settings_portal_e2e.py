@@ -17,6 +17,10 @@ Claims:
 - Pay set-up (phase 4): FoLT's statutory components and structure are kept with the app (read,
   never written); HR Manager keeps the rest; HRMS's slip preview matches the slip a run made and
   saves nothing.
+- Onboarding (phase 5): a new hire's four parts -- pay from the grade's defaults, a leave policy for
+  the leave period, an own holiday list, salary payment details, the onboarding checklist (with the
+  job applicant and accepted offer HRMS requires made from the employee) and ticking its tasks. HR
+  User reads it and cannot change it; the bank fields are hidden from an employee's own login.
 
 Runs in one transaction and rolls it back; the one stored default it touches (the overrides store)
 is put back by hand and the cache cleared, because a rollback does not reach Redis. Run with
@@ -265,6 +269,91 @@ def pay_setup():
 	expect_throw("an HR User cannot preview pay", lambda: as_user(HR_USER, lambda: hs.preview_salary_slip("FoLT Kenya Payroll", "HR-EMP-00001")), frappe.PermissionError)
 
 
+def onboarding():
+	print("Onboarding (phase 5)")
+	from folt_customizations import hr_onboarding as ob
+
+	designation = frappe.db.get_value("Designation", {}, "name")
+	grade = frappe.get_doc({"doctype": "Employee Grade", "__newname": "E2E Onboarding Grade", "default_salary_structure": "FoLT Kenya Payroll", "default_base_pay": 80000})
+	grade.name = "E2E Onboarding Grade"
+	grade.insert(ignore_permissions=True)
+	hire = frappe.get_doc({"doctype": "Employee", "first_name": "E2E New Hire", "gender": "Female", "date_of_birth": "1995-01-01", "date_of_joining": "2026-11-01",
+	                       "company": COMPANY, "status": "Active", "designation": designation, "grade": grade.name}).insert(ignore_permissions=True)
+	policy = frappe.get_doc({"doctype": "Leave Policy", "title": "E2E Onboarding Policy", "leave_policy_details": [{"leave_type": "Annual Leave", "annual_allocation": 21}]})
+	policy.insert(ignore_permissions=True)
+	policy.submit()
+	period = frappe.db.get_value("Leave Period", {"company": COMPANY, "is_active": 1, "from_date": ["<=", "2026-11-03"], "to_date": [">=", "2026-11-03"]}, "name")
+	if not period:
+		period = frappe.get_doc({"doctype": "Leave Period", "from_date": "2026-07-01", "to_date": "2027-06-30", "company": COMPANY, "is_active": 1}).insert(ignore_permissions=True).name
+	template = frappe.get_doc({"doctype": "Employee Onboarding Template", "title": "E2E Onboarding", "company": COMPANY, "activities": [
+		{"activity_name": "Issue a laptop", "role": "HR Manager", "begin_on": 0, "duration": 2},
+		{"activity_name": "Sign the contract", "user": HR_MANAGER, "begin_on": 0, "duration": 1},
+	]}).insert(ignore_permissions=True)
+
+	expect_throw("a finance officer is refused onboarding", lambda: as_user(FINANCE, lambda: ob.employee_onboarding(hire.name)), frappe.PermissionError)
+	seen = as_user(HR_USER, lambda: ob.employee_onboarding(hire.name))
+	check("an HR User reads an onboarding, as a reader", seen["may"]["edit"] is False and seen["employee"]["name"] == hire.name)
+	expect_throw("an HR User cannot onboard", lambda: as_user(HR_USER, lambda: ob.onboard(hire.name, "holidays", json.dumps({"holiday_list": "x", "from_date": "2026-11-01"}))), frappe.PermissionError)
+
+	def flow():
+		o = ob.employee_onboarding(hire.name)
+		s = o["pay"]["suggested"]
+		check("the grade suggests the structure and base, from the joining date",
+		      s["salary_structure"] == "FoLT Kenya Payroll" and s["base"] == 80000 and s["from_date"] == "2026-11-01" and s["from_grade"], s)
+		check("nothing is done yet", o["pay"]["current"] is None and o["leave"]["policy_assignment"] is None and o["checklist"] is None and o["payment_done"] is False)
+		row = next(r for r in ob.onboarding_list(COMPANY) if r["employee"] == hire.name)
+		check("the list shows the new hire not ready", row["ready"] is False and row["pay"] is False and row["holidays"] is True, row)
+		expect_throw("an unknown step is refused", lambda: ob.onboard(hire.name, "promote", "{}"))
+
+		o = ob.onboard(hire.name, "pay", json.dumps({"salary_structure": s["salary_structure"], "base": s["base"], "from_date": s["from_date"]}))
+		check("pay is assigned and submitted", o["pay"]["current"] and o["pay"]["current"]["base"] == 80000 and frappe.db.get_value("Salary Structure Assignment", o["pay"]["current"]["name"], "docstatus") == 1, o["pay"]["current"])
+		expect_throw("HRMS refuses a second assignment from the same date", lambda: ob.onboard(hire.name, "pay", json.dumps({"salary_structure": "FoLT Kenya Payroll", "base": 1, "from_date": "2026-11-01"})))
+
+		o = ob.onboard(hire.name, "leave", json.dumps({"leave_policy": policy.name, "leave_period": period}))
+		annual = next((a["days"] for a in o["leave"]["allocations"] if a["leave_type"] == "Annual Leave"), None)
+		check("the leave policy makes the allocations, pro-rated by HRMS for a November joiner",
+		      o["leave"]["policy_assignment"] and annual is not None and 0 < annual < 21, annual)
+
+		in_force = o["holidays"]["holiday_list"]
+		check("the company's holiday list is in force, none of their own", bool(in_force) and o["holidays"]["own"] is None, in_force)
+		o = ob.onboard(hire.name, "holidays", json.dumps({"holiday_list": in_force, "from_date": "2026-11-01"}))
+		check("an own holiday list is assigned", o["holidays"]["own"] and o["holidays"]["own"]["holiday_list"] == in_force)
+
+		expect_throw("a bank payment needs the bank and account", lambda: ob.onboard(hire.name, "payment", json.dumps({"salary_mode": "Bank", "bank_name": "KCB"})))
+		expect_throw("an unknown payment field is refused", lambda: ob.onboard(hire.name, "payment", json.dumps({"salary_mode": "Cash", "ctc": 1})))
+		o = ob.onboard(hire.name, "payment", json.dumps({"salary_mode": "Bank", "bank_name": "E2E Bank", "bank_ac_no": "000111222"}))
+		check("salary payment details are saved", o["payment_done"] and o["payment"]["bank_ac_no"] == "000111222")
+
+		expect_throw("the checklist needs an email when the employee has none", lambda: ob.onboard(hire.name, "checklist", json.dumps({"template": template.name})))
+		o = ob.onboard(hire.name, "checklist", json.dumps({"template": template.name, "email": "e2e.newhire@example.com", "boarding_begins_on": "2026-11-02"}))
+		c = o["checklist"]
+		check("the checklist is started from the template, a task per activity",
+		      c and c["docstatus"] == 1 and len(c["activities"]) == 2 and all(a["task"] and a["status"] == "Open" for a in c["activities"]), c and [(a["activity_name"], a["status"]) for a in c["activities"]])
+		applicant = frappe.db.get_value("Employee", hire.name, "job_applicant")
+		check("HRMS's job applicant and accepted offer are made and linked",
+		      bool(applicant) and frappe.db.exists("Job Offer", {"job_applicant": applicant, "status": "Accepted", "docstatus": 1}), applicant)
+		expect_throw("a second checklist is refused", lambda: ob.onboard(hire.name, "checklist", json.dumps({"template": template.name})))
+		first = c["activities"][0]["task"]
+		o = ob.onboard(hire.name, "activity", json.dumps({"task": first, "done": True}))
+		check("ticking an activity completes its task", next(a for a in o["checklist"]["activities"] if a["task"] == first)["status"] == "Completed", o["checklist"]["status"])
+		other = frappe.get_doc({"doctype": "Task", "subject": "E2E stray task"}).insert(ignore_permissions=True)
+		expect_throw("a task off the checklist is refused", lambda: ob.onboard(hire.name, "activity", json.dumps({"task": other.name, "done": True})))
+		row = next(r for r in ob.onboarding_list(COMPANY) if r["employee"] == hire.name)
+		check("the list shows the new hire ready", row["ready"] and row["checklist"], row)
+
+	as_user(HR_MANAGER, flow)
+	seen = as_user(HR_USER, lambda: ob.employee_onboarding(hire.name))
+	check("an HR User (a payroll role) reads the payment details", seen["payment"] and seen["payment"]["bank_name"] == "E2E Bank")
+
+	own = frappe.db.get_value("Employee", {"user_id": EMPLOYEE}, "name")
+	if own:
+		frappe.db.set_value("Employee", own, {"salary_mode": "Bank", "bank_name": "E2E Own Bank", "bank_ac_no": "999"}, update_modified=False)
+		got = as_user(EMPLOYEE, lambda: frappe.client.get("Employee", own))
+		check("an employee's own login no longer sees bank details (permlevel 1)", not got.get("bank_ac_no") and not got.get("bank_name") and got.get("name") == own)
+	else:
+		check("an employee's own login no longer sees bank details (permlevel 1)", False, "requester has no employee")
+
+
 def run():
 	frappe.db.commit()  # start clean: everything below is rolled back
 	try:
@@ -275,6 +364,7 @@ def run():
 		holidays()
 		leave()
 		pay_setup()
+		onboarding()
 	finally:
 		frappe.db.rollback()
 		frappe.clear_cache()

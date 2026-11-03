@@ -130,6 +130,17 @@ PERMLEVEL_1_PERMISSIONS = {
 	"User": {
 		"FoLT User Administrator": ("read",),
 	},
+	# Salary payment details (ADR-009 phase 5): Employee.salary_mode, bank_name, bank_ac_no and iban
+	# are moved to permlevel 1 (Property Setter fixtures). Payroll roles (salary_slip_access.PAYROLL_ROLES)
+	# read them; HR Manager and System Manager change them. Nobody else -- not the employee's own login.
+	"Employee": {
+		"HR Manager": ("read", "write"),
+		"System Manager": ("read", "write"),
+		"HR User": ("read",),
+		"Finance Assistant": ("read",),
+		"Finance Officer": ("read",),
+		"Executive Director": ("read",),
+	},
 }
 
 # Delegated administration (admin_portal.py). READ only: the Settings screens list users and

@@ -14,7 +14,8 @@ DOCTYPES grows by phase: phase 1 is the general settings and the organisation li
 holidays (phase 2) are the holiday lists and who each applies to; leave (phase 3) is leave types,
 periods, policies, their assignment and allocations, with the Leave Control Panel's bulk allocation;
 pay set-up (phase 4) is salary components and structures (with a slip preview), payroll periods,
-income tax slabs and shift types; onboarding comes after.
+income tax slabs and shift types; onboarding (phase 5) is the salary structure assignments and the
+onboarding templates, with the guided onboarding of one employee in hr_onboarding (served from here).
 
 KEPT WITH THE APP. FoLT's statutory salary components and its salary structure are fixtures
 (hooks.FOLT_SALARY_COMPONENTS, FOLT_SALARY_STRUCTURES), and `bench migrate` re-imports a fixture
@@ -28,6 +29,8 @@ import frappe
 from frappe import _
 
 from folt_customizations import portal_common as _common
+# Onboarding (phase 5): whitelisted in hr_onboarding, reached through this edge.
+from folt_customizations.hr_onboarding import employee_onboarding, onboard, onboarding_list  # noqa: F401
 
 READERS = ("HR User", "HR Manager", "System Manager")
 EDITORS = ("HR Manager", "System Manager")
@@ -58,6 +61,9 @@ DOCTYPES = {
 	"Payroll Period": ("pay", ["company", "start_date", "end_date"], ["name"]),
 	"Income Tax Slab": ("pay", ["company", "effective_from", "currency", "disabled"], ["name"]),
 	"Shift Type": ("pay", ["start_time", "end_time", "enable_auto_attendance", "holiday_list"], ["name"]),
+	# onboarding (phase 5)
+	"Salary Structure Assignment": ("onboarding", ["employee", "employee_name", "salary_structure", "from_date", "base"], ["name", "employee", "employee_name", "salary_structure"]),
+	"Employee Onboarding Template": ("onboarding", ["title", "company", "department", "designation", "employee_grade"], ["name", "title"]),
 }
 
 

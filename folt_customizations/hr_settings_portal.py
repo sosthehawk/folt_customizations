@@ -13,7 +13,15 @@ on a site where an administrator gave a permission back.
 DOCTYPES grows by phase: phase 1 is the general settings and the organisation lists HR keeps;
 holidays (phase 2) are the holiday lists and who each applies to; leave (phase 3) is leave types,
 periods, policies, their assignment and allocations, with the Leave Control Panel's bulk allocation;
-pay set-up and onboarding come after.
+pay set-up (phase 4) is salary components and structures (with a slip preview), payroll periods,
+income tax slabs and shift types; onboarding comes after.
+
+KEPT WITH THE APP. FoLT's statutory salary components and its salary structure are fixtures
+(hooks.FOLT_SALARY_COMPONENTS, FOLT_SALARY_STRUCTURES), and `bench migrate` re-imports a fixture
+over the record every time -- an edit made here would be reverted, silently, on the next deploy
+(verified 2026-11-03: a changed description came back blank and the accounts table emptied). So they
+are shown here in full and refused for any write; their rates change with a release, where
+payroll_e2e's known-answer checks guard them. Anything HR adds is theirs to change.
 """
 
 import frappe
@@ -44,7 +52,32 @@ DOCTYPES = {
 	"Leave Policy": ("leave", ["title"], ["name", "title"]),
 	"Leave Policy Assignment": ("leave", ["employee", "employee_name", "leave_policy", "effective_from", "effective_to", "leaves_allocated"], ["name", "employee", "employee_name", "leave_policy"]),
 	"Leave Allocation": ("leave", ["employee", "employee_name", "leave_type", "from_date", "to_date", "total_leaves_allocated", "leave_policy"], ["name", "employee", "employee_name", "leave_type"]),
+	# pay set-up (phase 4)
+	"Salary Component": ("pay", ["salary_component_abbr", "type", "depends_on_payment_days", "is_tax_applicable", "statistical_component", "disabled"], ["name", "salary_component_abbr"]),
+	"Salary Structure": ("pay", ["company", "payroll_frequency", "is_active", "currency"], ["name"]),
+	"Payroll Period": ("pay", ["company", "start_date", "end_date"], ["name"]),
+	"Income Tax Slab": ("pay", ["company", "effective_from", "currency", "disabled"], ["name"]),
+	"Shift Type": ("pay", ["start_time", "end_time", "enable_auto_attendance", "holiday_list"], ["name"]),
 }
+
+
+def kept_with_app():
+	"""{doctype: [names]} that are fixtures of this app: read here, never written."""
+	from folt_customizations import hooks
+
+	return {
+		"Salary Component": list(getattr(hooks, "FOLT_SALARY_COMPONENTS", [])),
+		"Salary Structure": list(getattr(hooks, "FOLT_SALARY_STRUCTURES", [])),
+	}
+
+
+def _not_kept(doctype, name):
+	if name and name in kept_with_app().get(doctype, []):
+		frappe.throw(
+			_("{0} is kept with the FoLT app: its rates change with a release, so an edit here would be undone on the next deploy.").format(name),
+			frappe.PermissionError,
+			title=_("Kept with the app"),
+		)
 
 # How many days ahead the hub warns that a company's holiday list is running out.
 HOLIDAY_LIST_WARN_DAYS = 60
@@ -124,6 +157,7 @@ def context():
 		"roles": {"editor": editor},
 		"holidays": _company_holidays([c.name for c in companies]),
 		"leave_periods": _company_leave_periods([c.name for c in companies]),
+		"kept_with_app": kept_with_app(),
 	}
 
 
@@ -205,7 +239,7 @@ def record(doctype, name=None):
 	"""A settings record with its history and what the reader may do with it."""
 	_doctype(doctype)
 	out = _common.record_view(doctype, name)
-	if not _editor():
+	if not _editor() or out["name"] in kept_with_app().get(doctype, []):
 		out["permissions"].update({"write": False, "create": False, "submit": False, "cancel": False, "amend": False, "delete": False})
 	return out
 
@@ -224,6 +258,7 @@ def meta(doctype):
 def save(doctype, doc, name=None):
 	"""Save a record, or a single settings record. Never submits (portal_common.save_doc)."""
 	_writable(doctype)
+	_not_kept(doctype, name)
 	target = _common.save_doc(doctype, doc, name)
 	return {"name": target.name}
 
@@ -239,6 +274,7 @@ def preview(doctype, doc):
 def act(doctype, name, action, transition=None, reason=None):
 	"""Submit, cancel, amend or delete a record."""
 	_writable(doctype)
+	_not_kept(doctype, name)
 	return _common.act_on(doctype, name, action, transition, reason)
 
 
@@ -365,6 +401,46 @@ def allocate_leave(spec, employees):
 			failed.append({"employee": employee, "message": frappe.utils.strip_html(str(e)).strip()[:300] or type(e).__name__})
 		frappe.clear_messages()
 	return {"done": done, "failed": failed}
+
+
+# --- pay set-up (phase 4): a salary slip preview ---------------------------------------------------
+
+
+@frappe.whitelist()
+def preview_salary_slip(structure, employee, posting_date=None):
+	"""What a structure would pay an employee for the period of `posting_date`: HRMS's own
+	make_salary_slip(for_preview=1), which computes a slip from the employee's assignment and
+	attendance without saving it. Run inside a savepoint that is always rolled back, so nothing it
+	might touch stays. Payroll figures: an editor who also holds a payroll role."""
+	from frappe.utils import flt, nowdate
+	from hrms.payroll.doctype.salary_structure.salary_structure import make_salary_slip
+
+	from folt_customizations.salary_slip_access import is_payroll_user
+
+	_writable("Salary Structure")
+	if not is_payroll_user():
+		frappe.throw(_("Salary previews are for payroll roles."), frappe.PermissionError)
+	if not frappe.db.exists("Salary Structure", {"name": structure, "docstatus": 1}):
+		frappe.throw(_("{0} is not a submitted salary structure.").format(structure))
+	savepoint = "folt_slip_preview"
+	frappe.db.savepoint(savepoint)
+	try:
+		slip = make_salary_slip(structure, employee=employee, posting_date=posting_date or nowdate(), for_preview=1)
+		lines = lambda rows: [  # noqa: E731
+			{"component": r.salary_component, "abbr": r.abbr, "amount": flt(r.amount, 2)}
+			for r in rows if not (r.get("statistical_component") or r.get("do_not_include_in_total"))
+		]
+		return {
+			"structure": structure, "employee": slip.employee,
+			"employee_name": slip.employee_name or frappe.db.get_value("Employee", slip.employee, "employee_name"),
+			"start_date": str(slip.start_date), "end_date": str(slip.end_date), "currency": slip.currency,
+			"total_working_days": flt(slip.total_working_days), "payment_days": flt(slip.payment_days),
+			"gross_pay": flt(slip.gross_pay, 2), "total_deduction": flt(slip.total_deduction, 2), "net_pay": flt(slip.net_pay, 2),
+			"earnings": lines(slip.earnings), "deductions": lines(slip.deductions),
+		}
+	finally:
+		frappe.db.rollback(save_point=savepoint)
+		frappe.clear_messages()
 
 
 @frappe.whitelist()

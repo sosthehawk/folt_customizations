@@ -14,6 +14,9 @@ Claims:
 - Leave (phase 3): leave types, periods and policies kept by HR Manager; the Leave Control Panel's
   candidates (HRMS's own query) and bulk allocation by policy and by leave type, one employee's
   refusal not stopping the rest.
+- Pay set-up (phase 4): FoLT's statutory components and structure are kept with the app (read,
+  never written); HR Manager keeps the rest; HRMS's slip preview matches the slip a run made and
+  saves nothing.
 
 Runs in one transaction and rolls it back; the one stored default it touches (the overrides store)
 is put back by hand and the cache cleared, because a rollback does not reach Redis. Run with
@@ -127,6 +130,9 @@ def hr_manager_keeps_settings():
 		check("the branch is listed", any(r["name"] == BRANCH for r in rows["rows"]))
 		rec = hs.record("Branch", BRANCH)
 		check("the branch opens with write", rec["permissions"]["write"] and rec["doc"]["branch"] == BRANCH)
+		grade = hs.save("Employee Grade", json.dumps({"__newname": "E2E HR Settings Grade", "currency": "KES", "default_base_pay": 50000}))
+		check("an HR Manager adds a grade, named by prompt", grade["name"] == "E2E HR Settings Grade")
+		expect_throw("a prompt-named record needs its name", lambda: hs.save("Employee Grade", json.dumps({"currency": "KES"})))
 		meta = hs.meta("Employee Grade")
 		check("a grade's form names its default structure and base pay", {"default_salary_structure", "default_base_pay"} <= {f["fieldname"] for f in meta["fields"]})
 		single = hs.record("HR Settings")
@@ -226,6 +232,39 @@ def leave():
 	as_user(HR_MANAGER, flow)
 
 
+def pay_setup():
+	print("Pay set-up")
+	from frappe.utils import flt
+
+	kept = hs.kept_with_app()
+	check("the statutory components and the structure are kept with the app", "PAYE" in kept["Salary Component"] and "FoLT Kenya Payroll" in kept["Salary Structure"])
+
+	def flow():
+		check("a kept component opens without write, even for an HR Manager", not hs.record("Salary Component", "PAYE")["permissions"]["write"])
+		expect_throw("a kept component cannot be saved", lambda: hs.save("Salary Component", json.dumps({"description": "x"}), "PAYE"), frappe.PermissionError)
+		expect_throw("the kept structure cannot be cancelled", lambda: hs.act("Salary Structure", "FoLT Kenya Payroll", "cancel"), frappe.PermissionError)
+		made = hs.save("Salary Component", json.dumps({"salary_component": "E2E HR Settings Allowance", "salary_component_abbr": "E2EA", "type": "Earning"}))
+		check("an HR Manager adds a component of their own", hs.record("Salary Component", made["name"])["permissions"]["write"], made["name"])
+		period = hs.save("Payroll Period", json.dumps({"__newname": "E2E HR Settings Tax Year", "company": COMPANY, "start_date": "2027-07-01", "end_date": "2028-06-30"}))
+		check("an HR Manager adds a payroll period", frappe.db.exists("Payroll Period", period["name"]))
+		shift = hs.save("Shift Type", json.dumps({"__newname": "E2E HR Settings Day Shift", "start_time": "08:00:00", "end_time": "17:00:00"}))
+		check("an HR Manager adds a shift type", frappe.db.exists("Shift Type", shift["name"]))
+		emp, slip = frappe.db.get_value("Salary Slip", {"docstatus": 1}, ["employee", "name"], order_by="start_date desc") or (None, None)
+		real = frappe.get_doc("Salary Slip", slip) if slip else None
+		before = frappe.db.count("Salary Slip")
+		p = hs.preview_salary_slip("FoLT Kenya Payroll", emp, str(real.end_date)) if real else None
+		check("the preview pays what the run's slip paid", bool(p) and flt(p["net_pay"]) == flt(real.net_pay) and flt(p["gross_pay"]) == flt(real.gross_pay),
+		      p and f"{p['employee_name']}: gross {p['gross_pay']}, net {p['net_pay']} (slip {real.net_pay})")
+		check("the preview leaves out statistical lines", p and all(l["component"] not in ("Taxable Pay", "NSSF Employer", "Housing Levy Employer") for l in p["earnings"] + p["deductions"]))
+		check("the preview saves nothing", frappe.db.count("Salary Slip") == before)
+		nobody = frappe.get_doc({"doctype": "Employee", "first_name": "E2E No Pay", "gender": "Female", "date_of_birth": "1990-01-01",
+		                         "date_of_joining": "2020-01-01", "company": COMPANY, "status": "Active"}).insert(ignore_permissions=True)
+		expect_throw("an employee with no assignment is refused (HRMS)", lambda: hs.preview_salary_slip("FoLT Kenya Payroll", nobody.name, "2026-11-30"))
+
+	as_user(HR_MANAGER, flow)
+	expect_throw("an HR User cannot preview pay", lambda: as_user(HR_USER, lambda: hs.preview_salary_slip("FoLT Kenya Payroll", "HR-EMP-00001")), frappe.PermissionError)
+
+
 def run():
 	frappe.db.commit()  # start clean: everything below is rolled back
 	try:
@@ -235,6 +274,7 @@ def run():
 		hr_manager_keeps_settings()
 		holidays()
 		leave()
+		pay_setup()
 	finally:
 		frappe.db.rollback()
 		frappe.clear_cache()

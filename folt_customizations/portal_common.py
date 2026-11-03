@@ -273,7 +273,15 @@ def save_doc(doctype, doc, name=None, protected=PROTECTED):
 		target.save()
 	else:
 		values.pop("name", None)
+		# A doctype named by prompt (Employee Grade, Salary Structure, Payroll Period, Tax Withholding
+		# Category...) takes the name the person typed, sent as Frappe's own `__newname`; `name` is
+		# never taken from a form (PROTECTED). Anything else ignores it.
+		new_name = str(values.pop("__newname", "") or "").strip()
 		target = frappe.get_doc({"doctype": doctype, **values})
+		if (m.autoname or "").lower() == "prompt":
+			if not new_name:
+				frappe.throw(_("Give the new {0} a name.").format(_(doctype)))
+			target.name = new_name
 		template_taxes(target, m)
 		target.insert()
 	return target

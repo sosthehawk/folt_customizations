@@ -33,10 +33,11 @@ from frappe.permissions import add_permission, update_permission_property
 # reproducible on a fresh site instead of being a one-off Desk edit.
 WORKFLOW_PERMISSIONS = {
 	"Purchase Order": {
-		"Finance Manager": ("read", "write", "submit"),
+		# Print: the approver of an order prints the LPO it signs (FoLT Local Purchase Order).
+		"Finance Manager": ("read", "write", "submit", "print"),
 		# Above FoLT Procurement Settings' threshold the Executive Director approves after the
 		# Finance Manager, and that Approve is what submits the order (ADR-008).
-		"Executive Director": ("read", "write", "submit"),
+		"Executive Director": ("read", "write", "submit", "print"),
 	},
 	# Not decoration on the grant above -- its prerequisites. ERPNext re-derives party, item and
 	# account details on every Purchase Order save, and several of those reads are
@@ -249,16 +250,17 @@ PROCUREMENT_PERMISSIONS = {
 	"Supplier Scorecard Period": {role: ("read",) for role in ("Purchase Manager", "Purchase Master Manager", "Purchase User")},
 	# ERPNext lets the Purchase User and the stores read goods receipts but not the Purchase
 	# Manager, who answers for whether what was ordered arrived.
-	"Purchase Receipt": {"Purchase Manager": ("read",)},
+	"Purchase Receipt": {"Purchase Manager": ("read", "print")},
 	# Finance registers and approves supplier invoices against the order (three-way match): the
 	# accounting roles read what was ordered. ERPNext gives them the receipt, not the order.
-	"Purchase Order": {role: ("read",) for role in ("Accounts User", "Accounts Manager")},
+	# ...and print it, to file with the invoice they approve.
+	"Purchase Order": {role: ("read", "print") for role in ("Accounts User", "Accounts Manager")},
 	# The requisition's approvers (FoLT Purchase Requisition Approval). Write, because a turn-down
 	# parks its reason on the document first (workflow_access.hold_rejection_reason); submit for
 	# the Head of Finance, whose Approve is what submits it.
 	"Material Request": {
-		"Head of Programs": ("read", "write"),
-		"Head of Finance": ("read", "write", "submit"),
+		"Head of Programs": ("read", "write", "print"),
+		"Head of Finance": ("read", "write", "submit", "print"),
 	},
 	# Procurement's settings screen (ADR-008 phase 7) is the Purchase Manager's: ERPNext gives them
 	# Buying Settings but keeps the buying terms, payment terms and the scorecard's criteria and

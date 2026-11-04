@@ -1,0 +1,125 @@
+{#-
+  FoLT Local Purchase Order -- the order FoLT issues to the supplier (procurement workflow, step 4).
+
+  It is the supplier's authority to deliver and FoLT's commitment to pay, so it carries what both
+  sides hold each other to: who is ordering from whom, what, how many, at what price, by when, on
+  whose authority (the committee's award or the approved waiver) and under which terms. Printed for
+  staff from the order and for the supplier from the portal; nothing on it is FoLT-internal.
+-#}
+{%- macro money(v) -%}{{ frappe.utils.fmt_money(v or 0, currency=doc.currency) }}{%- endmacro -%}
+{%- set authority = doc.get("folt_committee_evaluation") or doc.get("folt_waiver_request") -%}
+{%- set kra = frappe.db.get_value("Supplier", doc.supplier, "tax_id") -%}
+
+{% include "folt_customizations/print_format_templates/_page_frame.html" %}
+
+<div class="folt-form">
+
+  <div class="folt-title">{{ _("Local Purchase Order") }}</div>
+  <div class="folt-subtitle">{{ doc.name }}</div>
+  <hr class="folt-rule">
+
+  <table class="folt-meta">
+    <tr>
+      <td class="label">{{ _("Supplier") }}</td>
+      <td class="value">{{ doc.supplier_name or doc.supplier }}</td>
+      <td class="label">{{ _("Order Date") }}</td>
+      <td class="value">{{ frappe.utils.formatdate(doc.transaction_date) }}</td>
+    </tr>
+    <tr>
+      <td class="label">{{ _("KRA PIN") }}</td>
+      <td class="value">{{ kra or "&mdash;" }}</td>
+      <td class="label">{{ _("Required By") }}</td>
+      <td class="value">{{ frappe.utils.formatdate(doc.schedule_date) if doc.schedule_date else "&mdash;" }}</td>
+    </tr>
+    <tr>
+      <td class="label">{{ _("Supplier Address") }}</td>
+      <td class="value">{{ (doc.address_display or "") | striptags | truncate(120) or "&mdash;" }}</td>
+      <td class="label">{{ _("Awarded By") }}</td>
+      <td class="value">
+        {%- if doc.get("folt_committee_evaluation") %}{{ _("Committee award") }} {{ doc.folt_committee_evaluation }}
+        {%- elif doc.get("folt_waiver_request") %}{{ _("Approved waiver") }} {{ doc.folt_waiver_request }}
+        {%- else %}&mdash;{% endif %}
+      </td>
+    </tr>
+    <tr>
+      <td class="label">{{ _("Deliver To") }}</td>
+      <td class="value">{{ (doc.shipping_address_display or doc.billing_address_display or doc.company) | striptags | truncate(120) }}</td>
+      <td class="label">{{ _("Department") }}</td>
+      <td class="value">{{ doc.get("folt_department") or "&mdash;" }}</td>
+    </tr>
+  </table>
+
+  <table class="folt-lines">
+    <tr>
+      <th class="mid" style="width:5%">#</th>
+      <th style="width:43%">{{ _("Description") }}</th>
+      <th class="num" style="width:10%">{{ _("Qty") }}</th>
+      <th style="width:10%">{{ _("Unit") }}</th>
+      <th class="num" style="width:15%">{{ _("Unit Price") }}</th>
+      <th class="num" style="width:17%">{{ _("Amount") }}</th>
+    </tr>
+    {%- for row in doc.items %}
+    <tr>
+      <td class="mid">{{ row.idx }}</td>
+      <td>
+        <strong>{{ row.item_name }}</strong>
+        {%- if row.description and (row.description | striptags) != row.item_name %}<br>{{ row.description | striptags | truncate(300) }}{% endif %}
+        {%- if row.schedule_date and row.schedule_date != doc.schedule_date %}<br><em>{{ _("Required by") }} {{ frappe.utils.formatdate(row.schedule_date) }}</em>{% endif %}
+      </td>
+      <td class="num">{{ frappe.utils.fmt_money(row.qty, precision=2) | replace(".00", "") }}</td>
+      <td>{{ row.uom }}</td>
+      <td class="num">{{ money(row.rate) }}</td>
+      <td class="num">{{ money(row.amount) }}</td>
+    </tr>
+    {%- endfor %}
+    <tr class="total">
+      <td colspan="5" class="num">{{ _("Net Total") }}</td>
+      <td class="num">{{ money(doc.net_total) }}</td>
+    </tr>
+    {%- for tax in doc.taxes if tax.tax_amount %}
+    <tr>
+      <td colspan="5" class="num">{{ tax.description }}</td>
+      <td class="num">{{ money(tax.tax_amount) }}</td>
+    </tr>
+    {%- endfor %}
+    {%- if doc.discount_amount %}
+    <tr>
+      <td colspan="5" class="num">{{ _("Discount") }}</td>
+      <td class="num">-{{ money(doc.discount_amount) }}</td>
+    </tr>
+    {%- endif %}
+    <tr class="total">
+      <td colspan="5" class="num">{{ _("Grand Total") }}</td>
+      <td class="num">{{ money(doc.grand_total) }}</td>
+    </tr>
+  </table>
+  <div class="folt-state">{{ _("Amount in words") }}: {{ doc.in_words or "" }}</div>
+
+  {%- if doc.payment_schedule %}
+  <div class="folt-block">
+    <div class="heading">{{ _("Payment Terms") }}</div>
+    <div class="body">
+      {%- for p in doc.payment_schedule %}{{ frappe.utils.formatdate(p.due_date) }}: {{ money(p.payment_amount) }}{% if p.description %} ({{ p.description }}){% endif %}{% if not loop.last %}<br>{% endif %}{% endfor %}
+    </div>
+  </div>
+  {%- endif %}
+
+  <div class="folt-block">
+    <div class="heading">{{ _("Terms and Conditions") }}</div>
+    <div class="body">{{ (doc.terms | striptags) if doc.terms else _("Deliver to the address above by the date required, with a delivery note quoting this order number. Invoice FoLT quoting this order number, at the prices above; an invoice that does not match this order and what was received will be returned.") }}</div>
+  </div>
+
+  <div class="folt-state">
+    {{ _("Status") }}: <span class="pill">{{ _(doc.workflow_state or doc.status) }}</span>
+    {%- if doc.get("folt_supplier_acknowledged_on") %} &nbsp; {{ _("Acknowledged by the supplier on") }} {{ frappe.utils.formatdate(doc.folt_supplier_acknowledged_on) }}{% endif %}
+  </div>
+
+  <table class="folt-signoff">
+    <tr>
+      <td><div class="line"></div><div class="role">{{ _("Prepared by") }}</div><div class="who">{{ _("Procurement") }}</div></td>
+      <td><div class="line"></div><div class="role">{{ _("Authorised by") }}</div><div class="who">{{ _("Executive Director") if doc.get("folt_approval_tier") == "Executive" else _("Finance Manager") }}</div></td>
+      <td><div class="line"></div><div class="role">{{ _("Accepted by") }}</div><div class="who">{{ _("Supplier") }}</div></td>
+    </tr>
+  </table>
+
+</div>

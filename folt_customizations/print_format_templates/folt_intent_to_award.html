@@ -36,6 +36,12 @@
       <td class="value">{{ doc.requested_by or "&mdash;" }}</td>
     </tr>
     <tr>
+      <td class="label">{{ _("Committee") }}</td>
+      <td class="value">{{ _(doc.folt_constitution) if doc.get("folt_constitution") else "&mdash;" }}{% if doc.get("folt_drawn_on") %}, {{ frappe.utils.format_datetime(doc.folt_drawn_on) }}{% endif %}</td>
+      <td class="label">{{ _("Drawn From") }}</td>
+      <td class="value">{% if doc.get("folt_draw_pool") %}{{ doc.folt_draw_pool.split(", ") | length }} {{ _("eligible members") }}{% else %}&mdash;{% endif %}</td>
+    </tr>
+    <tr>
       <td class="label">{{ _("Recommended Supplier") }}</td>
       <td class="value">{{ doc.recommended_supplier or "&mdash;" }}</td>
       <td class="label">{{ _("Winning Quotation") }}</td>

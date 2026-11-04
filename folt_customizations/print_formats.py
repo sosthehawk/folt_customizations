@@ -66,6 +66,22 @@ PRINT_FORMATS = {
         "stylesheet": "folt_form",
         "set_as_default": True,
     },
+    # Procurement workflow step 4: the order FoLT issues, which the supplier also prints from the
+    # portal (supplier_portal.SUPPLIER_PRINTS). Default, so every print of an order is this one.
+    "FoLT Local Purchase Order": {
+        "doc_type": "Purchase Order",
+        "template": "folt_local_purchase_order",
+        "stylesheet": "folt_form",
+        "set_as_default": True,
+    },
+    # Step 5: the delivery checked against the order. ERPNext's only format for the doctype prints
+    # serial and batch bundles, which FoLT's services and supplies have none of.
+    "FoLT Goods Received Note": {
+        "doc_type": "Purchase Receipt",
+        "template": "folt_goods_received_note",
+        "stylesheet": "folt_form",
+        "set_as_default": True,
+    },
     "FoLT Derogation Waiver Request": {
         "doc_type": "Derogation Waiver Request",
         "template": "folt_derogation_waiver_request",

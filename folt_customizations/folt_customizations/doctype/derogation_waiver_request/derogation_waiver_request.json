@@ -9,32 +9,165 @@
   "sort_order": "DESC",
   "track_changes": 1,
   "fields": [
-    { "fieldname": "organisation_project_name", "fieldtype": "Data", "label": "Organisation & Project Name", "reqd": 1, "in_list_view": 1 },
-    { "fieldname": "estimated_value", "fieldtype": "Currency", "label": "Estimated Procurement Value", "reqd": 1, "in_list_view": 1 },
-    { "fieldname": "column_break_head", "fieldtype": "Column Break" },
-    { "fieldname": "project", "fieldtype": "Link", "options": "Project", "label": "Project" },
-    { "fieldname": "cost_center", "fieldtype": "Link", "options": "Cost Center", "label": "Cost Center" },
-    { "fieldname": "supplier", "fieldtype": "Link", "options": "Supplier", "label": "Proposed Supplier" },
-    { "fieldname": "supplier_quotation", "fieldtype": "Link", "options": "Supplier Quotation", "label": "Supplier Quotation", "description": "The sole-source bid this waiver is being requested on, where there is one. Filled in when the waiver is raised from a submitted quotation; the order is then derived from that quotation's own lines and prices.", "no_copy": 1 },
-    { "fieldname": "period_of_derogation", "fieldtype": "Data", "label": "Period of Derogation" },
-    { "fieldname": "section_break_items", "fieldtype": "Section Break", "label": "Scope" },
-    { "fieldname": "items_service", "fieldtype": "Small Text", "label": "Items / Service to be Purchased", "reqd": 1 },
-    { "fieldname": "procedure_should_have", "fieldtype": "Small Text", "label": "Procedure That Should Have Been Followed" },
-    { "fieldname": "requested_procedure", "fieldtype": "Small Text", "label": "Requested Procedure" },
-    { "fieldname": "section_break_justify", "fieldtype": "Section Break", "label": "Justification" },
-    { "fieldname": "reasons", "fieldtype": "Text", "label": "Reasons for the Waiver", "reqd": 1 },
-    { "fieldname": "risks_created", "fieldtype": "Text", "label": "Risks Created" },
-    { "fieldname": "mitigating_actions", "fieldtype": "Text", "label": "Mitigating Actions" },
-    { "fieldname": "section_break_status", "fieldtype": "Section Break" },
-    { "fieldname": "workflow_state", "fieldtype": "Link", "options": "Workflow State", "label": "Workflow State", "read_only": 1, "no_copy": 1, "in_standard_filter": 1 },
-    { "fieldname": "folt_rejection_reason", "fieldtype": "Small Text", "label": "Rejection Reason", "read_only": 1, "no_copy": 1, "allow_on_submit": 1, "depends_on": "eval:doc.folt_rejection_reason", "description": "Why this was rejected or returned. Written when a document is turned down and cleared when it goes back for another attempt -- the wording of each one is kept in the timeline." }
+    {
+      "fieldname": "organisation_project_name",
+      "fieldtype": "Data",
+      "label": "Organisation & Project Name",
+      "reqd": 1,
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "estimated_value",
+      "fieldtype": "Currency",
+      "label": "Estimated Procurement Value",
+      "reqd": 1,
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "column_break_head",
+      "fieldtype": "Column Break"
+    },
+    {
+      "fieldname": "project",
+      "fieldtype": "Link",
+      "options": "Project",
+      "label": "Project"
+    },
+    {
+      "fieldname": "cost_center",
+      "fieldtype": "Link",
+      "options": "Cost Center",
+      "label": "Cost Center"
+    },
+    {
+      "fieldname": "supplier",
+      "fieldtype": "Link",
+      "options": "Supplier",
+      "label": "Proposed Supplier"
+    },
+    {
+      "fieldname": "supplier_quotation",
+      "fieldtype": "Link",
+      "options": "Supplier Quotation",
+      "label": "Supplier Quotation",
+      "description": "The sole-source bid this waiver is being requested on, where there is one. Filled in when the waiver is raised from a submitted quotation; the order is then derived from that quotation's own lines and prices.",
+      "no_copy": 1
+    },
+    {
+      "fieldname": "period_of_derogation",
+      "fieldtype": "Data",
+      "label": "Period of Derogation"
+    },
+    {
+      "fieldname": "section_break_items",
+      "fieldtype": "Section Break",
+      "label": "Scope"
+    },
+    {
+      "fieldname": "items_service",
+      "fieldtype": "Small Text",
+      "label": "Items / Service to be Purchased",
+      "reqd": 1
+    },
+    {
+      "fieldname": "procedure_should_have",
+      "fieldtype": "Small Text",
+      "label": "Procedure That Should Have Been Followed"
+    },
+    {
+      "fieldname": "requested_procedure",
+      "fieldtype": "Small Text",
+      "label": "Requested Procedure"
+    },
+    {
+      "fieldname": "section_break_justify",
+      "fieldtype": "Section Break",
+      "label": "Justification"
+    },
+    {
+      "fieldname": "reasons",
+      "fieldtype": "Text",
+      "label": "Reasons for the Waiver",
+      "reqd": 1
+    },
+    {
+      "fieldname": "risks_created",
+      "fieldtype": "Text",
+      "label": "Risks Created"
+    },
+    {
+      "fieldname": "mitigating_actions",
+      "fieldtype": "Text",
+      "label": "Mitigating Actions"
+    },
+    {
+      "fieldname": "section_break_status",
+      "fieldtype": "Section Break"
+    },
+    {
+      "fieldname": "workflow_state",
+      "fieldtype": "Link",
+      "options": "Workflow State",
+      "label": "Workflow State",
+      "read_only": 1,
+      "no_copy": 1,
+      "in_standard_filter": 1
+    },
+    {
+      "fieldname": "folt_rejection_reason",
+      "fieldtype": "Small Text",
+      "label": "Rejection Reason",
+      "read_only": 1,
+      "no_copy": 1,
+      "allow_on_submit": 1,
+      "depends_on": "eval:doc.folt_rejection_reason",
+      "description": "Why this was rejected or returned. Written when a document is turned down and cleared when it goes back for another attempt -- the wording of each one is kept in the timeline."
+    }
   ],
   "permissions": [
-    { "role": "System Manager", "read": 1, "write": 1, "create": 1, "delete": 1, "submit": 1, "cancel": 1, "amend": 1 },
-    { "role": "Operations Support Officer", "read": 1, "write": 1, "create": 1 },
-    { "role": "Procurement Committee", "read": 1, "write": 1 },
-    { "role": "Finance Officer", "read": 1, "write": 1, "submit": 1 },
-    { "role": "Executive Director", "read": 1, "write": 1, "submit": 1 },
-    { "role": "Purchase User", "read": 1 }
-  ]
+    {
+      "role": "System Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "delete": 1,
+      "submit": 1,
+      "cancel": 1,
+      "amend": 1,
+      "print": 1
+    },
+    {
+      "role": "Operations Support Officer",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "print": 1
+    },
+    {
+      "role": "Procurement Committee",
+      "read": 1,
+      "write": 1,
+      "print": 1
+    },
+    {
+      "role": "Finance Officer",
+      "read": 1,
+      "write": 1,
+      "submit": 1,
+      "print": 1
+    },
+    {
+      "role": "Executive Director",
+      "read": 1,
+      "write": 1,
+      "submit": 1,
+      "print": 1
+    },
+    {
+      "role": "Purchase User",
+      "read": 1,
+      "print": 1
+    }
+  ],
+  "modified": "2026-11-04 09:00:00.000000"
 }

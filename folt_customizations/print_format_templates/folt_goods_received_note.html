@@ -1,0 +1,76 @@
+{#-
+  FoLT Goods Received Note -- the delivery checked against the order (procurement workflow, step 5).
+
+  What arrived, against which order and delivery note, how much was accepted and how much
+  rejected and why -- the evidence the three-way match and the Finance Assistant's review of the
+  supplier's invoice rest on, signed by whoever received it.
+-#}
+{%- set orders = doc.items | map(attribute="purchase_order") | select | unique | list -%}
+{%- set rejected = doc.items | selectattr("rejected_qty") | list -%}
+
+{% include "folt_customizations/print_format_templates/_page_frame.html" %}
+
+<div class="folt-form">
+
+  <div class="folt-title">{{ _("Goods Received Note") }}</div>
+  <div class="folt-subtitle">{{ doc.name }}</div>
+  <hr class="folt-rule">
+
+  <table class="folt-meta">
+    <tr>
+      <td class="label">{{ _("Supplier") }}</td>
+      <td class="value">{{ doc.supplier_name or doc.supplier }}</td>
+      <td class="label">{{ _("Received On") }}</td>
+      <td class="value">{{ frappe.utils.formatdate(doc.posting_date) }}</td>
+    </tr>
+    <tr>
+      <td class="label">{{ _("Purchase Order") }}</td>
+      <td class="value">{{ orders | join(", ") or "&mdash;" }}</td>
+      <td class="label">{{ _("Delivery Note") }}</td>
+      <td class="value">{{ doc.supplier_delivery_note or "&mdash;" }}</td>
+    </tr>
+    <tr>
+      <td class="label">{{ _("Inspection") }}</td>
+      <td class="value">{{ doc.get("folt_inspection_status") or "&mdash;" }}</td>
+      <td class="label">{{ _("Department") }}</td>
+      <td class="value">{{ doc.get("folt_department") or "&mdash;" }}</td>
+    </tr>
+  </table>
+
+  <table class="folt-lines">
+    <tr>
+      <th class="mid" style="width:5%">#</th>
+      <th style="width:47%">{{ _("Description") }}</th>
+      <th style="width:10%">{{ _("Unit") }}</th>
+      <th class="num" style="width:12%">{{ _("Received") }}</th>
+      <th class="num" style="width:13%">{{ _("Accepted") }}</th>
+      <th class="num" style="width:13%">{{ _("Rejected") }}</th>
+    </tr>
+    {%- for row in doc.items %}
+    <tr>
+      <td class="mid">{{ row.idx }}</td>
+      <td><strong>{{ row.item_name }}</strong>{% if row.description and (row.description | striptags) != row.item_name %}<br>{{ row.description | striptags | truncate(200) }}{% endif %}</td>
+      <td>{{ row.uom }}</td>
+      <td class="num">{{ row.received_qty | float | round(2) }}</td>
+      <td class="num">{{ row.qty | float | round(2) }}</td>
+      <td class="num">{{ (row.rejected_qty or 0) | float | round(2) }}</td>
+    </tr>
+    {%- endfor %}
+  </table>
+
+  {%- if rejected or doc.get("folt_discrepancy_notes") %}
+  <div class="folt-block">
+    <div class="heading">{{ _("Discrepancies and rejections") }}</div>
+    <div class="body">{{ doc.get("folt_discrepancy_notes") or "" }}</div>
+  </div>
+  {%- endif %}
+
+  <table class="folt-signoff">
+    <tr>
+      <td><div class="line"></div><div class="role">{{ _("Received by") }}</div><div class="who">{{ frappe.db.get_value("User", doc.owner, "full_name") or doc.owner }}</div></td>
+      <td><div class="line"></div><div class="role">{{ _("Delivered by") }}</div><div class="who">{{ _("Supplier") }}</div></td>
+      <td><div class="line"></div><div class="role">{{ _("Verified by") }}</div><div class="who">{{ _("Procurement") }}</div></td>
+    </tr>
+  </table>
+
+</div>

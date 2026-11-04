@@ -55,10 +55,20 @@ table.folt-meta td {
   font-size: 9.5pt;
 }
 
+/* `label` is also Bootstrap's badge class, which frappe's print stylesheet loads: undo the badge
+   (border, rounding, bold, inline display) so a label cell is a plain cell. */
 table.folt-meta td.label {
   width: 18%;
   color: #444;
   white-space: nowrap;
+  display: table-cell;
+  border: 0 !important;
+  border-radius: 0;
+  background: none;
+  font-size: 9.5pt;
+  font-weight: normal;
+  line-height: inherit;
+  text-align: left;
 }
 
 table.folt-meta td.value {
@@ -164,12 +174,14 @@ table.folt-signoff td {
   width: 33%;
 }
 
+/* The signing room, then the rule signed on. The rule sits on .role rather than under the empty
+   .line: wkhtmltopdf drops the border of an empty block. */
 table.folt-signoff .line {
-  border-bottom: 0.7px solid #000;
-  height: 26px;
+  height: 30px;
 }
 
 table.folt-signoff .role {
+  border-top: 1px solid #000 !important;
   padding-top: 2px;
   font-weight: bold;
 }

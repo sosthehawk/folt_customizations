@@ -85,7 +85,7 @@ def _run():
 
 	print("\n--- 1  nobody's portal user ---")
 	empty = as_user(STAFF, supplier_portal.portal_overview)
-	check("a staff login gets empty lists, not an error", empty == {"suppliers": [], "rfqs": [], "quotations": [], "orders": []}, str(empty)[:120])
+	check("a staff login gets empty lists, not an error", empty == {"suppliers": [], "rfqs": [], "quotations": [], "orders": [], "invoices": []}, str(empty)[:120])
 
 	print("\n--- 2  the supplier's overview ---")
 	overview = as_user(SUPPLIER_LOGIN, supplier_portal.portal_overview)

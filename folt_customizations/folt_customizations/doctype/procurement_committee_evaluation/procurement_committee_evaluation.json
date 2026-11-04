@@ -142,31 +142,36 @@
       "delete": 1,
       "submit": 1,
       "cancel": 1,
-      "amend": 1
+      "amend": 1,
+      "print": 1
     },
     {
       "role": "Purchase User",
       "read": 1,
       "write": 1,
-      "create": 1
+      "create": 1,
+      "print": 1
     },
     {
       "role": "Purchase Manager",
       "read": 1,
       "write": 1,
-      "create": 1
+      "create": 1,
+      "print": 1
     },
     {
       "role": "Procurement Committee",
       "read": 1,
-      "write": 1
+      "write": 1,
+      "print": 1
     },
     {
       "role": "Head of Finance",
       "read": 1,
       "write": 1,
-      "submit": 1
+      "submit": 1,
+      "print": 1
     }
   ],
-  "modified": "2026-11-03 10:00:00.000000"
+  "modified": "2026-11-04 09:00:00.000000"
 }

@@ -67,6 +67,12 @@ Three separate things have to be true for that, and none of them is true on a st
    the same answer to "who is this visitor" as part 2 -- and read with get_all, because a
    Website User holds no desk read on any of these doctypes. That is why they return only the
    fields a supplier may see: never another bidder, never FoLT's price history.
+
+5. AFTER THE ORDER: INVOICING AND PRINTING.
+
+   A supplier invoices an issued order from here (submit_invoice), which becomes a draft Purchase
+   Invoice in the Finance Assistant's queue, and prints their own documents (document_pdf). See
+   the sections at the end of the module.
 """
 
 from contextlib import contextmanager
@@ -399,7 +405,7 @@ def portal_overview() -> dict:
 	as "this account is not set up as a supplier" and says so.
 	"""
 	mine = my_suppliers()
-	out = {"suppliers": [], "rfqs": [], "quotations": [], "orders": []}
+	out = {"suppliers": [], "rfqs": [], "quotations": [], "orders": [], "invoices": []}
 	if not mine:
 		return out
 
@@ -472,7 +478,7 @@ def portal_overview() -> dict:
 	orders = frappe.get_all(
 		"Purchase Order",
 		filters={"supplier": ["in", mine], "docstatus": 1},
-		fields=["name", "supplier", "status", "grand_total", "currency", "transaction_date", "schedule_date", "per_received", "per_billed", "folt_supplier_acknowledged_on"],
+		fields=["name", "supplier", "status", "workflow_state", "docstatus", "grand_total", "currency", "transaction_date", "schedule_date", "per_received", "per_billed", "folt_supplier_acknowledged_on"],
 		order_by="transaction_date desc, name desc",
 		limit=ORDERS_LIMIT,
 	)
@@ -508,9 +514,11 @@ def portal_overview() -> dict:
 				"per_received": flt(o.per_received),
 				"per_billed": flt(o.per_billed),
 				"acknowledged_on": str(o.folt_supplier_acknowledged_on) if o.folt_supplier_acknowledged_on else None,
+				"can_invoice": _can_invoice(o),
 				"items": lines.get(o.name, []),
 			}
 		)
+	out["invoices"] = my_invoices(mine)
 	return out
 
 
@@ -593,3 +601,298 @@ def acknowledge_order(name: str) -> dict:
 	frappe.db.set_value("Purchase Order", name, {"folt_supplier_acknowledged_on": when, "folt_supplier_acknowledged_by": user}, update_modified=False)
 	frappe.get_doc("Purchase Order", name).add_comment("Info", _("Acknowledged by the supplier ({0}) on the supplier portal.").format(user))
 	return {"name": name, "acknowledged_on": str(when)}
+
+
+# --- 5. invoicing, after the order is issued ------------------------------------------------
+#
+# FoLT's procurement workflow, step 5: once the goods or services are delivered "the supplier
+# submits an invoice", and the Finance Assistant reviews it for accuracy and completeness before
+# forwarding it for approval (invoice_review.py). The supplier submits it here: against one of
+# their issued orders, with their own invoice number and date, the lines and quantities they are
+# billing, and the invoice itself attached. What lands in FoLT is a DRAFT Purchase Invoice made by
+# ERPNext's own mapper from the order -- prices, taxes and accounts are the order's, never the
+# supplier's typing -- waiting in the Finance Assistant's queue. Nothing posts to the ledger until
+# FoLT's own approval does it.
+#
+# The order has to be issued: submitted and at its workflow's Approved state. A line can be billed
+# up to what is ordered less what is already invoiced, counting invoices FoLT has not approved yet
+# (so a supplier cannot bill the same quantity twice while the first is being checked). Whether
+# the delivery has been received is the three-way match's question (match.py), not the portal's:
+# an invoice ahead of the receipt is accepted and flagged, as it would be on paper.
+
+INVOICE_FILE_TYPES = {".pdf", ".png", ".jpg", ".jpeg"}
+SUPPLIER_INVOICE_FIELD = "folt_submitted_by_supplier"
+REVIEWER_ROLE = "Finance Assistant"
+
+
+def _my_order(name: str):
+	order = frappe.db.get_value(
+		"Purchase Order", name, ["name", "supplier", "docstatus", "status", "workflow_state", "currency", "company"], as_dict=True
+	)
+	if not order or order.supplier not in my_suppliers():
+		frappe.throw(_("That is not one of your orders."), frappe.PermissionError)
+	return order
+
+
+def _invoice_refusal(order) -> str | None:
+	"""Why this order cannot be invoiced from the portal now, or None if it can."""
+	if order.docstatus != 1 or (order.workflow_state and order.workflow_state != "Approved"):
+		return _("The order has not been issued yet.")
+	if order.status in ("Closed", "On Hold"):
+		return _("The order is {0}.").format(_(order.status).lower())
+	return None
+
+
+def _invoiced_qty(po_details: list[str]) -> dict:
+	"""Quantity already on an invoice per order line, counting drafts and approvals in progress."""
+	if not po_details:
+		return {}
+	rows = frappe.db.sql(
+		"""select pii.po_detail, sum(pii.qty) from `tabPurchase Invoice Item` pii
+		join `tabPurchase Invoice` pi on pi.name = pii.parent
+		where pii.po_detail in %(lines)s and pi.docstatus < 2 and pi.is_return = 0
+		group by pii.po_detail""",
+		{"lines": po_details},
+	)
+	return {line: flt(qty) for line, qty in rows}
+
+
+def _order_lines(order_name: str) -> list[dict]:
+	lines = frappe.get_all(
+		"Purchase Order Item",
+		filters={"parent": order_name},
+		fields=["name", "item_name", "description", "qty", "uom", "rate", "received_qty"],
+		order_by="idx asc",
+	)
+	billed = _invoiced_qty([row.name for row in lines])
+	return [
+		{
+			"po_detail": row.name,
+			"item_name": row.item_name,
+			"description": row.description,
+			"uom": row.uom,
+			"rate": flt(row.rate),
+			"qty": flt(row.qty),
+			"received_qty": flt(row.received_qty),
+			"invoiced_qty": billed.get(row.name, 0.0),
+			"to_invoice": max(flt(row.qty) - billed.get(row.name, 0.0), 0.0),
+		}
+		for row in lines
+	]
+
+
+def _can_invoice(order) -> bool:
+	return not _invoice_refusal(order) and any(line["to_invoice"] > 0 for line in _order_lines(order.name))
+
+
+@frappe.whitelist(methods=["GET"])
+def invoice_form(order: str) -> dict:
+	"""What the supplier may invoice on one of their orders: each line, ordered, received, already
+	invoiced and still to invoice, at the order's price."""
+	po = _my_order(order)
+	lines = _order_lines(po.name)
+	refusal = _invoice_refusal(po) or (None if any(l["to_invoice"] > 0 for l in lines) else _("Everything on this order has been invoiced."))
+	return {
+		"order": po.name,
+		"supplier": po.supplier,
+		"currency": po.currency,
+		"can_invoice": refusal is None,
+		"reason": refusal,
+		"lines": lines,
+	}
+
+
+@frappe.whitelist(methods=["POST"])
+def submit_invoice(order: str, bill_no: str, bill_date: str, lines) -> dict:
+	"""The supplier sends their invoice for an issued order (multipart: these fields + `file`)."""
+	from frappe.utils import getdate, now_datetime
+
+	po = _my_order(order)
+	refusal = _invoice_refusal(po)
+	if refusal:
+		frappe.throw(refusal, title=_("Cannot invoice this order"))
+
+	bill_no = (bill_no or "").strip()
+	if not bill_no or len(bill_no) > 140:
+		frappe.throw(_("Give your invoice number."), title=_("Invoice number"))
+	if not bill_date or getdate(bill_date) > getdate(nowdate()):
+		frappe.throw(_("The invoice date cannot be in the future."), title=_("Invoice date"))
+	if frappe.db.exists("Purchase Invoice", {"supplier": po.supplier, "bill_no": bill_no, "docstatus": ["<", 2]}):
+		frappe.throw(_("You have already sent FoLT an invoice numbered {0}.").format(frappe.bold(bill_no)), title=_("Duplicate invoice number"))
+
+	billable = {line["po_detail"]: line for line in _order_lines(po.name)}
+	wanted = {}
+	for row in frappe.parse_json(lines) or []:
+		line, qty = (row or {}).get("po_detail"), flt((row or {}).get("qty"))
+		if line not in billable:
+			frappe.throw(_("A line is not on order {0}. Reload it and try again.").format(po.name))
+		if qty < 0 or qty > billable[line]["to_invoice"] + 1e-9:
+			frappe.throw(
+				_("{0}: you can invoice up to {1} {2}.").format(billable[line]["item_name"], billable[line]["to_invoice"], billable[line]["uom"] or ""),
+				title=_("Quantity"),
+			)
+		if qty:
+			wanted[line] = qty
+	if not wanted:
+		frappe.throw(_("Invoice at least one line."), title=_("Nothing invoiced"))
+
+	file_name, content = _uploaded_file()
+
+	user = frappe.session.user
+	# As the system, the way bids are written (save_quotation): ERPNext's mapper and the invoice's
+	# own validation read Item, Account and the order, none of which a supplier may read.
+	with _as_system_user():
+		from erpnext.buying.doctype.purchase_order.purchase_order import make_purchase_invoice
+
+		invoice = make_purchase_invoice(po.name)
+		invoice.set("items", [row for row in invoice.items if row.po_detail in wanted])
+		for row in invoice.items:
+			row.qty = wanted[row.po_detail]
+		invoice.bill_no = bill_no
+		invoice.bill_date = bill_date
+		invoice.posting_date = nowdate()
+		invoice.set_posting_time = 1
+		if invoice.meta.has_field(SUPPLIER_INVOICE_FIELD):
+			invoice.set(SUPPLIER_INVOICE_FIELD, user)
+		invoice.flags.ignore_permissions = True
+		invoice.insert()
+		frappe.get_doc(
+			{
+				"doctype": "File",
+				"file_name": file_name,
+				"content": content,
+				"attached_to_doctype": "Purchase Invoice",
+				"attached_to_name": invoice.name,
+				"is_private": 1,
+			}
+		).insert(ignore_permissions=True)
+		invoice.add_comment("Info", _("Submitted by the supplier ({0}) on the supplier portal against {1}.").format(user, po.name))
+
+	frappe.db.set_value("Purchase Invoice", invoice.name, {"owner": user, "modified_by": user}, update_modified=False)
+	_tell_finance(invoice.name, po.supplier, bill_no)
+	return {"name": invoice.name, "bill_no": bill_no, "submitted_on": str(now_datetime())}
+
+
+def _uploaded_file() -> tuple[str, bytes]:
+	"""The invoice copy posted with the form (`file`), checked: a PDF or an image, not empty."""
+	import os
+
+	request = getattr(frappe, "request", None)
+	upload = request.files.get("file") if request is not None and getattr(request, "files", None) else None
+	if not upload or not upload.filename:
+		frappe.throw(_("Attach your invoice (PDF or a photo of it)."), title=_("Invoice copy"))
+	file_name = os.path.basename(upload.filename)
+	if os.path.splitext(file_name)[1].lower() not in INVOICE_FILE_TYPES:
+		frappe.throw(_("Attach the invoice as a PDF, PNG or JPG."), title=_("Invoice copy"))
+	content = upload.stream.read()
+	if not content:
+		frappe.throw(_("The attached file is empty."), title=_("Invoice copy"))
+	return file_name, content
+
+
+def _tell_finance(invoice: str, supplier: str, bill_no: str):
+	from frappe.desk.doctype.notification_log.notification_log import enqueue_create_notification
+	from frappe.utils.user import get_users_with_role
+
+	users = sorted(set(get_users_with_role(REVIEWER_ROLE)))
+	if users:
+		enqueue_create_notification(
+			users,
+			{
+				"type": "Alert",
+				"subject": _("{0} sent invoice {1}: review {2} and forward it for approval").format(supplier, bill_no, invoice),
+				"document_type": "Purchase Invoice",
+				"document_name": invoice,
+				"from_user": frappe.session.user,
+			},
+		)
+
+
+# Where a supplier stands on an invoice, in their terms.
+def _invoice_standing(row) -> str:
+	if row.docstatus == 0:
+		return "approval" if row.workflow_state == "Pending Approval" else "received"
+	if flt(row.outstanding_amount) <= 0:
+		return "paid"
+	return "part_paid" if row.status == "Partly Paid" else "approved"
+
+
+def my_invoices(mine: list[str]) -> list[dict]:
+	rows = frappe.get_all(
+		"Purchase Invoice",
+		filters={"supplier": ["in", mine], "docstatus": ["<", 2], "is_return": 0},
+		fields=["name", "supplier", "bill_no", "bill_date", "posting_date", "grand_total", "outstanding_amount", "currency", "status", "docstatus", "workflow_state"],
+		order_by="creation desc",
+		limit=OVERVIEW_LIMIT,
+	)
+	orders = {}
+	if rows:
+		for item in frappe.get_all(
+			"Purchase Invoice Item",
+			filters={"parent": ["in", [r.name for r in rows]], "purchase_order": ["is", "set"]},
+			fields=["parent", "purchase_order"],
+		):
+			orders.setdefault(item.parent, item.purchase_order)
+	return [
+		{
+			"name": r.name,
+			"supplier": r.supplier,
+			"bill_no": r.bill_no or None,
+			"bill_date": str(r.bill_date) if r.bill_date else None,
+			"order": orders.get(r.name),
+			"grand_total": flt(r.grand_total),
+			"outstanding": flt(r.outstanding_amount) if r.docstatus == 1 else flt(r.grand_total),
+			"currency": r.currency,
+			"status": _invoice_standing(r),
+		}
+		for r in rows
+	]
+
+
+# --- 6. printing, the supplier's own documents --------------------------------------------
+#
+# A supplier prints what FoLT sent them and what they sent FoLT: the RFQ (as addressed to them),
+# their quotation, the LPO and their invoices. Rendered as the system in a fixed format per
+# doctype, after the same "is this yours" check as every read here -- a Website User holds no
+# print right on these doctypes, and choosing the format server-side is what keeps FoLT's own
+# fields (match notes, review stamps, other bidders) off the page.
+
+SUPPLIER_PRINTS = {
+	"Request for Quotation": "Request for Quotation with Item Image",
+	"Supplier Quotation": "Standard",
+	"Purchase Order": "FoLT Local Purchase Order",
+	"Purchase Invoice": "Purchase Invoice Standard",
+}
+
+
+def _printable(doctype: str, name: str):
+	"""The document, readied for the supplier's print, or PermissionError."""
+	if doctype not in SUPPLIER_PRINTS:
+		frappe.throw(_("Not Permitted"), frappe.PermissionError)
+	if not frappe.db.exists(doctype, name):
+		frappe.throw(_("Not Permitted"), frappe.PermissionError)
+	doc = frappe.get_doc(doctype, name)
+	if doctype == "Request for Quotation":
+		if doc.docstatus != 1:
+			frappe.throw(_("Not Permitted"), frappe.PermissionError)
+		doc.update_supplier_part_no(session_supplier(doc))
+		return doc
+	if doc.supplier not in my_suppliers() or doc.docstatus == 2:
+		frappe.throw(_("Not Permitted"), frappe.PermissionError)
+	if doctype == "Purchase Order" and doc.docstatus != 1:
+		frappe.throw(_("Not Permitted"), frappe.PermissionError)
+	return doc
+
+
+@frappe.whitelist(methods=["GET"])
+def document_pdf(doctype: str, name: str):
+	"""One of the supplier's own documents as a PDF (the response is the file)."""
+	doc = _printable(doctype, name)
+	print_format = SUPPLIER_PRINTS[doctype]
+	if print_format != "Standard" and not frappe.db.exists("Print Format", print_format):
+		print_format = "Standard"
+	with _as_system_user():
+		pdf = frappe.get_print(doctype, name, print_format, doc=doc, as_pdf=True)
+	frappe.local.response.filename = f"{name}.pdf"
+	frappe.local.response.filecontent = pdf
+	frappe.local.response.type = "pdf"

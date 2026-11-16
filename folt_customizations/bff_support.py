@@ -175,7 +175,13 @@ def my_holidays(from_date: str, to_date: str) -> dict:
 	)
 	if not employee:
 		return {"employee": None, "holiday_lists": [], "holidays": []}
+	return holidays_for(employee, start, end)
 
+
+def holidays_for(employee, start, end) -> dict:
+	"""One employee's holidays between two dates (my_holidays' answer, for an employee row with
+	`name` and `company`). No permission question is asked here: the caller has decided whose
+	holidays these are -- the session employee's, or one the caller may keep a timesheet for."""
 	# Every day from one boundary to the day before the next gets the same answer from HRMS: no
 	# assignment that could change it starts in between.
 	starts = frappe.get_all(
@@ -237,6 +243,9 @@ def _date(value: str):
 
 
 HR_ROLES = {"HR User", "HR Manager"}
+# leave_policy.NOTICE_DAYS, restated here because leave_policy imports nothing from this module
+# and this module must not import it at load (hr_timesheet imports both).
+NOTICE_DAYS = 7
 
 
 @frappe.whitelist(methods=["GET"])
@@ -273,28 +282,9 @@ def my_leave_approvers(employee: str | None = None) -> dict:
 			"Employee", {"user_id": user, "status": "Active"}, ["name", "department", "leave_approver", "user_id"], as_dict=True
 		)
 	if not employee:
-		return {"employee": None, "is_mandatory": is_mandatory, "default": None, "approvers": []}
+		return {"employee": None, "is_mandatory": is_mandatory, "default": None, "approvers": [], "notice_days": NOTICE_DAYS}
 
-	candidates = [employee.leave_approver] if employee.leave_approver else []
-	own_department: list[str] = []
-	bounds = employee.department and frappe.db.get_value("Department", employee.department, ["lft", "rgt"])
-	if bounds:
-		lft, rgt = bounds
-		ancestors = frappe.get_all(
-			"Department",
-			filters={"lft": ["<=", lft], "rgt": [">=", rgt]},
-			fields=["name", "lft"],
-			order_by="lft desc",
-		)
-		depth = {row.name: i for i, row in enumerate(ancestors)}
-		rows = frappe.get_all(
-			"Department Approver",
-			filters={"parenttype": "Department", "parentfield": "leave_approvers", "parent": ["in", list(depth)]},
-			fields=["parent", "approver", "idx"],
-		)
-		rows.sort(key=lambda row: (depth[row.parent], row.idx))
-		candidates += [row.approver for row in rows]
-		own_department = [row.approver for row in rows if row.parent == employee.department]
+	candidates, own_department = approver_candidates(employee)
 
 	# Nobody approves their own leave, and a disabled account cannot sign in to approve anything.
 	unique = [u for u in dict.fromkeys(candidates) if u and u not in (user, employee.user_id)]
@@ -316,7 +306,37 @@ def my_leave_approvers(employee: str | None = None) -> dict:
 		"is_mandatory": is_mandatory,
 		"default": default,
 		"approvers": [{"user": u, "full_name": users[u].full_name or u} for u in kept],
+		# The leave policy's notice, so the form can say it before a date is chosen (leave_policy.py).
+		"notice_days": NOTICE_DAYS,
 	}
+
+
+def approver_candidates(employee) -> tuple[list[str], list[str]]:
+	"""The users who may approve for an employee row (`leave_approver`, `department`), nearest
+	first: their own approver, then the Department Approver rows of their department and of every
+	department above it. The second list is the ones named on their own department. Unfiltered:
+	the caller drops the employee themselves, disabled accounts and whoever else does not apply."""
+	candidates = [employee.leave_approver] if employee.leave_approver else []
+	own_department: list[str] = []
+	bounds = employee.department and frappe.db.get_value("Department", employee.department, ["lft", "rgt"])
+	if bounds:
+		lft, rgt = bounds
+		ancestors = frappe.get_all(
+			"Department",
+			filters={"lft": ["<=", lft], "rgt": [">=", rgt]},
+			fields=["name", "lft"],
+			order_by="lft desc",
+		)
+		depth = {row.name: i for i, row in enumerate(ancestors)}
+		rows = frappe.get_all(
+			"Department Approver",
+			filters={"parenttype": "Department", "parentfield": "leave_approvers", "parent": ["in", list(depth)]},
+			fields=["parent", "approver", "idx"],
+		)
+		rows.sort(key=lambda row: (depth[row.parent], row.idx))
+		candidates += [row.approver for row in rows]
+		own_department = [row.approver for row in rows if row.parent == employee.department]
+	return candidates, own_department
 
 
 # --- activity feed --------------------------------------------------------------------------------

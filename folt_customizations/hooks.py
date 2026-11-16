@@ -211,6 +211,8 @@ after_install = [
     "folt_customizations.print_formats.apply_print_formats",
     "folt_customizations.supplier_portal.link_portal_users",
     "folt_customizations.leave_notifications.apply_leave_notification_templates",
+    # The HR Settings the leave policy rests on: an approver is mandatory, nobody approves their own.
+    "folt_customizations.leave_policy.apply_leave_policy",
     "folt_customizations.hr_accounts.apply_hr_accounts",
     "folt_customizations.masterdata.apply_master_data",
     # FoLT Procurement Settings' defaults, and the duplicate invoice-number check (ADR-008).
@@ -228,6 +230,8 @@ after_migrate = [
     "folt_customizations.print_formats.apply_print_formats",
     "folt_customizations.supplier_portal.link_portal_users",
     "folt_customizations.leave_notifications.apply_leave_notification_templates",
+    # The HR Settings the leave policy rests on: an approver is mandatory, nobody approves their own.
+    "folt_customizations.leave_policy.apply_leave_policy",
     # After the fixtures sync: their empty `accounts` tables would otherwise wipe the ledgers.
     "folt_customizations.hr_accounts.apply_hr_accounts",
     "folt_customizations.masterdata.apply_master_data",
@@ -307,6 +311,9 @@ doc_events = {
     # decided and if it is later cancelled. See leave_notifications.py, which also wires up the
     # Email Templates that left hrms's own leave emails silently unsent.
     "Leave Application": {
+        # The leave policy: seven days' notice unless it is a stated emergency, and an approver on
+        # every request. See leave_policy.py.
+        "validate": "folt_customizations.leave_policy.validate",
         "after_insert": "folt_customizations.leave_notifications.notify_approver_of_new_application",
         "on_update": "folt_customizations.leave_notifications.notify_applicant_of_decision",
         "on_cancel": "folt_customizations.leave_notifications.notify_applicant_of_cancellation",
@@ -424,6 +431,8 @@ scheduler_events = {
         "folt_customizations.masterdata.flag_reporting_periods",
         # RFQ deadlines, deliveries and supplier invoices falling due or overdue (ADR-008).
         "folt_customizations.procurement_alerts.daily",
+        # Leave about to start that nobody has decided: approval comes before leave (HR policy).
+        "folt_customizations.leave_policy.remind_undecided",
     ],
 }
 

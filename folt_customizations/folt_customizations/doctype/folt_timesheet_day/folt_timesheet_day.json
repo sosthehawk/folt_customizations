@@ -1,0 +1,53 @@
+{
+ "doctype": "DocType",
+ "name": "FoLT Timesheet Day",
+ "module": "Folt Customizations",
+ "custom": 0,
+ "istable": 1,
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "date",
+  "kind",
+  "leave_type",
+  "hours"
+ ],
+ "fields": [
+  {
+   "fieldname": "date",
+   "fieldtype": "Date",
+   "label": "Date",
+   "reqd": 1,
+   "in_list_view": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "kind",
+   "fieldtype": "Data",
+   "label": "Day",
+   "in_list_view": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "leave_type",
+   "fieldtype": "Data",
+   "label": "Leave Type",
+   "in_list_view": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "hours",
+   "fieldtype": "Float",
+   "label": "Hours",
+   "in_list_view": 1,
+   "read_only": 1,
+   "precision": "1"
+  }
+ ],
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "modified": "2026-11-16 09:00:00.000000",
+ "modified_by": "Administrator",
+ "owner": "Administrator"
+}

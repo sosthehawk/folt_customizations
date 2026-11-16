@@ -492,7 +492,7 @@ def _approvers(employee):
 	nobody = as_user(HEAD_OF_PROGRAMS, bff_support.my_leave_approvers)
 	check(
 		"a user with no Employee: no approvers, the site's mandatory flag",
-		nobody == {"employee": None, "is_mandatory": mandatory, "default": None, "approvers": []},
+		nobody == {"employee": None, "is_mandatory": mandatory, "default": None, "approvers": [], "notice_days": 7},
 		str(nobody),
 	)
 	if not employee:
@@ -502,7 +502,8 @@ def _approvers(employee):
 	users = [a.get("user") for a in live["approvers"]]
 	check(
 		"live: shaped, mandatory flag from HR Settings, default one of the approvers",
-		set(live) == {"employee", "is_mandatory", "default", "approvers"}
+		set(live) == {"employee", "is_mandatory", "default", "approvers", "notice_days"}
+		and live["notice_days"] == 7
 		and live["employee"] == employee
 		and live["is_mandatory"] is mandatory
 		and all(set(a) == {"user", "full_name"} and a["full_name"] for a in live["approvers"])

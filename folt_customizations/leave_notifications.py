@@ -111,7 +111,11 @@ def notify_approver_of_new_application(doc, method=None):
     _notify(
         recipients,
         doc,
-        subject=_("{0} has applied for {1}").format(doc.employee_name, _(doc.leave_type)),
+        subject=(
+            _("Emergency: {0} has applied for {1} at short notice")
+            if doc.get("folt_emergency")
+            else _("{0} has applied for {1}")
+        ).format(doc.employee_name, _(doc.leave_type)),
         content=_("{0} requested <b>{1}</b> of {2} from {3} to {4}, and it is waiting on you.").format(
             frappe.bold(doc.employee_name),
             doc.total_leave_days,

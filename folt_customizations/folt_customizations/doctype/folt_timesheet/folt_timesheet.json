@@ -1,0 +1,242 @@
+{
+ "doctype": "DocType",
+ "name": "FoLT Timesheet",
+ "module": "Folt Customizations",
+ "custom": 0,
+ "engine": "InnoDB",
+ "autoname": "format:TS-{employee}-{month}",
+ "naming_rule": "Expression",
+ "title_field": "employee_name",
+ "track_changes": 1,
+ "field_order": [
+  "employee",
+  "employee_name",
+  "department",
+  "column_break_1",
+  "month",
+  "from_date",
+  "to_date",
+  "status",
+  "section_signoff",
+  "submitted_by",
+  "submitted_on",
+  "approver",
+  "column_break_2",
+  "approved_by",
+  "approved_on",
+  "return_reason",
+  "section_totals",
+  "working_days",
+  "days_worked",
+  "days_leave",
+  "column_break_3",
+  "days_absent",
+  "days_holiday",
+  "hours_total",
+  "section_days",
+  "days"
+ ],
+ "fields": [
+  {
+   "read_only": 1,
+   "fieldname": "employee",
+   "fieldtype": "Link",
+   "options": "Employee",
+   "label": "Employee",
+   "reqd": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "search_index": 1
+  },
+  {
+   "read_only": 1,
+   "fieldname": "employee_name",
+   "fieldtype": "Data",
+   "label": "Employee Name",
+   "in_list_view": 1
+  },
+  {
+   "read_only": 1,
+   "fieldname": "department",
+   "fieldtype": "Link",
+   "options": "Department",
+   "label": "Department",
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "read_only": 1,
+   "fieldname": "month",
+   "fieldtype": "Data",
+   "label": "Month",
+   "reqd": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "description": "YYYY-MM"
+  },
+  {
+   "read_only": 1,
+   "fieldname": "from_date",
+   "fieldtype": "Date",
+   "label": "From"
+  },
+  {
+   "read_only": 1,
+   "fieldname": "to_date",
+   "fieldtype": "Date",
+   "label": "To"
+  },
+  {
+   "read_only": 1,
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "options": "Submitted\nApproved\nReturned",
+   "label": "Status",
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "section_signoff",
+   "fieldtype": "Section Break",
+   "label": "Sign-off"
+  },
+  {
+   "read_only": 1,
+   "fieldname": "submitted_by",
+   "fieldtype": "Link",
+   "options": "User",
+   "label": "Confirmed By"
+  },
+  {
+   "read_only": 1,
+   "fieldname": "submitted_on",
+   "fieldtype": "Datetime",
+   "label": "Confirmed On"
+  },
+  {
+   "read_only": 1,
+   "fieldname": "approver",
+   "fieldtype": "Link",
+   "options": "User",
+   "label": "Sent To"
+  },
+  {
+   "fieldname": "column_break_2",
+   "fieldtype": "Column Break"
+  },
+  {
+   "read_only": 1,
+   "fieldname": "approved_by",
+   "fieldtype": "Link",
+   "options": "User",
+   "label": "Approved By"
+  },
+  {
+   "read_only": 1,
+   "fieldname": "approved_on",
+   "fieldtype": "Datetime",
+   "label": "Approved On"
+  },
+  {
+   "read_only": 1,
+   "fieldname": "return_reason",
+   "fieldtype": "Small Text",
+   "label": "Returned Because"
+  },
+  {
+   "fieldname": "section_totals",
+   "fieldtype": "Section Break",
+   "label": "Totals"
+  },
+  {
+   "read_only": 1,
+   "fieldname": "working_days",
+   "fieldtype": "Float",
+   "label": "Working Days",
+   "precision": "1"
+  },
+  {
+   "read_only": 1,
+   "fieldname": "days_worked",
+   "fieldtype": "Float",
+   "label": "Days Worked",
+   "precision": "1"
+  },
+  {
+   "read_only": 1,
+   "fieldname": "days_leave",
+   "fieldtype": "Float",
+   "label": "Days on Leave",
+   "precision": "1"
+  },
+  {
+   "fieldname": "column_break_3",
+   "fieldtype": "Column Break"
+  },
+  {
+   "read_only": 1,
+   "fieldname": "days_absent",
+   "fieldtype": "Float",
+   "label": "Days Absent",
+   "precision": "1"
+  },
+  {
+   "read_only": 1,
+   "fieldname": "days_holiday",
+   "fieldtype": "Int",
+   "label": "Holidays"
+  },
+  {
+   "read_only": 1,
+   "fieldname": "hours_total",
+   "fieldtype": "Float",
+   "label": "Hours",
+   "precision": "1"
+  },
+  {
+   "fieldname": "section_days",
+   "fieldtype": "Section Break",
+   "label": "Days"
+  },
+  {
+   "read_only": 1,
+   "fieldname": "days",
+   "fieldtype": "Table",
+   "options": "FoLT Timesheet Day",
+   "label": "Days"
+  }
+ ],
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "write": 1,
+   "delete": 1,
+   "report": 1,
+   "export": 1,
+   "print": 1
+  },
+  {
+   "role": "HR Manager",
+   "read": 1,
+   "report": 1,
+   "export": 1,
+   "print": 1
+  },
+  {
+   "role": "HR User",
+   "read": 1,
+   "report": 1,
+   "export": 1,
+   "print": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "modified": "2026-11-16 09:00:00.000000",
+ "modified_by": "Administrator",
+ "owner": "Administrator"
+}

@@ -111,3 +111,21 @@ def backfill():
 				values["folt_request_title"] = title
 			if values:
 				frappe.db.set_value(doctype, name, values, update_modified=False)
+
+
+def title_fields(meta, preferred=None) -> list[str]:
+	"""What a document is called, best first, for the screens that name documents generically
+	(Home's queue, Tasks, the activity feed, link titles): a buying document by its request title,
+	then by the field that named it before (`preferred`, else the doctype's title_field -- on most
+	buying documents the supplier's name), for the ones bought before there were request titles."""
+	out = []
+	if meta.name in CHAIN and meta.has_field("folt_request_title"):
+		out.append("folt_request_title")
+	fallback = preferred or meta.title_field
+	if fallback and fallback not in out:
+		out.append(fallback)
+	return out
+
+
+def first_title(row, fields):
+	return next((row.get(f) for f in fields if row.get(f)), None)

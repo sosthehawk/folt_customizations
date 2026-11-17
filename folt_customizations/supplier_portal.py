@@ -414,7 +414,7 @@ def portal_overview() -> dict:
 	)
 
 	invited = frappe.db.sql(
-		"""select rfq.name, rfq.title, rfq.transaction_date, rfq.schedule_date, rfqs.supplier,
+		"""select rfq.name, rfq.title, rfq.folt_request_title, rfq.transaction_date, rfq.schedule_date, rfqs.supplier,
 			(select count(*) from `tabRequest for Quotation Item` i where i.parent = rfq.name) as line_count
 		from `tabRequest for Quotation` rfq
 		join `tabRequest for Quotation Supplier` rfqs on rfqs.parent = rfq.name
@@ -433,7 +433,8 @@ def portal_overview() -> dict:
 		out["rfqs"].append(
 			{
 				"name": row.name,
-				"title": row.title or None,
+				# What is being bought, in FoLT's words: the purchase's request title (request_title.py).
+				"title": row.folt_request_title or row.title or None,
 				"transaction_date": str(row.transaction_date) if row.transaction_date else None,
 				"schedule_date": str(row.schedule_date) if row.schedule_date else None,
 				"supplier": row.supplier,
@@ -448,7 +449,7 @@ def portal_overview() -> dict:
 	quotations = frappe.get_all(
 		"Supplier Quotation",
 		filters={"supplier": ["in", mine], "docstatus": ["<", 2]},
-		fields=["name", "supplier", "status", "docstatus", "grand_total", "currency", "transaction_date", "valid_till"],
+		fields=["name", "folt_request_title", "supplier", "status", "docstatus", "grand_total", "currency", "transaction_date", "valid_till"],
 		order_by="creation desc",
 		limit=OVERVIEW_LIMIT,
 	)
@@ -464,6 +465,7 @@ def portal_overview() -> dict:
 		out["quotations"].append(
 			{
 				"name": q.name,
+				"title": q.folt_request_title or None,
 				"supplier": q.supplier,
 				"rfq": rfq_of.get(q.name),
 				"status": q.status,
@@ -478,7 +480,7 @@ def portal_overview() -> dict:
 	orders = frappe.get_all(
 		"Purchase Order",
 		filters={"supplier": ["in", mine], "docstatus": 1},
-		fields=["name", "supplier", "status", "workflow_state", "docstatus", "grand_total", "currency", "transaction_date", "schedule_date", "per_received", "per_billed", "folt_supplier_acknowledged_on"],
+		fields=["name", "folt_request_title", "supplier", "status", "workflow_state", "docstatus", "grand_total", "currency", "transaction_date", "schedule_date", "per_received", "per_billed", "folt_supplier_acknowledged_on"],
 		order_by="transaction_date desc, name desc",
 		limit=ORDERS_LIMIT,
 	)
@@ -505,6 +507,7 @@ def portal_overview() -> dict:
 		out["orders"].append(
 			{
 				"name": o.name,
+				"title": o.folt_request_title or None,
 				"supplier": o.supplier,
 				"status": o.status,
 				"grand_total": flt(o.grand_total),
@@ -565,7 +568,7 @@ def portal_rfq(name: str) -> dict:
 
 	return {
 		"name": doc.name,
-		"title": doc.title or None,
+		"title": doc.get("folt_request_title") or doc.get("title") or None,
 		"company": doc.company,
 		"transaction_date": str(doc.transaction_date) if doc.transaction_date else None,
 		"schedule_date": str(doc.schedule_date) if doc.schedule_date else None,
@@ -821,7 +824,7 @@ def my_invoices(mine: list[str]) -> list[dict]:
 	rows = frappe.get_all(
 		"Purchase Invoice",
 		filters={"supplier": ["in", mine], "docstatus": ["<", 2], "is_return": 0},
-		fields=["name", "supplier", "bill_no", "bill_date", "posting_date", "grand_total", "outstanding_amount", "currency", "status", "docstatus", "workflow_state"],
+		fields=["name", "folt_request_title", "supplier", "bill_no", "bill_date", "posting_date", "grand_total", "outstanding_amount", "currency", "status", "docstatus", "workflow_state"],
 		order_by="creation desc",
 		limit=OVERVIEW_LIMIT,
 	)
@@ -836,6 +839,7 @@ def my_invoices(mine: list[str]) -> list[dict]:
 	return [
 		{
 			"name": r.name,
+			"title": r.folt_request_title or None,
 			"supplier": r.supplier,
 			"bill_no": r.bill_no or None,
 			"bill_date": str(r.bill_date) if r.bill_date else None,

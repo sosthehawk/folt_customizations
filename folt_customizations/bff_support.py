@@ -427,6 +427,11 @@ def _readable_title(doctype: str, name: str, titles) -> str | None:
 
 	# spa._title_of's rules, without loading the document: the same title the Tasks screen shows.
 	meta = frappe.get_meta(doctype)
+	if doctype in spa.REQUEST_TITLED and meta.has_field("folt_request_title"):
+		# A purchase is called by its request title (request_title.py), when it has one.
+		request_title = frappe.db.get_value(doctype, name, "folt_request_title")
+		if request_title:
+			return request_title
 	field = spa._TITLE_OVERRIDE.get(doctype) or meta.title_field or spa._TITLE_FALLBACK.get(doctype)
 	value = field and frappe.db.get_value(doctype, name, field)
 	if not value:

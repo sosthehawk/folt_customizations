@@ -44,6 +44,7 @@ from frappe.utils import cint, flt, getdate
 
 from folt_customizations import activity_chain, masterdata, procurement_chain, step_forms, workflow_shape
 from folt_customizations.portal_common import complete_item_rows
+from folt_customizations.request_title import CHAIN as REQUEST_TITLED, first_title, title_fields
 from folt_customizations.document_guide import _documents, get_guide, guide_map
 from folt_customizations.folt_customizations.page.folt_tasks.folt_tasks import _fields, _row
 from folt_customizations.float_lifecycle import FUNDED_FLOAT_STATES
@@ -173,13 +174,13 @@ def documents(doctype: str, state: str | None = None, query: str = "", start: in
 	if query:
 		like = f"%{query.strip()}%"
 		or_filters = [["name", "like", like]]
-		if _title_field(meta):
-			or_filters.append([_title_field(meta), "like", like])
+		for field in _title_fields(meta):
+			or_filters.append([field, "like", like])
 
 	if shaped:
 		fields = _fields(doctype, state_field)
 	else:
-		fields = ["name", "owner", "modified", "docstatus"] + ([_title_field(meta)] if _title_field(meta) else [])
+		fields = ["name", "owner", "modified", "docstatus"] + _title_fields(meta)
 
 	found = frappe.get_list(
 		doctype,
@@ -204,7 +205,7 @@ def _plain_row(doctype, meta, row) -> dict:
 	return {
 		"doctype": doctype,
 		"name": row.name,
-		"title": (_title_field(meta) and row.get(_title_field(meta))) or row.name,
+		"title": first_title(row, _title_fields(meta)) or row.name,
 		"state": _DOCSTATUS_NAMES[row.docstatus],
 		"lane": None,
 		"of": 0,
@@ -1370,7 +1371,15 @@ def _title_field(meta) -> str | None:
 	return _TITLE_OVERRIDE.get(meta.name) or meta.title_field
 
 
+def _title_fields(meta) -> list[str]:
+	"""Every field that may name a document, best first: a buying document's request title, then
+	_title_field (request_title.title_fields)."""
+	return title_fields(meta, _TITLE_OVERRIDE.get(meta.name))
+
+
 def _title_of(doc) -> str:
+	if doc.get("folt_request_title") and doc.doctype in REQUEST_TITLED:
+		return doc.folt_request_title
 	title_field = _TITLE_OVERRIDE.get(doc.doctype) or doc.meta.title_field or _TITLE_FALLBACK.get(doc.doctype)
 	value = title_field and doc.get(title_field)
 	if not value:
@@ -1420,7 +1429,8 @@ class _Titles:
 		key = (doctype, name)
 		if key not in self.cache:
 			meta = frappe.get_meta(doctype)
-			field = "full_name" if doctype == "User" else _title_field(meta)
-			value = frappe.db.get_value(doctype, name, field) if field and meta.get_field(field) or doctype == "User" else None
+			fields = ["full_name"] if doctype == "User" else [f for f in _title_fields(meta) if meta.get_field(f)]
+			got = frappe.db.get_value(doctype, name, fields, as_dict=True) if fields else None
+			value = first_title(got, fields) if got else None
 			self.cache[key] = value if value and value != name else None
 		return self.cache[key]

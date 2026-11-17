@@ -219,8 +219,12 @@ def _fields(doctype: str, state_field: str) -> list[str]:
 	meta = frappe.get_meta(doctype)
 	fields = ["name", "owner", "modified", "docstatus", state_field]
 
-	if meta.title_field and meta.title_field not in fields:
-		fields.append(meta.title_field)
+	# A buying document is called by its request title first (request_title.title_fields).
+	from folt_customizations.request_title import title_fields
+
+	for field in title_fields(meta):
+		if field not in fields:
+			fields.append(field)
 
 	amount = next(
 		(f.fieldname for f in meta.fields if f.fieldtype == "Currency" and f.in_list_view), None
@@ -232,6 +236,8 @@ def _fields(doctype: str, state_field: str) -> list[str]:
 
 
 def _row(doctype, shaped, states_roles, row, state_field) -> dict:
+	from folt_customizations.request_title import first_title, title_fields
+
 	state = row.get(state_field)
 	meta = frappe.get_meta(doctype)
 	placed = workflow_shape.locate(shaped, state)
@@ -242,7 +248,7 @@ def _row(doctype, shaped, states_roles, row, state_field) -> dict:
 	return {
 		"doctype": doctype,
 		"name": row.name,
-		"title": (meta.title_field and row.get(meta.title_field)) or row.name,
+		"title": first_title(row, title_fields(meta)) or row.name,
 		"state": state,
 		"lane": placed["lane"],
 		"of": placed["of"],

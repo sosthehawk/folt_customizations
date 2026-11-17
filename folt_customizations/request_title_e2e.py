@@ -203,5 +203,35 @@ def carried():
 	flow = as_user(BUYER, lambda: pp.flow("Purchase Order", po.name))
 	titles = {d["name"]: d.get("title") for d in flow["documents"]}
 	check("the chain card names each document by its request title", titles.get(mr.name) == mr.folt_request_title and titles.get(rfq.name) == mr.folt_request_title, titles)
+	print("\nHome, Tasks and the activity feed")
+	from folt_customizations import bff_support, spa
+
+	check("a document is called by its request title", spa._title_of(frappe.get_doc("Purchase Order", po.name)) == po.folt_request_title, spa._title_of(frappe.get_doc("Purchase Order", po.name)))
+	listed = as_user(BUYER, lambda: spa.documents("Request for Quotation", query="Ileret clinic"))
+	got = {r["name"]: r["title"] for r in listed["rows"]}
+	check("the Tasks list finds an RFQ by its request title and names it so", got.get(rfq.name) == mr.folt_request_title, got)
+	listed = as_user(BUYER, lambda: spa.documents("Purchase Order", query="first tranche"))
+	got = {r["name"]: r["title"] for r in listed["rows"]}
+	check("...and an order with its own title", got.get(po.name) == po.folt_request_title, got)
+	feed = as_user(BUYER, lambda: bff_support._readable_title("Purchase Order", po.name, spa._Titles()))
+	check("the activity feed names it by its request title", feed == po.folt_request_title, feed)
+	check("a link to it reads as its request title", as_user(BUYER, lambda: spa._Titles().get("Request for Quotation", rfq.name)) == mr.folt_request_title)
+
+	print("\nThe supplier portal")
+	from folt_customizations import supplier_portal
+
+	po.reload()
+	# The portal lists submitted orders: shown as one for the read, then back to the draft it is.
+	frappe.db.set_value("Purchase Order", po.name, "docstatus", 1, update_modified=False)
+	original = supplier_portal.my_suppliers
+	supplier_portal.my_suppliers = lambda user=None: [SUPPLIER]
+	try:
+		out = supplier_portal.portal_overview()
+	finally:
+		supplier_portal.my_suppliers = original
+		frappe.db.set_value("Purchase Order", po.name, "docstatus", 0, update_modified=False)
+	check("the supplier sees the bid by its request title", any(q["name"] == sq.name and q["title"] == mr.folt_request_title for q in out["quotations"]), out["quotations"])
+	check("...and the order", any(o["name"] == po.name and o["title"] == po.folt_request_title for o in out["orders"]), [(o["name"], o["title"]) for o in out["orders"]])
+
 	row = frappe.db.get_value("Material Request", mr.name, "title")
 	check("the requisition's codes and links are untouched", row == mr.title and frappe.db.get_value("Request for Quotation Item", rfq.items[0].name, "material_request") == mr.name)

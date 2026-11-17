@@ -384,6 +384,10 @@ def save(doctype, doc, name=None):
 		quick = {k: values.get(k) for k in _SUPPLIER_QUICK_ENTRY if values.get(k)}
 		if quick.get("address_line1") and not (quick.get("city") and quick.get("country")):
 			frappe.throw(_("An address needs its town or city and its country."))
+	if doctype == "Item" and not name:
+		# Most of what FoLT buys is a service (car hire, printing, a venue): a new item is not kept
+		# in stock unless whoever adds it says it is. ERPNext's own default is the opposite.
+		values.setdefault("is_stock_item", 0)
 	if doctype == "Material Request" and not name:
 		values.setdefault("material_request_type", "Purchase")
 		_requester_defaults(values)

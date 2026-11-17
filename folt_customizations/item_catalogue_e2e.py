@@ -145,11 +145,15 @@ def keeping():
 	code = f"{MARK} Fuel bowser hire"
 	saved = as_user(MANAGER, lambda: pp.save("Item", {
 		"item_code": code, "item_name": "Fuel bowser hire", "item_group": GROUP, "stock_uom": UNIT,
-		"is_stock_item": 0, "description": "Fuel bowser with driver",
+		"description": "Fuel bowser with driver",
 	}))
 	check("…and a service in them", frappe.db.exists("Item", code), saved)
-	row = frappe.db.get_value("Item", code, ["is_purchase_item", "disabled", "item_group", "stock_uom"], as_dict=True) or {}
+	row = frappe.db.get_value("Item", code, ["is_purchase_item", "is_stock_item", "disabled", "item_group", "stock_uom"], as_dict=True) or {}
 	check("a new item is buyable by default", row.get("is_purchase_item") == 1 and row.get("disabled") == 0, row)
+	check("…and not kept in stock unless asked", row.get("is_stock_item") == 0, row)
+	goods = f"{MARK} Solar panel 200W"
+	as_user(MANAGER, lambda: pp.save("Item", {"item_code": goods, "item_group": GROUP, "stock_uom": UNIT, "is_stock_item": 1}))
+	check("goods ticked as stock stay stock", frappe.db.get_value("Item", goods, "is_stock_item") == 1)
 	frappe.db.commit()
 	offered = as_user(REQUESTER, lambda: pp.link_search("Item", "bowser"))
 	check("a requester finds it on their next line straight away", [o["label"] for o in offered] == ["Fuel bowser hire"], offered)

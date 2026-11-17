@@ -24,7 +24,20 @@ def _may_make(doc):
 	apply_workflow refuses only when the button is pressed."""
 	from frappe.model.workflow import get_transitions, has_approval_access
 
-	return [t for t in get_transitions(doc) if has_approval_access(frappe.session.user, doc, t)]
+	return distinct_moves(t for t in get_transitions(doc) if has_approval_access(frappe.session.user, doc, t))
+
+
+def distinct_moves(transitions):
+	"""One move per (action, next state). A Workflow Transition row names a single role, so a move
+	open to three roles is three rows, and somebody holding two of them would see the button twice.
+	apply_workflow picks the first row the person qualifies for, so dropping the repeats loses nothing."""
+	seen, out = set(), []
+	for t in transitions:
+		key = (t.action, t.next_state)
+		if key not in seen:
+			seen.add(key)
+			out.append(t)
+	return out
 
 def parse_json(value, default=None):
 	if value in (None, ""):

@@ -22,11 +22,11 @@ import io
 
 import frappe
 from frappe import _
-from frappe.model.workflow import apply_workflow, get_transitions, get_workflow, get_workflow_name, has_approval_access
+from frappe.model.workflow import apply_workflow, get_workflow, get_workflow_name
 from frappe.utils import cint, getdate, nowdate
 
 from folt_customizations import masterdata
-from folt_customizations.portal_common import STD_FIELDS, columns, filters, parse_json, version_summary
+from folt_customizations.portal_common import STD_FIELDS, _may_make, columns, filters, parse_json, version_summary
 from folt_customizations.workflow_access import hold_rejection_reason, is_turn_down
 
 READERS = (
@@ -305,8 +305,7 @@ def record(doctype, name=None):
 		# the person would be refused is not offered.
 		moves = [
 			{"action": t.action, "next_state": t.next_state, "needs_reason": is_turn_down(wf, state, t.next_state)}
-			for t in get_transitions(doc)
-			if has_approval_access(frappe.session.user, doc, t)
+			for t in _may_make(doc)
 		]
 		workflow = {"name": wf.name, "state": state, "transitions": moves}
 
@@ -625,8 +624,7 @@ def approvals():
 			doc = frappe.get_doc(dt, r.name)
 			moves = [
 				{"action": t.action, "next_state": t.next_state, "needs_reason": is_turn_down(wf, masterdata.PENDING, t.next_state)}
-				for t in get_transitions(doc)
-				if has_approval_access(user, doc, t)
+				for t in _may_make(doc)
 			]
 			if moves:
 				waiting.append({**row, "moves": moves})

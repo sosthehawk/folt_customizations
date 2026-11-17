@@ -252,7 +252,23 @@ PROCUREMENT_PERMISSIONS = {
 	# on every save of a requisition, so select alone fails the requester's own draft. The item
 	# master names what FoLT buys; nothing on it is confidential. ERPNext gives it to the Purchase
 	# User but not the Purchase Manager, whose saves of an order (an amendment) need it as much.
-	"Item": {role: ("read",) for role in ("Employee", "Head of Programs", "Head of Finance", "Purchase Manager")},
+	#
+	# The catalogue itself -- the items and services, their groups and their units -- is kept by
+	# Procurement (Procurement > Settings > Items and services): the Purchase Manager and Purchase
+	# Master Manager add and change them. ERPNext keeps all three for the Item Manager alone.
+	"Item": {
+		**{role: ("read",) for role in ("Employee", "Head of Programs", "Head of Finance")},
+		**{role: ("read", "write", "create") for role in ("Purchase Manager", "Purchase Master Manager")},
+	},
+	"Item Group": {
+		**{role: ("read",) for role in ("Employee", "Purchase User")},
+		**{role: ("read", "write", "create") for role in ("Purchase Manager", "Purchase Master Manager")},
+	},
+	# A requisition line's unit is picked from UOM: a requester who may not read it cannot choose one.
+	"UOM": {
+		**{role: ("read",) for role in ("Employee", "Purchase User")},
+		**{role: ("read", "write", "create") for role in ("Purchase Manager", "Purchase Master Manager")},
+	},
 	# Supplier evaluation is ERPNext's Supplier Scorecard, which ships for the System Manager
 	# alone. The people who keep suppliers keep their scorecards; buyers read them.
 	"Supplier Scorecard": {

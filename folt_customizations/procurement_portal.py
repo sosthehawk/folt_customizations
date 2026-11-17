@@ -91,6 +91,12 @@ DOCTYPES.update({
 	"Payment Terms Template": ("settings", ["template_name"], ["name"], None),
 	"Supplier Scorecard Criteria": ("settings", ["criteria_name", "max_score", "weight"], ["name", "criteria_name"], None),
 	"Supplier Scorecard Standing": ("settings", ["standing_name", "min_grade", "max_grade", "standing_color"], ["name", "standing_name"], None),
+	# Items and services: what a requisition line can ask for, the groups they are kept in and the
+	# units they are counted in. Kept here by the Purchase Manager (permissions.PROCUREMENT_PERMISSIONS).
+	"Item": ("settings", ["item_name", "item_group", "stock_uom", "is_stock_item", "is_purchase_item", "disabled"],
+	         ["name", "item_name", "item_group", "description"], None),
+	"Item Group": ("settings", ["item_group_name", "parent_item_group", "is_group"], ["name", "item_group_name"], None),
+	"UOM": ("settings", ["uom_name", "must_be_whole_number", "enabled"], ["name", "uom_name"], None),
 })
 
 # The reports Procurement runs: ERPNext's own buying reports and FoLT's (folt_customizations/report).
@@ -454,7 +460,49 @@ def link_search(doctype, txt="", filters=None, page_length=20):
 	_only_procurement()
 	if doctype in _HR_ONLY:
 		frappe.throw(_("{0} belongs to HR.").format(doctype), frappe.PermissionError)
+	if doctype == "Item":
+		return item_search(txt, filters, page_length)
 	return _common.link_search(doctype, txt, filters, page_length)
+
+
+# What an item's picker offers: a purchasable, enabled item that is not a variant template.
+_BUYABLE = {"disabled": 0, "has_variants": 0, "is_purchase_item": 1}
+
+
+def item_search(txt="", filters=None, page_length=20):
+	"""The items and services a buying line may ask for, named the way people know them.
+
+	Frappe's own search labels an item by its code and puts the name, the whole description and
+	the group into one run-on hint; a requester looking for "car hire to Kakuma" saw a column of
+	codes. Here the label is the item's name, the code sits beside it, and the hint says which group
+	it is in and how it is counted, then the start of its description. The search reaches the name,
+	the code, the group and the description, as the reader may read the Item."""
+	values = _json(filters, {}) or {}
+	where = {**(values if isinstance(values, dict) else {}), **_BUYABLE}
+	txt = (txt or "").strip()
+	or_filters = None
+	if txt:
+		like = f"%{txt}%"
+		or_filters = {"name": ["like", like], "item_name": ["like", like], "item_group": ["like", like], "description": ["like", like]}
+	rows = frappe.get_list(
+		"Item",
+		filters=where,
+		or_filters=or_filters,
+		fields=["name", "item_name", "item_group", "stock_uom", "description"],
+		order_by="item_name asc",
+		limit_page_length=min(cint(page_length) or 20, 50),
+	)
+	return [{"value": r.name, "label": r.item_name or r.name, "description": _item_hint(r)} for r in rows]
+
+
+def _item_hint(row) -> str:
+	from frappe.utils import strip_html
+
+	parts = [p for p in (row.item_group, f"per {row.stock_uom}" if row.stock_uom else None) if p]
+	text = " ".join(strip_html(row.description or "").split())
+	if text and text.lower() not in (row.item_name or "").lower():
+		parts.append(text if len(text) <= 90 else text[:89].rstrip() + "…")
+	return " · ".join(parts)
 
 
 @frappe.whitelist(methods=["POST"])

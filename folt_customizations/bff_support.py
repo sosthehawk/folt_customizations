@@ -48,6 +48,7 @@ from hrms.utils.holiday_list import get_holiday_list_for_employee
 
 from folt_customizations import spa, step_forms, workflow_shape
 from folt_customizations.document_guide import _parse_comment
+from folt_customizations.request_title import chain_title_field
 
 # --- backups --------------------------------------------------------------------------------------
 
@@ -427,11 +428,13 @@ def _readable_title(doctype: str, name: str, titles) -> str | None:
 
 	# spa._title_of's rules, without loading the document: the same title the Tasks screen shows.
 	meta = frappe.get_meta(doctype)
-	if doctype in spa.REQUEST_TITLED and meta.has_field("folt_request_title"):
-		# A purchase is called by its request title (request_title.py), when it has one.
-		request_title = frappe.db.get_value(doctype, name, "folt_request_title")
-		if request_title:
-			return request_title
+	lead = chain_title_field(meta)
+	if lead:
+		# A purchase is called by its request title, an activity's documents by the activity's
+		# title (request_title.chain_title_field), when they have one.
+		chain_title = frappe.db.get_value(doctype, name, lead)
+		if chain_title:
+			return chain_title
 	field = spa._TITLE_OVERRIDE.get(doctype) or meta.title_field or spa._TITLE_FALLBACK.get(doctype)
 	value = field and frappe.db.get_value(doctype, name, field)
 	if not value:

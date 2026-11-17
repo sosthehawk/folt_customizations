@@ -127,6 +127,7 @@ _UNACKNOWLEDGED = {"acknowledgement": ""}
 _PAYOUT_COLUMNS = ("payment_status", "acknowledgement", "payment_reference", "justification")
 
 _FLOAT_REQUEST = (
+	"folt_activity_title",
 	"purpose",
 	"advance_amount",
 	"posting_date",
@@ -361,7 +362,7 @@ SUMMARY: dict[str, list[tuple]] = {
 		),
 	],
 	"Participant Reimbursement List": [
-		("Float", ["employee_advance", "activity", "attendance_reference"]),
+		("Float", ["folt_activity_title", "folt_activity_requisition", "employee_advance", "activity", "attendance_reference"]),
 		("Totals", ["total_amount", "total_paid", "advance_disbursed"]),
 		(
 			"Payees",
@@ -392,12 +393,12 @@ SUMMARY: dict[str, list[tuple]] = {
 		("Items", {"table": "items", "columns": ["item_code", "item_name", "qty", "uom", "rate", "amount", "schedule_date"]}),
 	],
 	"Employee Advance": [
-		("Float", ["employee", "employee_name", "department", "posting_date", "purpose", "advance_amount"]),
+		("Float", ["folt_activity_title", "employee", "employee_name", "department", "posting_date", "purpose", "advance_amount"]),
 		("Activity", ["folt_activity_requisition", "folt_project", "folt_budget_line", "folt_donor_code", "folt_retire_by"]),
 		("Money", ["paid_amount", "claimed_amount", "return_amount", "pending_amount"]),
 	],
 	"Expense Claim": [
-		("Claim", ["employee", "employee_name", "posting_date", "project", "cost_center", "folt_reimbursement_list", "remark"]),
+		("Claim", ["folt_activity_title", "folt_activity_requisition", "employee", "employee_name", "posting_date", "project", "cost_center", "folt_reimbursement_list", "remark"]),
 		("Totals", ["total_claimed_amount", "total_sanctioned_amount", "total_advance_amount", "grand_total"]),
 		("Receipts", {"table": "expenses", "columns": ["expense_date", "expense_type", "description", "amount", "sanctioned_amount"]}),
 		("Against the float", {"table": "advances", "columns": ["employee_advance", "advance_paid", "unclaimed_amount", "allocated_amount"]}),

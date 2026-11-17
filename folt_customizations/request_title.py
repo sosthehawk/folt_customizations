@@ -119,12 +119,22 @@ def title_fields(meta, preferred=None) -> list[str]:
 	then by the field that named it before (`preferred`, else the doctype's title_field -- on most
 	buying documents the supplier's name), for the ones bought before there were request titles."""
 	out = []
-	if meta.name in CHAIN and meta.has_field("folt_request_title"):
-		out.append("folt_request_title")
+	lead = chain_title_field(meta)
+	if lead:
+		out.append(lead)
 	fallback = preferred or meta.title_field
 	if fallback and fallback not in out:
 		out.append(fallback)
 	return out
+
+
+def chain_title_field(meta) -> str | None:
+	"""The field a chain document is called by, when it is on one and has it: a purchase's request
+	title, an activity's title (activity_title.py)."""
+	from folt_customizations.activity_title import title_field as activity_title_field
+
+	field = "folt_request_title" if meta.name in CHAIN else activity_title_field(meta.name)
+	return field if field and meta.has_field(field) else None
 
 
 def first_title(row, fields):

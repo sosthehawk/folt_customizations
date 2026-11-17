@@ -8,8 +8,11 @@
   "sort_field": "modified",
   "sort_order": "DESC",
   "track_changes": 1,
+  "title_field": "activity_program",
+  "show_title_field_in_link": 1,
+  "search_fields": "activity_program,requested_by,activity_date",
   "fields": [
-    { "fieldname": "activity_program", "fieldtype": "Data", "label": "Activity / Program", "reqd": 1, "in_list_view": 1 },
+    { "fieldname": "activity_program", "fieldtype": "Data", "label": "Activity title", "reqd": 1, "bold": 1, "length": 140, "in_list_view": 1, "in_standard_filter": 1, "in_global_search": 1, "description": "What everyone will call this activity, from the requisition to the float retirement: the float, the attendance register, the reimbursement list and the retirement all carry it. Make it specific, e.g. Community dialogue on fisheries, Kalokol, March." },
     { "fieldname": "requested_by", "fieldtype": "Link", "options": "Employee", "label": "Requested By", "reqd": 1, "description": "The person raising this. Their name and job title are what the Float Request Form asks for." },
     { "fieldname": "activity_date", "fieldtype": "Date", "label": "Activity Date", "reqd": 1, "in_list_view": 1, "description": "The day the activity runs. The attendance register opens on this date." },
     { "fieldname": "activity_end_date", "fieldtype": "Date", "label": "Activity End Date", "description": "Leave blank for a one-day activity. Floats are accountable three days after this date." },

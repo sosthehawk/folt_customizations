@@ -3,6 +3,7 @@ from frappe import _
 from frappe.model.document import Document
 from frappe.utils import flt
 
+from folt_customizations.activity_title import carry as carry_activity_title
 from folt_customizations.float_lifecycle import FUNDED_FLOAT_STATES
 from folt_customizations.participants import (
 	ACKNOWLEDGED_FORMS as ACKNOWLEDGED,
@@ -32,6 +33,8 @@ class ParticipantReimbursementList(Document):
 
 	def validate(self):
 		self.set_activity_from_advance()
+		# Named by its activity and traced to its requisition, from the float or register (activity_title.py).
+		carry_activity_title(self)
 		self.validate_register_project()
 		self.validate_register_not_already_used()
 		self.normalise_rows()

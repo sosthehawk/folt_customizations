@@ -3,6 +3,7 @@ from frappe import _
 from frappe.model.document import Document
 from frappe.utils import cint
 
+from folt_customizations.activity_title import carry as carry_activity_title
 from folt_customizations.participants import (
 	ACKNOWLEDGED_FORMS,
 	ELIGIBLE_CATEGORIES,
@@ -39,6 +40,8 @@ class ActivityParticipantList(Document):
 	"""
 
 	def validate(self):
+		# The register's title follows its requisition (activity_title.py).
+		carry_activity_title(self)
 		self.normalise_rows()
 		check_duplicates(self.participants or [], _("attendance register"))
 		self.link_or_create_participants()

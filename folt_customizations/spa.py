@@ -43,8 +43,9 @@ from frappe.sessions import get_csrf_token
 from frappe.utils import cint, flt, getdate
 
 from folt_customizations import activity_chain, approval_signatures, masterdata, procurement_chain, step_forms, workflow_shape
-from folt_customizations.portal_common import complete_item_rows
-from folt_customizations.request_title import CHAIN as REQUEST_TITLED, first_title, title_fields
+from folt_customizations.activity_title import ref_field as activity_ref_field
+from folt_customizations.portal_common import complete_item_rows, distinct_moves
+from folt_customizations.request_title import chain_title_field, first_title, title_fields
 from folt_customizations.document_guide import _documents, get_guide, guide_map
 from folt_customizations.folt_customizations.page.folt_tasks.folt_tasks import _fields, _row
 from folt_customizations.float_lifecycle import FUNDED_FLOAT_STATES
@@ -176,6 +177,10 @@ def documents(doctype: str, state: str | None = None, query: str = "", start: in
 		or_filters = [["name", "like", like]]
 		for field in _title_fields(meta):
 			or_filters.append([field, "like", like])
+		# Every document of one activity is found by its requisition's number, too.
+		ref = activity_ref_field(doctype)
+		if ref and ref != "name" and meta.has_field(ref):
+			or_filters.append([ref, "like", like])
 
 	if shaped:
 		fields = _fields(doctype, state_field)
@@ -371,9 +376,7 @@ def actions_for(doc) -> list[dict]:
 	next_status = {row.state: int(row.doc_status or 0) for row in workflow.states}
 
 	actions = []
-	for transition in get_transitions(doc, workflow):
-		if not has_approval_access(user, doc, transition):
-			continue
+	for transition in distinct_moves(t for t in get_transitions(doc, workflow) if has_approval_access(user, doc, t)):
 		turn_down = is_turn_down(workflow, transition.state, transition.next_state)
 		# The ledger moves a float into these on its own (float_lifecycle) -- a Payment Entry makes
 		# it Disbursed, a retirement makes it Accounted -- and the manual transitions exist to correct
@@ -1392,8 +1395,10 @@ def _title_fields(meta) -> list[str]:
 
 
 def _title_of(doc) -> str:
-	if doc.get("folt_request_title") and doc.doctype in REQUEST_TITLED:
-		return doc.folt_request_title
+	# A purchase by its request title, an activity's documents by the activity's (request_title).
+	lead = chain_title_field(doc.meta)
+	if lead and doc.get(lead):
+		return doc.get(lead)
 	title_field = _TITLE_OVERRIDE.get(doc.doctype) or doc.meta.title_field or _TITLE_FALLBACK.get(doc.doctype)
 	value = title_field and doc.get(title_field)
 	if not value:

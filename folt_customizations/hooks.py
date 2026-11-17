@@ -256,6 +256,8 @@ after_migrate = [
     # The request title and requisition reference on buying documents saved before those fields
     # existed (request_title.py). After the fixtures sync, which is what adds the columns.
     "folt_customizations.request_title.backfill",
+    # Likewise the activity title and requisition reference on the activity chain (activity_title.py).
+    "folt_customizations.activity_title.backfill",
 ]
 
 # Bulk submit from the list view runs twenty or more documents in a background job, out of
@@ -426,7 +428,11 @@ doc_events = {
     # workflow state is derived from them rather than clicked a second time. See
     # float_lifecycle.py for why the sync is deferred to after the commit.
     "Employee Advance": {
-        "validate": "folt_customizations.float_lifecycle.set_retirement_deadline",
+        "validate": [
+            "folt_customizations.float_lifecycle.set_retirement_deadline",
+            # The activity's title and requisition, carried from the requisition (activity_title.py).
+            "folt_customizations.activity_title.carry",
+        ],
     },
     # Journal Entry, Payment Entry and Purchase Invoice post to the ledger only through their
     # approval workflow; Frappe leaves a direct submit open to anyone holding Submit. See
@@ -458,6 +464,7 @@ doc_events = {
         "before_cancel": "folt_customizations.finance_approvals.refuse_direct_submit",
     },
     "Expense Claim": {
+        "validate": "folt_customizations.activity_title.carry",
         "on_submit": "folt_customizations.float_lifecycle.sync_from_claim",
         "on_cancel": "folt_customizations.float_lifecycle.sync_from_claim",
     },

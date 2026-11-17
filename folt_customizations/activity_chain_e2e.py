@@ -233,6 +233,11 @@ def run():
 	advance = frappe.get_doc("Employee Advance", advance_name)
 	check("float request opens in Requested", advance.workflow_state == "Requested", advance.workflow_state)
 	check(
+		"the float is named by the activity and traced to its requisition",
+		advance.folt_activity_title == ACTIVITY and advance.folt_activity_requisition == requisition.name,
+		f"{advance.folt_activity_title} / {advance.folt_activity_requisition}",
+	)
+	check(
 		"amount, budget line and donor carried from the requisition",
 		flt(advance.advance_amount) == FLOAT and advance.folt_budget_line == BUDGET_LINE,
 		f"{advance.advance_amount} / {advance.folt_budget_line}",
@@ -342,6 +347,11 @@ def run():
 
 	reimbursement = frappe.get_doc("Participant Reimbursement List", result["name"])
 	check(
+		"the reimbursement list is named by the activity and traced to its requisition",
+		reimbursement.folt_activity_title == ACTIVITY and reimbursement.folt_activity_requisition == requisition.name,
+		f"{reimbursement.folt_activity_title} / {reimbursement.folt_activity_requisition}",
+	)
+	check(
 		"list scoped to the activity and the float in one action",
 		reimbursement.activity == requisition.project
 		and reimbursement.employee_advance == advance.name
@@ -447,6 +457,18 @@ def run():
 
 	retirement = as_user(FINANCE_OFFICER, lambda: activity_chain.make_float_retirement(reimbursement.name))
 	claim = frappe.get_doc("Expense Claim", retirement["name"])
+	check(
+		"the retirement is named by the activity and traced to its requisition",
+		claim.folt_activity_title == ACTIVITY and claim.folt_activity_requisition == requisition.name,
+		f"{claim.folt_activity_title} / {claim.folt_activity_requisition}",
+	)
+	from folt_customizations import spa
+
+	check(
+		"/folt calls the float and the retirement by the activity, not the employee",
+		spa._title_of(advance) == ACTIVITY and spa._title_of(claim) == ACTIVITY,
+		f"{spa._title_of(advance)} / {spa._title_of(claim)}",
+	)
 	check(
 		"retirement claim opens in Draft, in the float holder's name",
 		claim.workflow_state == "Draft" and claim.employee == advance.employee,

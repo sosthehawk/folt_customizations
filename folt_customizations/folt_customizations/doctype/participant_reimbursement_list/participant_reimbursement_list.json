@@ -8,7 +8,30 @@
   "sort_field": "modified",
   "sort_order": "DESC",
   "track_changes": 1,
+  "title_field": "folt_activity_title",
+  "search_fields": "folt_activity_title,folt_activity_requisition,employee_advance",
   "fields": [
+    {
+      "fieldname": "folt_activity_title",
+      "fieldtype": "Data",
+      "label": "Activity title",
+      "bold": 1,
+      "length": 140,
+      "in_list_view": 1,
+      "in_standard_filter": 1,
+      "in_global_search": 1,
+      "description": "The activity this list pays for, carried from its requisition. Filled from the float or the register when empty."
+    },
+    {
+      "fieldname": "folt_activity_requisition",
+      "fieldtype": "Link",
+      "options": "Activity Requisition",
+      "label": "Activity requisition",
+      "read_only": 1,
+      "in_standard_filter": 1,
+      "search_index": 1,
+      "description": "The requisition this activity started from. Set from the float or the register; never typed."
+    },
     {
       "fieldname": "employee_advance",
       "fieldtype": "Link",

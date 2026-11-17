@@ -8,6 +8,7 @@
   is the account the payment actually posted against, so the voucher and the ledger cannot
   disagree.
 -#}
+{%- from "folt_customizations/print_format_templates/_signoff.html" import signoff -%}
 {%- macro money(v) -%}{{ frappe.utils.fmt_money(v or 0, currency=doc.paid_from_account_currency or doc.paid_to_account_currency) }}{%- endmacro -%}
 
 {%- set paying_out = doc.payment_type != "Receive" -%}
@@ -89,9 +90,9 @@
 
   <table class="folt-signoff">
     <tr>
-      <td><div class="line"></div><div class="role">{{ _("Prepared By") }}</div><div class="who">{{ _("Finance Assistant") }}</div></td>
+      {{ signoff(doc, "Prepared By", _("Finance Assistant"), ["Submit for approval"]) }}
       <td><div class="line"></div><div class="role">{{ _("Checked By") }}</div><div class="who">{{ _("Finance Officer") }}</div></td>
-      <td><div class="line"></div><div class="role">{{ _("Authorised By") }}</div><div class="who">{{ _("Executive Director") }}</div></td>
+      {{ signoff(doc, "Authorised By", _("Executive Director"), ["Approve"]) }}
     </tr>
   </table>
 

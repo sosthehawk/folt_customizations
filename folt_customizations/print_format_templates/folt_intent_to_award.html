@@ -6,6 +6,7 @@
   recommended. The quotation scores are printed per supplier with each member's mark, because
   "the committee scored it 7" is not an audit trail and "four members scored it" is.
 -#}
+{%- from "folt_customizations/print_format_templates/_signoff.html" import signoff -%}
 {%- macro money(v, currency) -%}{{ frappe.utils.fmt_money(v or 0, currency=currency) }}{%- endmacro -%}
 
 {%- set reviewed = doc.members | selectattr("reviewed") | list -%}
@@ -109,8 +110,8 @@
 
   <table class="folt-signoff">
     <tr>
-      <td><div class="line"></div><div class="role">{{ _("Committee Chair") }}</div><div class="who">{{ _("Procurement Committee") }}</div></td>
-      <td><div class="line"></div><div class="role">{{ _("Award Approval") }}</div><div class="who">{{ _("Head of Finance") }}</div></td>
+      {{ signoff(doc, "Committee Chair", _("Procurement Committee"), ["Submit for Award Approval"]) }}
+      {{ signoff(doc, "Award Approval", _("Head of Finance"), ["Approve (Intent to Award)"]) }}
       <td></td>
     </tr>
   </table>

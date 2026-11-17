@@ -1,0 +1,24 @@
+{#-
+  One sign-off cell on a FoLT form, filled in from the workflow when the step has been taken.
+
+    {% from "folt_customizations/print_format_templates/_signoff.html" import signoff %}
+    {{ signoff(doc, "Authorised By", _("Executive Director"), ["Approve"]) }}
+
+  `actions` names the workflow action(s) whose taker signs the cell (approval_signatures.folt_signoff).
+  Taken: the drawn signature sits on the line, with the approver's name, designation and the date
+  under it. Not taken yet, or signed from a screen with no pad: the line is left for a wet
+  signature, and the role that owes it is printed under it as before.
+-#}
+{%- macro signoff(doc, label, who, actions=None) -%}
+{%- set s = folt_signoff(doc, actions) if actions else None -%}
+<td>
+  <div class="line">{% if s and s.signature %}<img class="sig" src="{{ s.signature }}" alt="">{% endif %}</div>
+  <div class="role">{{ _(label) }}</div>
+  {%- if s %}
+  <div class="who">{{ s.approver_name or s.approver }}{% if s.designation %}, {{ s.designation }}{% endif %}</div>
+  <div class="when">{{ frappe.utils.format_datetime(s.signed_on, "dd-MM-yyyy HH:mm") }}</div>
+  {%- else %}
+  <div class="who">{{ who }}</div>
+  {%- endif %}
+</td>
+{%- endmacro -%}

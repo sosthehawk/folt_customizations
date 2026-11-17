@@ -12,6 +12,7 @@
   donor and budget line off the float being retired: they are recorded once, on the advance,
   and this reads them rather than asking for them again.
 -#}
+{%- from "folt_customizations/print_format_templates/_signoff.html" import signoff -%}
 {%- macro money(v) -%}{{ frappe.utils.fmt_money(v or 0, currency=doc.currency) }}{%- endmacro -%}
 
 {%- set advance_names = doc.advances | map(attribute="employee_advance") | select | list -%}
@@ -134,9 +135,9 @@
 
   <table class="folt-signoff">
     <tr>
-      <td><div class="line"></div><div class="role">{{ _("Prepared By") }}</div><div class="who">{{ doc.employee_name }}</div></td>
-      <td><div class="line"></div><div class="role">{{ _("Checked By") }}</div><div class="who">{{ _("Finance Officer") }}</div></td>
-      <td><div class="line"></div><div class="role">{{ _("Approved By") }}</div><div class="who">{{ _("Executive Director") }}</div></td>
+      {{ signoff(doc, "Prepared By", doc.employee_name, ["Submit for Review"]) }}
+      {{ signoff(doc, "Checked By", _("Finance Officer"), ["Review & Forward"]) }}
+      {{ signoff(doc, "Approved By", _("Executive Director"), ["Approve"]) }}
     </tr>
   </table>
 

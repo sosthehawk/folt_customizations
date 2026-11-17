@@ -22,6 +22,7 @@
   and is then scanned to a shared drive have no use on the day, and the register already holds
   both. Do not add them because the child table happens to have them.
 -#}
+{%- from "folt_customizations/print_format_templates/_signoff.html" import signoff -%}
 {%- set signing = doc.docstatus == 0 -%}
 {%- set CONTINUATION = 10 -%}
 {%- set rows = doc.participants or [] -%}
@@ -134,9 +135,9 @@
 
   <table class="folt-signoff">
     <tr>
-      <td><div class="line"></div><div class="role">{{ _("Prepared By") }}</div><div class="who">{{ preparer or "" }}</div></td>
+      {{ signoff(doc, "Prepared By", preparer or "", ["Submit for Verification"]) }}
       <td><div class="line"></div><div class="role">{{ _("Facilitator") }}</div><div class="who">{{ _("Field Officer") }}</div></td>
-      <td><div class="line"></div><div class="role">{{ _("Verified By") }}</div><div class="who">{{ _("Head of Programs") }}</div></td>
+      {{ signoff(doc, "Verified By", _("Head of Programs"), ["Verify"]) }}
     </tr>
   </table>
 

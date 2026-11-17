@@ -1119,3 +1119,75 @@ body.folt-guided .folt-tasks-error-body {
   background: var(--fg-color);
   color: var(--text-color);
 }
+
+/* --- approvals and signatures (folt_approvals.js) -------------------------------------------
+   Who signed each step. The signature sits on a white card in both themes: a drawn signature is
+   dark ink on a transparent PNG, invisible on the dark-mode surface. --neutral-white is the one
+   token frappe keeps white under [data-theme="dark"]. */
+.folt-approvals-list {
+  list-style: none;
+  margin: 0 0 var(--padding-sm);
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--padding-sm);
+}
+
+.folt-approval {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--padding-md);
+  padding: var(--padding-sm) 0;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.folt-approval-action {
+  font-weight: 600;
+  color: var(--heading-color);
+}
+
+.folt-approval-who,
+.folt-approval-when,
+.folt-approval-reason {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+.folt-approval-reason {
+  font-style: italic;
+}
+
+.folt-approval.is-superseded .folt-approval-step,
+.folt-approval.is-superseded .folt-approval-sigbox {
+  opacity: 0.55;
+}
+
+.folt-approval-note {
+  font-weight: normal;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius-sm);
+  padding: 0 4px;
+  margin-left: 4px;
+}
+
+.folt-approval-sigbox {
+  flex: 0 0 auto;
+}
+
+.folt-approval-sig {
+  display: block;
+  max-height: 44px;
+  max-width: 180px;
+  background: var(--neutral-white);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius-sm);
+  padding: 2px 6px;
+}
+
+.folt-approval-nosig {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}

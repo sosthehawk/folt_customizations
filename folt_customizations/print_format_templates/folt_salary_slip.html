@@ -314,8 +314,12 @@
 
   <table class="sign-row">
     <tr>
-      <td><div class="sign-line"></div>{{ _("Prepared by") }}</td>
-      <td><div class="sign-line"></div>{{ _("Approved by") }}</td>
+      {#- Filled in from the payroll workflow (approval_signatures): the drawn signature sits in the
+          room above the rule, which the row's top margin already leaves, so the slip stays one page. #}
+      {%- for label, actions in [(_("Prepared by"), ["Submit Payroll for Approval"]), (_("Approved by"), ["Approve"])] %}
+      {%- set s = folt_signoff(doc, actions) %}
+      <td><div class="sign-img">{% if s and s.signature %}<img src="{{ s.signature }}" alt="">{% endif %}</div><div class="sign-line"></div>{{ label }}{% if s %}: {{ s.approver_name }}, {{ frappe.utils.format_date(s.signed_on) }}{% endif %}</td>
+      {%- endfor %}
       <td><div class="sign-line"></div>{{ _("Received by (Employee)") }}</td>
     </tr>
   </table>

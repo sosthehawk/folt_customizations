@@ -7,6 +7,7 @@
   and unwrapped -- an abridged justification is not one -- which is why they carry ruled boxes
   rather than being squeezed into a table.
 -#}
+{%- from "folt_customizations/print_format_templates/_signoff.html" import signoff -%}
 {% include "folt_customizations/print_format_templates/_page_frame.html" %}
 
 <div class="folt-form">
@@ -74,9 +75,9 @@
 
   <table class="folt-signoff">
     <tr>
-      <td><div class="line"></div><div class="role">{{ _("Prepared By") }}</div><div class="who">{{ _("Operations Support Officer") }}</div></td>
-      <td><div class="line"></div><div class="role">{{ _("Reviewed By") }}</div><div class="who">{{ _("Finance Officer") }}</div></td>
-      <td><div class="line"></div><div class="role">{{ _("Authorised By") }}</div><div class="who">{{ _("Executive Director") }}</div></td>
+      {{ signoff(doc, "Prepared By", _("Operations Support Officer"), ["Submit for Committee Review", "Submit for Finance Review"]) }}
+      {{ signoff(doc, "Reviewed By", _("Finance Officer"), ["Review & Forward"]) }}
+      {{ signoff(doc, "Authorised By", _("Executive Director"), ["Authorise"]) }}
     </tr>
   </table>
 

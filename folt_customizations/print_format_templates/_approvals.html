@@ -1,0 +1,41 @@
+{#-
+  The approvals block: who moved this document on at each step that still stands, and their
+  signature. Rendered by frappe's standard print through the hidden `folt_approvals_html` field
+  (approval_signatures.apply_approval_fields), so every workflow document that has no FoLT print
+  format of its own still prints its approvers. FoLT's own formats fill their sign-off cells
+  instead -- see _signoff.html.
+
+  Self-contained styles: the standard print does not load folt_form.css.
+-#}
+{%- set steps = folt_approvals(doc) -%}
+{%- if steps %}
+<style>
+  .folt-approvals { width: 100%; border-collapse: collapse; margin-top: 8px; page-break-inside: avoid; font-size: 9pt; }
+  .folt-approvals th { text-align: left; border-bottom: 1px solid #000; padding: 3px 6px !important; font-weight: bold; }
+  .folt-approvals td { border-bottom: 1px solid #ccc; padding: 3px 6px !important; vertical-align: middle; }
+  .folt-approvals td.sig { width: 32%; height: 34px; }
+  .folt-approvals img { max-height: 32px; max-width: 160px; }
+  .folt-approvals .muted { color: #555; }
+</style>
+<h5 style="margin: 12px 0 2px; font-size: 10pt;">{{ _("Approvals") }}</h5>
+<table class="folt-approvals">
+  <thead>
+    <tr>
+      <th>{{ _("Step") }}</th>
+      <th>{{ _("Name") }}</th>
+      <th>{{ _("Date") }}</th>
+      <th>{{ _("Signature") }}</th>
+    </tr>
+  </thead>
+  <tbody>
+    {%- for s in steps %}
+    <tr>
+      <td>{{ _(s.action) }}<br><span class="muted">{{ _(s.to_state) }}</span></td>
+      <td>{{ s.approver_name or s.approver }}<br><span class="muted">{{ s.designation or (_(s.role) if s.role else "") }}</span></td>
+      <td>{{ frappe.utils.format_datetime(s.signed_on, "dd-MM-yyyy HH:mm") }}</td>
+      <td class="sig">{% if s.signature %}<img src="{{ s.signature }}" alt="">{% endif %}</td>
+    </tr>
+    {%- endfor %}
+  </tbody>
+</table>
+{%- endif %}

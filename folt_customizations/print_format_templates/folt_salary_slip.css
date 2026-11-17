@@ -157,6 +157,8 @@
 .print-format .folt-slip .note { font-size: 7.4pt; color: #7c7c7c; margin-top: 4px; }
 .print-format .folt-slip .sign-row { margin-top: 26px; font-size: 8pt; }
 .print-format .folt-slip .sign-row td { width: 33.33%; padding: 0 12px 0 0 !important; }
+.print-format .folt-slip .sign-img { height: 0; position: relative; }
+.print-format .folt-slip .sign-img img { position: absolute; left: 0; bottom: 1px; max-height: 24px; max-width: 140px; }
 .print-format .folt-slip .sign-line {
 	border-top: 1px solid #171717;
 	margin-bottom: 3px;

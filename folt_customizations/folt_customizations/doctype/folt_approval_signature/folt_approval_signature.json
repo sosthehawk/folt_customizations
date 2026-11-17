@@ -1,0 +1,37 @@
+{
+  "doctype": "DocType",
+  "name": "FoLT Approval Signature",
+  "module": "Folt Customizations",
+  "custom": 0,
+  "description": "Who moved a workflow document on at each step, in what capacity, when, and their signature. Written by the workflow itself; never edited.",
+  "autoname": "hash",
+  "naming_rule": "Random",
+  "in_create": 1,
+  "read_only": 1,
+  "title_field": "approver_name",
+  "sort_field": "signed_on",
+  "sort_order": "DESC",
+  "modified": "2026-11-17 09:00:00.000000",
+  "fields": [
+    { "fieldname": "reference_doctype", "fieldtype": "Link", "label": "Document type", "options": "DocType", "reqd": 1, "in_list_view": 1, "in_standard_filter": 1, "search_index": 1, "read_only": 1 },
+    { "fieldname": "reference_name", "fieldtype": "Dynamic Link", "label": "Document", "options": "reference_doctype", "reqd": 1, "in_list_view": 1, "in_standard_filter": 1, "search_index": 1, "read_only": 1 },
+    { "fieldname": "action", "fieldtype": "Data", "label": "Action", "in_list_view": 1, "read_only": 1 },
+    { "fieldname": "from_state", "fieldtype": "Data", "label": "From", "read_only": 1 },
+    { "fieldname": "to_state", "fieldtype": "Data", "label": "To", "read_only": 1 },
+    { "fieldname": "turn_down", "fieldtype": "Check", "label": "Turned down", "read_only": 1 },
+    { "fieldname": "superseded", "fieldtype": "Check", "label": "Superseded", "read_only": 1, "in_standard_filter": 1, "description": "A later return or rejection reopened the document, so this step no longer stands." },
+    { "fieldname": "reason", "fieldtype": "Small Text", "label": "Reason", "read_only": 1 },
+    { "fieldname": "who_column", "fieldtype": "Column Break" },
+    { "fieldname": "approver", "fieldtype": "Link", "label": "User", "options": "User", "in_standard_filter": 1, "read_only": 1 },
+    { "fieldname": "approver_name", "fieldtype": "Data", "label": "Name", "in_list_view": 1, "read_only": 1 },
+    { "fieldname": "designation", "fieldtype": "Data", "label": "Designation", "read_only": 1 },
+    { "fieldname": "role", "fieldtype": "Data", "label": "Acting as", "read_only": 1 },
+    { "fieldname": "signed_on", "fieldtype": "Datetime", "label": "Signed on", "in_list_view": 1, "read_only": 1 },
+    { "fieldname": "signature_section", "fieldtype": "Section Break" },
+    { "fieldname": "signature", "fieldtype": "Signature", "label": "Signature", "read_only": 1 }
+  ],
+  "permissions": [
+    { "role": "System Manager", "read": 1, "report": 1, "export": 1, "print": 1, "delete": 1 },
+    { "role": "Auditor", "read": 1, "report": 1, "export": 1, "print": 1 }
+  ]
+}

@@ -130,7 +130,17 @@ extend_bootinfo = [
     "folt_customizations.branding.rebrand_bootinfo",
     "folt_customizations.workflow_access.add_turn_downs_to_bootinfo",
     "folt_customizations.document_guide.add_guide_to_bootinfo",
+    "folt_customizations.approval_signatures.add_signing_to_bootinfo",
 ]
+
+# Prints name the people who approved a document and carry their signatures. See
+# approval_signatures.folt_approvals / folt_signoff and print_format_templates/_signoff.html.
+jinja = {
+    "methods": [
+        "folt_customizations.approval_signatures.folt_approvals",
+        "folt_customizations.approval_signatures.folt_signoff",
+    ],
+}
 
 # Plain path rather than a `.bundle.js` one, for the same reason email_css is: anything without
 # ".bundle." is passed through untouched, so this needs no build step.
@@ -141,6 +151,7 @@ extend_bootinfo = [
 # sidebar builds the bell. See notifications.clear_read_notifications for what it is for.
 app_include_js = [
     "/assets/folt_customizations/js/folt_workflow.js",
+    "/assets/folt_customizations/js/folt_approvals.js",
     "/assets/folt_customizations/js/folt_guide.js",
     "/assets/folt_customizations/js/folt_notifications.js",
 ]
@@ -209,6 +220,8 @@ after_install = [
     "folt_customizations.permissions.apply_read_only",
     "folt_customizations.access.apply_module_access",
     "folt_customizations.print_formats.apply_print_formats",
+    # The approval signature on User and the print-only approvals block on every signed doctype.
+    "folt_customizations.approval_signatures.apply_approval_fields",
     "folt_customizations.supplier_portal.link_portal_users",
     "folt_customizations.leave_notifications.apply_leave_notification_templates",
     # The HR Settings the leave policy rests on: an approver is mandatory, nobody approves their own.
@@ -228,6 +241,8 @@ after_migrate = [
     "folt_customizations.permissions.apply_read_only",
     "folt_customizations.access.apply_module_access",
     "folt_customizations.print_formats.apply_print_formats",
+    # The approval signature on User and the print-only approvals block on every signed doctype.
+    "folt_customizations.approval_signatures.apply_approval_fields",
     "folt_customizations.supplier_portal.link_portal_users",
     "folt_customizations.leave_notifications.apply_leave_notification_templates",
     # The HR Settings the leave policy rests on: an approver is mandatory, nobody approves their own.
@@ -274,8 +289,18 @@ doc_events = {
             "folt_customizations.workflow_access.enforce_state_custodian",
             "folt_customizations.workflow_access.require_rejection_reason",
         ],
-        "on_update": "folt_customizations.workflow_access.record_rejection_reason",
-        "on_update_after_submit": "folt_customizations.workflow_access.record_rejection_reason",
+        # Every move is also stamped with who made it, in what capacity, when, and their
+        # signature -- the names and signatures the printed forms carry. See approval_signatures.
+        "on_update": [
+            "folt_customizations.workflow_access.record_rejection_reason",
+            "folt_customizations.approval_signatures.record",
+        ],
+        "on_update_after_submit": [
+            "folt_customizations.workflow_access.record_rejection_reason",
+            "folt_customizations.approval_signatures.record",
+        ],
+        "on_cancel": "folt_customizations.approval_signatures.record",
+        "on_trash": "folt_customizations.approval_signatures.forget_document",
     },
     # The Public / Hidden checkboxes on a Workspace are the interface a System Manager uses to
     # take a module off the Desk or put it back, so they have to move the module's icon too --

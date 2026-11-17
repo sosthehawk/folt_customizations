@@ -190,6 +190,19 @@ table.folt-signoff .who {
   color: #444;
 }
 
+/* Filled in from the workflow (_signoff.html): the drawn signature stands on the rule, inside the
+   signing room, so a signed form is the same height as a blank one. */
+table.folt-signoff .line img.sig {
+  max-height: 30px;
+  max-width: 150px;
+  display: block;
+}
+
+table.folt-signoff .when {
+  color: #666;
+  font-size: 8.5pt;
+}
+
 .folt-note {
   font-size: 8.5pt;
   color: #555;

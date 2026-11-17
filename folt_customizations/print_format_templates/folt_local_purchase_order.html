@@ -6,6 +6,7 @@
   whose authority (the committee's award or the approved waiver) and under which terms. Printed for
   staff from the order and for the supplier from the portal; nothing on it is FoLT-internal.
 -#}
+{%- from "folt_customizations/print_format_templates/_signoff.html" import signoff -%}
 {%- macro money(v) -%}{{ frappe.utils.fmt_money(v or 0, currency=doc.currency) }}{%- endmacro -%}
 {%- set authority = doc.get("folt_committee_evaluation") or doc.get("folt_waiver_request") -%}
 {%- set kra = frappe.db.get_value("Supplier", doc.supplier, "tax_id") -%}
@@ -116,8 +117,8 @@
 
   <table class="folt-signoff">
     <tr>
-      <td><div class="line"></div><div class="role">{{ _("Prepared by") }}</div><div class="who">{{ _("Procurement") }}</div></td>
-      <td><div class="line"></div><div class="role">{{ _("Authorised by") }}</div><div class="who">{{ _("Executive Director") if doc.get("folt_approval_tier") == "Executive" else _("Finance Manager") }}</div></td>
+      {{ signoff(doc, "Prepared by", _("Procurement"), ["Submit for approval"]) }}
+      {{ signoff(doc, "Authorised by", _("Executive Director") if doc.get("folt_approval_tier") == "Executive" else _("Finance Manager"), ["Approve"]) }}
       <td><div class="line"></div><div class="role">{{ _("Accepted by") }}</div><div class="who">{{ _("Supplier") }}</div></td>
     </tr>
   </table>

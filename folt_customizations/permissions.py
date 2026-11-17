@@ -144,6 +144,20 @@ PERMLEVEL_1_PERMISSIONS = {
 	},
 }
 
+# Personal details (HR onboarding, employee_details.py): Employee's addresses, emergency contact,
+# marital status, family, blood group, health, health insurance, passport and the Kenyan statutory
+# numbers (National ID, KRA PIN, NSSF, SHA) are moved to permlevel 2 (Property Setter and Custom Field
+# fixtures). The Employee role reads every Employee on this site, so at permlevel 0 any member of staff
+# could read a colleague's passport or health notes in the Desk. HR keeps them; nobody else sees them,
+# not payroll (that is permlevel 1) and not the employee's own login.
+PERMLEVEL_2_PERMISSIONS = {
+	"Employee": {
+		"HR Manager": ("read", "write"),
+		"HR User": ("read", "write"),
+		"System Manager": ("read", "write"),
+	},
+}
+
 # Delegated administration (admin_portal.py). READ only: the Settings screens list users and
 # roles as the person asking, and every write is made by admin_portal after its ceiling rules
 # pass -- so the Desk offers these roles nothing to change and nothing to step around.
@@ -340,6 +354,7 @@ def _maps():
 		(PROCUREMENT_PERMISSIONS, 0),
 		(HR_SETTINGS_PERMISSIONS, 0),
 		(PERMLEVEL_1_PERMISSIONS, 1),
+		(PERMLEVEL_2_PERMISSIONS, 2),
 	)
 
 

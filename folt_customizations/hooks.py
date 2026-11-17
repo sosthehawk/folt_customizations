@@ -332,6 +332,11 @@ doc_events = {
     "Department": {
         "validate": "folt_customizations.department.validate",
     },
+    # FoLT's Kenyan statutory numbers on the employee record (National ID, KRA PIN, NSSF, SHA): kept
+    # in the form the authorities issue them, and never on two people. See employee_details.py.
+    "Employee": {
+        "validate": "folt_customizations.employee_details.validate",
+    },
     # Leave Application is the one approval at FoLT that is not a Workflow -- it uses hrms's own
     # `status` + `leave_approver` -- so notify_pending_approvers, which hangs off Workflow
     # Action, never sees it. These three name the doctype explicitly to cover the same ground:

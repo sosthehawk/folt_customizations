@@ -32,6 +32,23 @@ from folt_customizations import portal_common as _common
 # Onboarding (phase 5): whitelisted in hr_onboarding, reached through this edge.
 from folt_customizations.hr_onboarding import employee_onboarding, onboard, onboarding_list  # noqa: F401
 
+
+@frappe.whitelist()
+def employee_details(employee):
+	"""Every tab of the employee's record, as this reader may see and change it (employee_details.py)."""
+	_reader()
+	from folt_customizations import employee_details as details
+
+	return details.details_view(employee)
+
+
+@frappe.whitelist(methods=["POST"])
+def save_employee_details(employee, values, modified):
+	"""Save the fields and tables sent; answers the record again (employee_details.py)."""
+	from folt_customizations import employee_details as details
+
+	return details.save_details(employee, values, modified)
+
 READERS = ("HR User", "HR Manager", "System Manager")
 EDITORS = ("HR Manager", "System Manager")
 

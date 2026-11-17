@@ -45,7 +45,7 @@ _LINE_FROM_ACTIVITY = {
 def validate(doc, method=None):
 	if doc.get("material_request_type") and doc.material_request_type != "Purchase":
 		return
-	_title(doc)
+	_title(doc)  # also the request title the rest of the chain carries (request_title.py)
 	_from_activity(doc)
 	_price_list(doc)
 	_default_warehouse(doc)
@@ -56,12 +56,20 @@ def validate(doc, method=None):
 def _title(doc):
 	"""A title that says what is being bought. The field's default is a template
 	("{material_request_type}"); a title left empty or still templated becomes the items, as
-	ERPNext's own set_title does for an empty one."""
+	ERPNext's own set_title does for an empty one.
+
+	The requester types it as the request title (`folt_request_title`, request_title.py), which
+	names the purchase on every document after this one; ERPNext's hidden `title` follows it, so
+	the Desk shows the same words. Either one set is enough: the other is made to match."""
+	typed = (doc.get("folt_request_title") or "").strip()
+	if typed:
+		doc.title = typed
 	title = (doc.get("title") or "").strip()
-	if title and "{" not in title:
-		return
-	names = [r.get("item_name") or r.get("item_code") for r in doc.get("items") or [] if r.get("item_code")]
-	doc.title = ", ".join(dict.fromkeys(names))[:100] or _("Purchase requisition")
+	if not title or "{" in title:
+		names = [r.get("item_name") or r.get("item_code") for r in doc.get("items") or [] if r.get("item_code")]
+		title = doc.title = ", ".join(dict.fromkeys(names))[:100] or _("Purchase requisition")
+	if doc.meta.has_field("folt_request_title"):
+		doc.folt_request_title = title
 
 
 def _from_activity(doc):

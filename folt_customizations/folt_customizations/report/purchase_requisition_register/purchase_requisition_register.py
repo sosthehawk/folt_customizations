@@ -16,12 +16,12 @@ def execute(filters=None):
 	if f.workflow_state:
 		where.append(["workflow_state", "=", f.workflow_state])
 	rows = frappe.get_list("Material Request", filters=where, order_by="transaction_date desc, name desc", limit_page_length=0,
-	                       fields=["name", "transaction_date", "schedule_date", "title", "folt_department", "owner", "folt_activity_requisition",
+	                       fields=["name", "transaction_date", "schedule_date", "folt_request_title", "folt_department", "owner", "folt_activity_requisition",
 	                               "folt_priority", "workflow_state", "status", "folt_estimated_total", "per_ordered", "per_received"])
 	columns = [
+		{"fieldname": "folt_request_title", "label": _("Request title"), "fieldtype": "Data", "width": 240},
 		{"fieldname": "name", "label": _("Requisition"), "fieldtype": "Link", "options": "Material Request", "width": 160},
 		{"fieldname": "transaction_date", "label": _("Date"), "fieldtype": "Date", "width": 100},
-		{"fieldname": "title", "label": _("What"), "fieldtype": "Data", "width": 200},
 		{"fieldname": "folt_department", "label": _("Department"), "fieldtype": "Link", "options": "Department", "width": 150},
 		{"fieldname": "owner", "label": _("Requested by"), "fieldtype": "Link", "options": "User", "width": 160},
 		{"fieldname": "folt_activity_requisition", "label": _("Activity"), "fieldtype": "Link", "options": "Activity Requisition", "width": 130},

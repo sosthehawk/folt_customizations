@@ -55,23 +55,30 @@ DOCTYPES = {
 	"Bank Account": ("suppliers", ["account_name", "bank", "party_type", "party", "is_default", "disabled"], ["name", "account_name", "bank", "party"], None),
 	"Supplier Group": ("suppliers", ["supplier_group_name", "parent_supplier_group", "is_group", "payment_terms"], ["name", "supplier_group_name"], None),
 	"Supplier Scorecard": ("suppliers", ["supplier", "supplier_score", "status", "period"], ["name", "supplier"], None),
+	# The buying chain lists by request title first -- what is being bought, in words -- with the
+	# requisition's reference number beside it (request_title.py). Search reaches the title, the
+	# reference, and each line's item name and code (portal_common: "table.field" searches lines).
 	# requisitions
-	"Material Request": ("requisitions", ["transaction_date", "schedule_date", "material_request_type", "folt_department", "status", "per_ordered", "per_received"],
-	                     ["name", "title", "folt_department"], "transaction_date"),
+	"Material Request": ("requisitions", ["folt_request_title", "transaction_date", "schedule_date", "folt_department", "status", "per_ordered", "per_received"],
+	                     ["name", "title", "folt_request_title", "folt_department", "items.item_code", "items.item_name"], "transaction_date"),
 	# sourcing
-	"Request for Quotation": ("sourcing", ["transaction_date", "schedule_date", "folt_department", "status"], ["name", "message_for_supplier"], "transaction_date"),
-	"Supplier Quotation": ("sourcing", ["supplier_name", "transaction_date", "valid_till", "grand_total", "currency", "status"], ["name", "supplier", "supplier_name"], "transaction_date"),
-	"Procurement Committee Evaluation": ("sourcing", ["request_for_quotation", "recommended_supplier", "workflow_state"], ["name", "request_for_quotation", "recommended_supplier"], None),
-	"Derogation Waiver Request": ("sourcing", ["supplier", "estimated_value", "project", "workflow_state"], ["name", "supplier", "organisation_project_name"], None),
+	"Request for Quotation": ("sourcing", ["folt_request_title", "folt_request", "transaction_date", "schedule_date", "folt_department", "status"],
+	                          ["name", "folt_request_title", "folt_request", "message_for_supplier", "items.item_code", "items.item_name", "items.material_request"], "transaction_date"),
+	"Supplier Quotation": ("sourcing", ["folt_request_title", "supplier_name", "folt_request", "transaction_date", "valid_till", "grand_total", "currency", "status"],
+	                       ["name", "supplier", "supplier_name", "folt_request_title", "folt_request", "items.item_code", "items.item_name", "items.material_request", "items.request_for_quotation"], "transaction_date"),
+	"Procurement Committee Evaluation": ("sourcing", ["folt_request_title", "request_for_quotation", "recommended_supplier", "folt_request", "workflow_state"],
+	                                     ["name", "request_for_quotation", "recommended_supplier", "folt_request_title", "folt_request"], None),
+	"Derogation Waiver Request": ("sourcing", ["folt_request_title", "supplier", "estimated_value", "project", "folt_request", "workflow_state"],
+	                              ["name", "supplier", "organisation_project_name", "folt_request_title", "folt_request"], None),
 	# orders
-	"Purchase Order": ("orders", ["supplier_name", "transaction_date", "schedule_date", "grand_total", "currency", "per_received", "per_billed", "status"],
-	                   ["name", "supplier", "supplier_name", "folt_department"], "transaction_date"),
+	"Purchase Order": ("orders", ["folt_request_title", "supplier_name", "folt_request", "transaction_date", "schedule_date", "grand_total", "currency", "per_received", "per_billed", "status"],
+	                   ["name", "supplier", "supplier_name", "folt_department", "folt_request_title", "folt_request", "items.item_code", "items.item_name", "items.material_request"], "transaction_date"),
 	# receipts
-	"Purchase Receipt": ("receipts", ["supplier_name", "posting_date", "supplier_delivery_note", "grand_total", "per_billed", "status"],
-	                     ["name", "supplier", "supplier_name", "supplier_delivery_note"], "posting_date"),
+	"Purchase Receipt": ("receipts", ["folt_request_title", "supplier_name", "folt_request", "posting_date", "supplier_delivery_note", "grand_total", "per_billed", "status"],
+	                     ["name", "supplier", "supplier_name", "supplier_delivery_note", "folt_request_title", "folt_request", "items.item_code", "items.item_name", "items.purchase_order"], "posting_date"),
 	# invoices
-	"Purchase Invoice": ("invoices", ["supplier_name", "bill_no", "posting_date", "due_date", "grand_total", "outstanding_amount", "currency", "status"],
-	                     ["name", "supplier", "supplier_name", "bill_no"], "posting_date"),
+	"Purchase Invoice": ("invoices", ["folt_request_title", "supplier_name", "bill_no", "folt_request", "posting_date", "due_date", "grand_total", "outstanding_amount", "currency", "status"],
+	                     ["name", "supplier", "supplier_name", "bill_no", "folt_request_title", "folt_request", "items.item_code", "items.item_name", "items.purchase_order"], "posting_date"),
 	"Payment Entry": ("invoices", ["posting_date", "party_name", "paid_amount", "mode_of_payment", "reference_no"], ["name", "party", "party_name", "reference_no"], "posting_date"),
 }
 
@@ -465,6 +472,13 @@ def lookup(method, args=None):
 		if values.get("master_name") and not frappe.has_permission("Purchase Taxes and Charges Template", "read", values["master_name"]):
 			frappe.throw(_("{0} is not open to you.").format(values["master_name"]), frappe.PermissionError)
 	out = _common.call_allowed(method, args, LOOKUPS, _("{0} is not available from Procurement."))
+	from frappe.model.document import Document
+
+	if isinstance(out, Document):
+		# The request title and requisition reference the save would fill, shown on the form now.
+		from folt_customizations import request_title
+
+		request_title.carry(out)
 	# A maker answers an unsaved Document: the form takes it as plain values, dates as strings.
 	return out.as_dict(convert_dates_to_str=True) if hasattr(out, "as_dict") else out
 
@@ -578,12 +592,12 @@ def supplier_profile(name):
 		"addresses": _linked("Address", name),
 		"bank_accounts": bank,
 		"figures": figures,
-		"quotations": _documents("Supplier Quotation", party, ["name", "transaction_date", "valid_till", "grand_total", "currency", "status", "docstatus"], "transaction_date desc"),
-		"orders": _documents("Purchase Order", party, ["name", "transaction_date", "schedule_date", "grand_total", "currency", "per_received", "per_billed", "status", "docstatus"], "transaction_date desc"),
-		"receipts": _documents("Purchase Receipt", party, ["name", "posting_date", "grand_total", "currency", "status", "docstatus"], "posting_date desc"),
-		"invoices": _documents("Purchase Invoice", party, ["name", "bill_no", "posting_date", "due_date", "grand_total", "outstanding_amount", "currency", "status", "docstatus"], "posting_date desc"),
+		"quotations": _documents("Supplier Quotation", party, ["name", "folt_request_title", "transaction_date", "valid_till", "grand_total", "currency", "status", "docstatus"], "transaction_date desc"),
+		"orders": _documents("Purchase Order", party, ["name", "folt_request_title", "transaction_date", "schedule_date", "grand_total", "currency", "per_received", "per_billed", "status", "docstatus"], "transaction_date desc"),
+		"receipts": _documents("Purchase Receipt", party, ["name", "folt_request_title", "posting_date", "grand_total", "currency", "status", "docstatus"], "posting_date desc"),
+		"invoices": _documents("Purchase Invoice", party, ["name", "folt_request_title", "bill_no", "posting_date", "due_date", "grand_total", "outstanding_amount", "currency", "status", "docstatus"], "posting_date desc"),
 		"payments": payments,
-		"waivers": _documents("Derogation Waiver Request", party, ["name", "estimated_value", "workflow_state", "modified"], "modified desc"),
+		"waivers": _documents("Derogation Waiver Request", party, ["name", "folt_request_title", "estimated_value", "workflow_state", "modified"], "modified desc"),
 		"scorecard": scorecard,
 		"delivery": _delivery_record(name),
 		"items": items,
@@ -853,15 +867,17 @@ def _supplier_performance(po_filters, from_date, to_date):
 	return top
 
 
+# What an approvals row says about a document. `title` is the request title (what is being
+# bought); the supplier, where there is one, is `party`.
 _SUMMARY_FIELDS = {
-	"Material Request": ["title", "folt_estimated_total as amount", "folt_department as kind", "transaction_date as posting_date"],
-	"Request for Quotation": ["transaction_date as posting_date"],
-	"Supplier Quotation": ["supplier_name as title", "grand_total as amount", "transaction_date as posting_date"],
-	"Procurement Committee Evaluation": ["recommended_supplier as title", "request_for_quotation as kind"],
-	"Derogation Waiver Request": ["supplier as title", "estimated_value as amount"],
-	"Purchase Order": ["supplier_name as title", "grand_total as amount", "transaction_date as posting_date", "folt_department as kind"],
-	"Purchase Receipt": ["supplier_name as title", "grand_total as amount", "posting_date"],
-	"Purchase Invoice": ["supplier_name as title", "grand_total as amount", "posting_date", "bill_no as kind"],
+	"Material Request": ["folt_request_title as title", "folt_estimated_total as amount", "folt_department as kind", "transaction_date as posting_date"],
+	"Request for Quotation": ["folt_request_title as title", "folt_request as kind", "transaction_date as posting_date"],
+	"Supplier Quotation": ["folt_request_title as title", "supplier_name as party", "grand_total as amount", "transaction_date as posting_date"],
+	"Procurement Committee Evaluation": ["folt_request_title as title", "recommended_supplier as party", "request_for_quotation as kind"],
+	"Derogation Waiver Request": ["folt_request_title as title", "supplier as party", "estimated_value as amount"],
+	"Purchase Order": ["folt_request_title as title", "supplier_name as party", "grand_total as amount", "transaction_date as posting_date", "folt_department as kind"],
+	"Purchase Receipt": ["folt_request_title as title", "supplier_name as party", "grand_total as amount", "posting_date"],
+	"Purchase Invoice": ["folt_request_title as title", "supplier_name as party", "grand_total as amount", "posting_date", "bill_no as kind"],
 }
 
 
@@ -882,7 +898,9 @@ def _recent(limit=12):
 			break
 		if not frappe.db.exists(v.ref_doctype, v.docname) or not frappe.has_permission(v.ref_doctype, "read", v.docname):
 			continue
-		out.append({"doctype": v.ref_doctype, "name": v.docname, "user": v.owner, "when": v.creation, "detail": frappe.utils.strip_html(_common.version_summary(v.data)).replace("\n", " ")[:300]})
+		title = frappe.db.get_value(v.ref_doctype, v.docname, "folt_request_title") if frappe.get_meta(v.ref_doctype).has_field("folt_request_title") else None
+		out.append({"doctype": v.ref_doctype, "name": v.docname, "title": title, "user": v.owner, "when": v.creation,
+		            "detail": frappe.utils.strip_html(_common.version_summary(v.data)).replace("\n", " ")[:300]})
 	return out
 
 
@@ -987,14 +1005,14 @@ _HEAD_LINKS = (
 _FLOW_ORDER = ("Material Request", "Request for Quotation", "Supplier Quotation", "Procurement Committee Evaluation",
                "Derogation Waiver Request", "Purchase Order", "Purchase Receipt", "Purchase Invoice", "Payment Entry")
 _FLOW_FIELDS = {
-	"Material Request": ["transaction_date as date", "folt_estimated_total as amount"],
-	"Request for Quotation": ["transaction_date as date"],
-	"Supplier Quotation": ["transaction_date as date", "supplier_name as party", "grand_total as amount"],
-	"Procurement Committee Evaluation": ["recommended_supplier as party"],
-	"Derogation Waiver Request": ["supplier as party", "estimated_value as amount"],
-	"Purchase Order": ["transaction_date as date", "supplier_name as party", "grand_total as amount"],
-	"Purchase Receipt": ["posting_date as date", "supplier_name as party", "grand_total as amount"],
-	"Purchase Invoice": ["posting_date as date", "supplier_name as party", "grand_total as amount"],
+	"Material Request": ["folt_request_title as title", "transaction_date as date", "folt_estimated_total as amount"],
+	"Request for Quotation": ["folt_request_title as title", "transaction_date as date"],
+	"Supplier Quotation": ["folt_request_title as title", "transaction_date as date", "supplier_name as party", "grand_total as amount"],
+	"Procurement Committee Evaluation": ["folt_request_title as title", "recommended_supplier as party"],
+	"Derogation Waiver Request": ["folt_request_title as title", "supplier as party", "estimated_value as amount"],
+	"Purchase Order": ["folt_request_title as title", "transaction_date as date", "supplier_name as party", "grand_total as amount"],
+	"Purchase Receipt": ["folt_request_title as title", "posting_date as date", "supplier_name as party", "grand_total as amount"],
+	"Purchase Invoice": ["folt_request_title as title", "posting_date as date", "supplier_name as party", "grand_total as amount"],
 	"Payment Entry": ["posting_date as date", "party_name as party", "paid_amount as amount"],
 }
 _FLOW_CAP = 50
@@ -1232,7 +1250,7 @@ def compare(name):
 		routes[q["name"]] = [_plain_handoff(h) for h in procurement_chain.handoffs_for(frappe.get_doc("Supplier Quotation", q["name"]))]
 
 	return {
-		"rfq": {"name": rfq.name, "docstatus": rfq.docstatus, "status": rfq.status, "transaction_date": str(rfq.transaction_date),
+		"rfq": {"name": rfq.name, "request_title": rfq.get("folt_request_title"), "request": rfq.get("folt_request"), "docstatus": rfq.docstatus, "status": rfq.status, "transaction_date": str(rfq.transaction_date),
 		        "schedule_date": str(rfq.schedule_date) if rfq.schedule_date else None, "deadline": str(deadline) if deadline else None,
 		        "deadline_passed": bool(deadline and now_datetime() > get_datetime(deadline)), "company": rfq.company,
 		        "currency": frappe.get_cached_value("Company", rfq.company, "default_currency")},

@@ -203,6 +203,26 @@ def meta_view(doctype):
 	}
 
 
+_CHILD_MATCH_CAP = 500
+
+
+def _child_matches(doctype, dotted, q):
+	"""The documents one of whose lines matches: `items.item_code` searches the `items` table's
+	item_code. Only names come back, and they are OR'ed into the list's own query, which still
+	applies the reader's permissions -- a match on a document they may not read is never shown.
+	(A filter on the child table itself would join it and count a document once per line.)"""
+	meta = frappe.get_meta(doctype)
+	names = []
+	for entry in dotted:
+		table, _dot, field = entry.partition(".")
+		df = meta.get_field(table)
+		if not df or df.fieldtype not in ("Table", "Table MultiSelect") or not frappe.get_meta(df.options).get_field(field):
+			continue
+		names += frappe.get_all(df.options, filters={"parenttype": doctype, "parentfield": table, field: ["like", f"%{q}%"]},
+		                        pluck="parent", distinct=True, limit_page_length=_CHILD_MATCH_CAP)
+	return list(dict.fromkeys(names))[:_CHILD_MATCH_CAP]
+
+
 def list_view(doctype, wanted, search, q=None, raw_filters=None, order_by=None, start=0, page_length=20, extra_filters=None):
 	"""One page of a list, as the person may see it, with its total."""
 	meta = frappe.get_meta(doctype)
@@ -215,7 +235,12 @@ def list_view(doctype, wanted, search, q=None, raw_filters=None, order_by=None, 
 			fields.append(extra)
 
 	where = filters(doctype, raw_filters) + list(extra_filters or [])
-	or_filters = [[doctype, f, "like", f"%{q}%"] for f in search if f == "name" or meta.get_field(f)] if q else None
+	or_filters = None
+	if q:
+		or_filters = [[doctype, f, "like", f"%{q}%"] for f in search if "." not in f and (f == "name" or meta.get_field(f))]
+		parents = _child_matches(doctype, [f for f in search if "." in f], q)
+		if parents:
+			or_filters.append([doctype, "name", "in", parents])
 
 	order = "modified desc"
 	if order_by:

@@ -238,6 +238,9 @@ after_migrate = [
     # FoLT Procurement Settings' defaults on a site that has never set them, and the duplicate
     # supplier-invoice-number check switched on once (ADR-008).
     "folt_customizations.purchase_order.ensure_procurement_settings",
+    # The request title and requisition reference on buying documents saved before those fields
+    # existed (request_title.py). After the fixtures sync, which is what adds the columns.
+    "folt_customizations.request_title.backfill",
 ]
 
 # Bulk submit from the list view runs twenty or more documents in a background job, out of
@@ -330,11 +333,15 @@ doc_events = {
     # well as in the form script, since a link query only guards the dropdown. See
     # purchase_order.py.
     "Purchase Order": {
-        "validate": "folt_customizations.purchase_order.validate",
+        "validate": ["folt_customizations.purchase_order.validate", "folt_customizations.request_title.carry"],
         "before_update_after_submit": "folt_customizations.purchase_order.keep_acknowledgement",
         "before_submit": "folt_customizations.finance_approvals.refuse_direct_submit",
         "before_cancel": "folt_customizations.finance_approvals.refuse_direct_submit",
     },
+    # The request title (what is being bought, in words) and the requisition reference ride the
+    # whole buying chain; every document after the requisition fills them from upstream when
+    # empty, on each draft save (request_title.carry, listed under each doctype below).
+    #
     # A purchase requisition (ADR-008): the activity it is for fills what it can, the lines'
     # estimates add up to its estimated total, and it says why before it goes for review.
     "Material Request": {
@@ -345,10 +352,12 @@ doc_events = {
     # The award documents go forward only by their approval workflows; a direct submit through
     # the REST API would skip the committee or the authorisation (finance_approvals, ADR-008).
     "Procurement Committee Evaluation": {
+        "validate": "folt_customizations.request_title.carry",
         "before_submit": "folt_customizations.finance_approvals.refuse_direct_submit",
         "before_cancel": "folt_customizations.finance_approvals.refuse_direct_submit",
     },
     "Derogation Waiver Request": {
+        "validate": "folt_customizations.request_title.carry",
         "before_submit": "folt_customizations.finance_approvals.refuse_direct_submit",
         "before_cancel": "folt_customizations.finance_approvals.refuse_direct_submit",
     },
@@ -357,13 +366,13 @@ doc_events = {
     # it runs validate(), so a cancelled quotation left in the grid would freeze the evaluation
     # outright -- see procurement.withdraw_cancelled_quotation.
     "Supplier Quotation": {
-        "validate": "folt_customizations.sourcing.validate_quotation",
+        "validate": ["folt_customizations.sourcing.validate_quotation", "folt_customizations.request_title.carry"],
         "on_submit": "folt_customizations.procurement_alerts.bid_arrived",
         "on_cancel": "folt_customizations.procurement.withdraw_cancelled_quotation",
     },
     # A receipt that rejects goods says why, and the buyer is told (receiving.py).
     "Purchase Receipt": {
-        "validate": "folt_customizations.receiving.validate",
+        "validate": ["folt_customizations.receiving.validate", "folt_customizations.request_title.carry"],
         "before_submit": "folt_customizations.receiving.before_submit",
         "on_submit": "folt_customizations.receiving.on_submit",
     },
@@ -371,7 +380,7 @@ doc_events = {
     # ...and, when it is sent, an approved requisition behind every line and only pre-qualified
     # suppliers (procurement workflow: initiation and step 1).
     "Request for Quotation": {
-        "validate": "folt_customizations.sourcing.validate_rfq",
+        "validate": ["folt_customizations.sourcing.validate_rfq", "folt_customizations.request_title.carry"],
         "before_submit": "folt_customizations.sourcing.before_submit_rfq",
     },
     # Notify the role that can make the next move whenever a document enters a state that
@@ -412,6 +421,8 @@ doc_events = {
             # The Finance Assistant's review before an invoice is forwarded for approval, and the
             # reviewer never approving it (invoice_review.py, procurement workflow step 5).
             "folt_customizations.invoice_review.validate",
+            # The purchase's request title and requisition reference (request_title.py).
+            "folt_customizations.request_title.carry",
         ],
         "before_submit": "folt_customizations.finance_approvals.refuse_direct_submit",
         "before_cancel": "folt_customizations.finance_approvals.refuse_direct_submit",

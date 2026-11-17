@@ -22,7 +22,7 @@ def _first(child, link, values, parent_doctype, date_field):
 def execute(filters=None):
 	f = frappe._dict(filters or {})
 	orders = frappe.get_list("Purchase Order", filters=[["docstatus", "=", 1], *period("Purchase Order", "transaction_date", f)],
-	                         fields=["name", "supplier_name", "transaction_date"], order_by="transaction_date desc", limit_page_length=0)
+	                         fields=["name", "folt_request_title", "supplier_name", "transaction_date"], order_by="transaction_date desc", limit_page_length=0)
 	names = [o.name for o in orders]
 	lines = frappe.get_all("Purchase Order Item", filters={"parent": ["in", names or [""]]}, fields=["parent", "material_request", "supplier_quotation"])
 	mr_of, sq_of = {}, {}
@@ -44,11 +44,12 @@ def execute(filters=None):
 		mr = mr_dates.get(mr_of.get(o.name))
 		sq = sq_dates.get(sq_of.get(o.name))
 		rfq = rfq_dates.get(rfq_of.get(sq_of.get(o.name)))
-		rows.append({"name": o.name, "supplier": o.supplier_name, "requisition": mr, "rfq": rfq, "bid": sq, "ordered": o.transaction_date,
+		rows.append({"name": o.name, "folt_request_title": o.folt_request_title, "supplier": o.supplier_name, "requisition": mr, "rfq": rfq, "bid": sq, "ordered": o.transaction_date,
 		             "received": receipt.get(o.name), "invoiced": invoice.get(o.name),
 		             "req_to_order": gap(mr, o.transaction_date), "order_to_receipt": gap(o.transaction_date, receipt.get(o.name)),
 		             "receipt_to_invoice": gap(receipt.get(o.name), invoice.get(o.name)), "total": gap(mr or rfq or o.transaction_date, invoice.get(o.name) or receipt.get(o.name))})
 	columns = [
+		{"fieldname": "folt_request_title", "label": _("Request title"), "fieldtype": "Data", "width": 220},
 		{"fieldname": "name", "label": _("Order"), "fieldtype": "Link", "options": "Purchase Order", "width": 150},
 		{"fieldname": "supplier", "label": _("Supplier"), "fieldtype": "Data", "width": 170},
 		{"fieldname": "requisition", "label": _("Requested"), "fieldtype": "Date", "width": 100},

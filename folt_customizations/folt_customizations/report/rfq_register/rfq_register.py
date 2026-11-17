@@ -11,7 +11,7 @@ from folt_customizations.report_common import period, readable
 def execute(filters=None):
 	f = frappe._dict(filters or {})
 	rfqs = frappe.get_list("Request for Quotation", filters=[["docstatus", "<", 2], *period("Request for Quotation", "transaction_date", f)],
-	                       fields=["name", "transaction_date", "schedule_date", "folt_quotation_deadline", "status", "docstatus"],
+	                       fields=["name", "folt_request_title", "folt_request", "transaction_date", "schedule_date", "folt_quotation_deadline", "status", "docstatus"],
 	                       order_by="transaction_date desc, name desc", limit_page_length=0)
 	names = [r.name for r in rfqs] or [""]
 	invited = {}
@@ -34,7 +34,9 @@ def execute(filters=None):
 		             "evaluation_state": ev.workflow_state if ev else None,
 		             "open": bool(r.docstatus == 1 and r.folt_quotation_deadline and now_datetime() <= get_datetime(r.folt_quotation_deadline))})
 	columns = [
+		{"fieldname": "folt_request_title", "label": _("Request title"), "fieldtype": "Data", "width": 240},
 		{"fieldname": "name", "label": _("RFQ"), "fieldtype": "Link", "options": "Request for Quotation", "width": 160},
+		{"fieldname": "folt_request", "label": _("Requisition"), "fieldtype": "Link", "options": "Material Request", "width": 160},
 		{"fieldname": "transaction_date", "label": _("Date"), "fieldtype": "Date", "width": 100},
 		{"fieldname": "folt_quotation_deadline", "label": _("Deadline"), "fieldtype": "Datetime", "width": 150},
 		{"fieldname": "status", "label": _("Status"), "fieldtype": "Data", "width": 100},

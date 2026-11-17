@@ -242,6 +242,7 @@ _FIELDS = (
 	"role",
 	"signed_on",
 	"signature",
+	"backfilled",
 )
 
 
@@ -291,6 +292,40 @@ def signing_doctypes() -> list[str]:
 		for dt in frappe.get_all("Workflow", filters={"is_active": 1}, pluck="document_type")
 		if dt not in MASTERS
 	)
+
+
+def signs(workflow, from_state: str, next_state: str) -> bool:
+	"""Whether a move asks for a signature: forward, out of a draft (docstatus 0) state, on a
+	signed doctype. The one rule signing_map applies, for callers that hold one transition."""
+	from folt_customizations.masterdata import MASTERS
+
+	if workflow.document_type in MASTERS or is_turn_down(workflow, from_state, next_state):
+		return False
+	return any(row.state == from_state and int(row.doc_status or 0) == 0 for row in workflow.states)
+
+
+def take_signature(doctype: str, name: str, signature: str | None, remember=0):
+	"""For a write endpoint taking a move in the same request (spa.act, portal_common.act_on).
+
+	Parks the drawn signature for the move about to be made, keyed to the version in the database
+	now -- after any edits the endpoint saved first -- and keeps it as the user's own if asked.
+	Returns the parked version, for forget_held_signature once the move is done; None if nothing
+	was drawn, and then `record` falls back to the saved signature.
+	"""
+	signature = _clean(signature)
+	if not signature:
+		return None
+	if frappe.utils.cint(remember):
+		_save_user_signature(signature)
+	return park_signature(doctype, name, signature)
+
+
+def document_payload(doctype: str, name: str) -> dict:
+	"""What a document screen shows about signing: the steps so far and the reader's own signature."""
+	return {
+		"approvals": approvals_for(doctype, name) if doctype in signing_doctypes() else [],
+		"my_signature": saved_signature(frappe.session.user),
+	}
 
 
 def signing_map() -> dict:
@@ -373,3 +408,123 @@ def apply_approval_fields():
 		]
 	create_custom_fields(fields, update=True)
 
+
+
+# --- documents moved before this module existed ---------------------------------------------
+
+# frappe's own workflow comment is "<state>"; workflow_access adds "<state> — <reason>" on a
+# turn-down (a moment before frappe's bare one, for the same move); float_lifecycle writes
+# "<from> → <to> (<why>)" when the ledger moves a float. See folt-guided-desk-layer's timeline.
+_DERIVED = re.compile(r"^(?P<from>.+?) \u2192 (?P<to>.+?)(?: \((?P<why>.*)\))?$")
+
+
+def backfill(doctypes=None) -> dict:
+	"""Name the people who moved documents before signatures were recorded. Idempotent.
+
+	The only record of those moves is the Workflow comment frappe writes on every transition, owned
+	by whoever made it, so that is what each step is rebuilt from: who, when, from which state to
+	which, by which action, and in what role -- the role on the transition that the person holds
+	today, which is the best there is. Nothing was signed, so no signature is invented; the rows are
+	marked `backfilled` and the printed line stays blank for a wet signature.
+
+	A document that has been moved since this module shipped keeps its live rows: only the moves
+	older than its first live row are rebuilt. Returns {doctype: documents backfilled}.
+	"""
+	done = {}
+	for doctype in sorted(set(frappe.get_all("Workflow", filters={"is_active": 1}, pluck="document_type"))):
+		if doctypes and doctype not in doctypes:
+			continue
+		workflow = get_workflow(doctype)
+		names = frappe.get_all(
+			"Comment",
+			filters={"reference_doctype": doctype, "comment_type": "Workflow"},
+			pluck="reference_name",
+			distinct=True,
+		)
+		count = 0
+		for name in names:
+			if name and frappe.db.exists(doctype, name) and _backfill_document(workflow, doctype, name):
+				count += 1
+		if count:
+			done[doctype] = count
+	return done
+
+
+def _backfill_document(workflow, doctype, name) -> bool:
+	if frappe.db.exists(DOCTYPE, {"reference_doctype": doctype, "reference_name": name, "backfilled": 1}):
+		return False
+	live = frappe.get_all(
+		DOCTYPE,
+		filters={"reference_doctype": doctype, "reference_name": name},
+		pluck="signed_on",
+		order_by="signed_on asc",
+		limit=1,
+	)
+	cutoff = live[0] if live else None
+
+	states = {row.state for row in workflow.states}
+	previous = workflow.states[0].state if workflow.states else None
+	comments = frappe.get_all(
+		"Comment",
+		filters={"reference_doctype": doctype, "reference_name": name, "comment_type": "Workflow"},
+		fields=["owner", "content", "creation"],
+		order_by="creation asc, name asc",
+	)
+	made = 0
+	for c in comments:
+		if cutoff and c.creation >= cutoff:
+			break
+		text = frappe.utils.html2text(c.content or "").strip() if "<" in (c.content or "") else (c.content or "").strip()
+		reason = None
+		derived = _DERIVED.match(text)
+		if derived:
+			from_state, to_state = derived.group("from").strip(), derived.group("to").strip()
+		else:
+			to_state, _sep, reason = text.partition(" \u2014 ")
+			to_state, from_state = to_state.strip(), previous
+			reason = reason.strip() or None
+		if to_state not in states or not from_state or to_state == from_state:
+			continue
+		user = c.owner
+		transition, role = _transition_taken(workflow, from_state, to_state, user)
+		turn_down = is_turn_down(workflow, from_state, to_state)
+		frappe.get_doc(
+			{
+				"doctype": DOCTYPE,
+				"reference_doctype": doctype,
+				"reference_name": name,
+				"action": transition.action if transition else _("Moved to {0}").format(_(to_state)),
+				"from_state": from_state,
+				"to_state": to_state,
+				"turn_down": 1 if turn_down else 0,
+				"reason": reason if turn_down else None,
+				"approver": user,
+				"approver_name": frappe.utils.get_fullname(user),
+				"designation": _designation(user),
+				"role": role,
+				"signed_on": c.creation,
+				"backfilled": 1,
+			}
+		).insert(ignore_permissions=True)
+		previous = to_state
+		made += 1
+	if made:
+		resupersede(doctype, name)
+	return bool(made)
+
+
+def resupersede(doctype, name):
+	"""Recompute `superseded` from the order of the steps: a turn-down, and everything before the
+	last one, no longer stands. What `record` does as it goes, restated over the whole history so
+	rows inserted out of order (backfilled ones) come out the same."""
+	rows = frappe.get_all(
+		DOCTYPE,
+		filters={"reference_doctype": doctype, "reference_name": name},
+		fields=["name", "turn_down", "superseded"],
+		order_by="signed_on asc, creation asc",
+	)
+	last_turn_down = max((i for i, r in enumerate(rows) if r.turn_down), default=-1)
+	for i, r in enumerate(rows):
+		want = 1 if (r.turn_down or i < last_turn_down) else 0
+		if r.superseded != want:
+			frappe.db.set_value(DOCTYPE, r.name, "superseded", want, update_modified=False)

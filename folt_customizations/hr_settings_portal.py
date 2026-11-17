@@ -277,11 +277,11 @@ def preview(doctype, doc):
 
 
 @frappe.whitelist(methods=["POST"])
-def act(doctype, name, action, transition=None, reason=None):
+def act(doctype, name, action, transition=None, reason=None, signature=None, remember=0):
 	"""Submit, cancel, amend or delete a record."""
 	_writable(doctype)
 	_not_kept(doctype, name)
-	return _common.act_on(doctype, name, action, transition, reason)
+	return _common.act_on(doctype, name, action, transition, reason, signature, remember)
 
 
 @frappe.whitelist(methods=["POST"])

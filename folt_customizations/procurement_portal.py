@@ -417,11 +417,11 @@ def preview(doctype, doc):
 
 
 @frappe.whitelist(methods=["POST"])
-def act(doctype, name, action, transition=None, reason=None):
+def act(doctype, name, action, transition=None, reason=None, signature=None, remember=0):
 	"""Move a document: a workflow step, or ERPNext's submit / cancel / amend / delete."""
 	_writable(doctype)
 	_assert_suppliers(doctype, name)
-	return _common.act_on(doctype, name, action, transition, reason)
+	return _common.act_on(doctype, name, action, transition, reason, signature, remember)
 
 
 @frappe.whitelist(methods=["POST"])

@@ -146,6 +146,21 @@ def walk():
 
 	result = as_user(ape.HEAD_OF_FINANCE, lambda: sig.get_approvals(DT, name))
 	check("get_approvals gives the whole history to a reader", len(result["steps"]) == 6 and result["signing"], str(len(result["steps"])))
+	payload = as_user(ape.HEAD_OF_FINANCE, lambda: sig.document_payload(DT, name))
+	check("document screens get the steps and the reader's own signature", len(payload["approvals"]) == 6 and payload["my_signature"] == PNG_B)
+
+	print("\n--- older documents: names rebuilt from the timeline ---")
+	before = [(r.action, r.approver, r.to_state, r.turn_down, r.superseded) for r in steps(name)]
+	frappe.db.delete(sig.DOCTYPE, {"reference_doctype": DT, "reference_name": name})
+	check("a document moved before signatures has no steps", steps(name) == [])
+	result = sig.backfill([DT])
+	rebuilt = steps(name)
+	check("backfill rebuilds its steps from the Workflow comments", result.get(DT, 0) >= 1 and len(rebuilt) == len(before), f"{len(rebuilt)} of {len(before)}")
+	check("with the same people, actions, states and superseding", [(r.action, r.approver, r.to_state, r.turn_down, r.superseded) for r in rebuilt] == before,
+		str([(r.action, r.approver, r.superseded) for r in rebuilt]))
+	check("the return keeps its reason", any(r.turn_down and r.reason == "E2E: the venue quote is missing." for r in rebuilt))
+	check("rebuilt steps are marked as history and carry no signature", all(r.backfilled and not r.signature for r in rebuilt))
+	check("backfill is idempotent", sig.backfill([DT]).get(DT, 0) == 0 and len(steps(name)) == len(before))
 
 	print("\n--- removed with the document ---")
 	frappe.db.rollback()  # nothing above is kept; reproduce one row and delete its document

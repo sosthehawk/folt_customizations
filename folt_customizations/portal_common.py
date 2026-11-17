@@ -103,6 +103,7 @@ def record_view(doctype, name=None, masker=None):
 	from frappe.desk.form.load import get_docinfo
 	from frappe.model.workflow import get_workflow, get_workflow_name
 
+	from folt_customizations import approval_signatures
 	from folt_customizations.workflow_access import is_turn_down
 
 	meta = frappe.get_meta(doctype)
@@ -129,8 +130,12 @@ def record_view(doctype, name=None, masker=None):
 				from folt_customizations.match import needs_reason as match_needs_reason
 
 				moves.append({"action": t.action, "next_state": t.next_state,
-				              "needs_reason": is_turn_down(wf, state, t.next_state) or match_needs_reason(doc, t.next_state)})
-		workflow = {"name": workflow_name, "state": state, "transitions": moves}
+				              "needs_reason": is_turn_down(wf, state, t.next_state) or match_needs_reason(doc, t.next_state),
+				              # An approval step: the screen asks for a signature (approval_signatures).
+				              "signs": approval_signatures.signs(wf, state, t.next_state)})
+		# Who signed each step so far, and the reader's own signature to prefill the pad with.
+		workflow = {"name": workflow_name, "state": state, "transitions": moves,
+		            **approval_signatures.document_payload(doctype, doc.name)}
 
 	gl_entries = []
 	if meta.is_submittable and doc.docstatus > 0 and frappe.has_permission("GL Entry", "read"):
@@ -400,7 +405,7 @@ def preview_doc(doctype, doc, methods, after=None):
 	return draft.as_dict(convert_dates_to_str=True)
 
 
-def act_on(doctype, name, action, transition=None, reason=None):
+def act_on(doctype, name, action, transition=None, reason=None, signature=None, remember=0):
 	"""Move a document: a workflow step, or ERPNext's submit / cancel / amend / delete.
 
 	A workflow step goes through apply_workflow exactly as the Desk's button does, with the reason
@@ -409,6 +414,7 @@ def act_on(doctype, name, action, transition=None, reason=None):
 	"""
 	from frappe.model.workflow import apply_workflow, get_workflow_name
 
+	from folt_customizations import approval_signatures
 	from folt_customizations.workflow_access import hold_rejection_reason
 
 	doc = frappe.get_doc(doctype, name)
@@ -417,7 +423,13 @@ def act_on(doctype, name, action, transition=None, reason=None):
 			frappe.throw(_("Which step?"))
 		if reason and reason.strip():
 			hold_rejection_reason(doctype, name, reason.strip())
-		apply_workflow(doc, transition)
+		# The signature drawn for an approval step; without one, the user's saved signature.
+		signed = approval_signatures.take_signature(doctype, name, signature, remember)
+		try:
+			apply_workflow(doc, transition)
+		finally:
+			if signed is not None:
+				approval_signatures.forget_held_signature(doctype, name, signed)
 		return {"name": doc.name}
 	if action in ("submit", "cancel") and get_workflow_name(doctype):
 		frappe.throw(

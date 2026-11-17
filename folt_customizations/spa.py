@@ -42,7 +42,7 @@ from frappe.model.workflow import (
 from frappe.sessions import get_csrf_token
 from frappe.utils import cint, flt, getdate
 
-from folt_customizations import activity_chain, masterdata, procurement_chain, step_forms, workflow_shape
+from folt_customizations import activity_chain, approval_signatures, masterdata, procurement_chain, step_forms, workflow_shape
 from folt_customizations.portal_common import complete_item_rows
 from folt_customizations.request_title import CHAIN as REQUEST_TITLED, first_title, title_fields
 from folt_customizations.document_guide import _documents, get_guide, guide_map
@@ -253,6 +253,8 @@ def document(doctype: str, name: str) -> dict:
 		"summary": summary_for(doc),
 		"context": context_for(doc),
 		"desk_url": f"/desk/{frappe.scrub(doctype).replace('_', '-')}/{quote(doc.name)}",
+		# Who signed each step so far, and the reader's own signature to prefill the pad with.
+		**approval_signatures.document_payload(doctype, doc.name),
 	}
 
 
@@ -356,6 +358,7 @@ def actions_for(doc) -> list[dict]:
 				"next_state": _("Submitted"),
 				"kind": "forward",
 				"needs_reason": False,
+				"signs": False,
 				"submits": True,
 				"blocks": [],
 				"primary": True,
@@ -385,6 +388,8 @@ def actions_for(doc) -> list[dict]:
 				"next_state": transition.next_state,
 				"kind": "turn_down" if turn_down else ("correction" if correction else "forward"),
 				"needs_reason": turn_down,
+				# An approval step: the screen asks for a signature (approval_signatures.signs).
+				"signs": approval_signatures.signs(workflow, transition.state, transition.next_state),
 				"submits": doc.docstatus == 0 and next_status.get(transition.next_state) == 1,
 				"blocks": [
 					row["label"]
@@ -588,8 +593,14 @@ def act(
 	reason: str | None = None,
 	values: str | dict | None = None,
 	modified: str | None = None,
+	signature: str | None = None,
+	remember: int = 0,
 ) -> dict:
 	"""Take a workflow action -- with its reason, and the step's edits if the actor may make them.
+
+	`signature` is the one drawn for an approval step (Action.signs), stamped onto the step by
+	approval_signatures.record; `remember` keeps it as the user's own. Without one the saved
+	signature is used, so a screen with no pad still signs for somebody who keeps one.
 
 	The order below is forced; see the module docstring.
 	"""
@@ -634,6 +645,7 @@ def act(
 		doc.save()
 
 	parked = park_reason(doctype, doc.name, reason) if turn_down else None
+	signed = None if turn_down else approval_signatures.take_signature(doctype, doc.name, signature, remember)
 	try:
 		# By name, not the in-memory document: apply_workflow reloads from the database anyway,
 		# and handing it a dict makes that explicit.
@@ -641,6 +653,8 @@ def act(
 	finally:
 		if parked is not None:
 			forget_held_reason(doctype, doc.name, parked)
+		if signed is not None:
+			approval_signatures.forget_held_signature(doctype, doc.name, signed)
 
 	return document(doctype, doc.name)
 

@@ -14,6 +14,7 @@ import SkeletonList from "../components/SkeletonList.vue";
 import StateChip from "../components/StateChip.vue";
 import ActSheet from "../components/doc/ActSheet.vue";
 import ActionBar from "../components/doc/ActionBar.vue";
+import Approvals from "../components/doc/Approvals.vue";
 import DetailsList from "../components/doc/DetailsList.vue";
 import EvidenceList from "../components/doc/EvidenceList.vue";
 import HandoffList from "../components/doc/HandoffList.vue";
@@ -112,15 +113,16 @@ function onAct(action: Action) {
   actResult.value = null;
   // Confirm what cannot be undone and ask for what a turn-down must carry. A plain forward move
   // with nothing unsaved is one tap.
-  if (action.needs_reason || action.submits || dirty.value) pending.value = action;
+  // An approval step is always signed, so it always opens the sheet.
+  if (action.needs_reason || action.signs || action.submits || dirty.value) pending.value = action;
   else void act(action);
 }
 
-async function act(action: Action, reason?: string) {
+async function act(action: Action, reason?: string, signature?: { image: string; remember: boolean }) {
   if (!doc.value) return;
   busy.value = true;
   const before = doc.value.state;
-  actResult.value = await actOn(doc.value, action.action, reason, dirty.value ? draft.patch() : undefined);
+  actResult.value = await actOn(doc.value, action.action, reason, dirty.value ? draft.patch() : undefined, signature);
   busy.value = false;
   if (actResult.value.ok) {
     draft.reset();
@@ -287,6 +289,11 @@ function discard() {
             </dl>
           </section>
 
+          <section v-if="doc.approvals?.length || doc.actions.some((a) => a.signs)" class="card pad">
+            <h2 class="section-title">Approvals</h2>
+            <Approvals :steps="doc.approvals ?? []" />
+          </section>
+
           <section class="card pad">
             <h2 class="section-title">History</h2>
             <Timeline :entries="guide.timeline" />
@@ -305,7 +312,8 @@ function discard() {
         :error-title="actResult?.title ?? null"
         :stale="!!actResult?.stale"
         @close="pending = null"
-        @confirm="(reason) => pending && act(pending, reason)"
+        :my-signature="doc.my_signature"
+        @confirm="(reason, signature) => pending && act(pending, reason, signature)"
         @reload="reload"
       />
     </template>

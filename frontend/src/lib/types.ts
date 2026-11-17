@@ -146,6 +146,8 @@ export type Action = {
   next_state: string;
   kind: "forward" | "turn_down" | "correction";
   needs_reason: boolean;
+  /** An approval step: the sheet asks for a signature (approval_signatures.signs). */
+  signs: boolean;
   submits: boolean;
   blocks: string[];
   primary: boolean;
@@ -207,6 +209,24 @@ export type SummarySection = {
   table?: { columns: FieldSpec[]; rows: { name: string; values: Record<string, FieldValue>; display: Record<string, string | null> }[] };
 };
 
+/** One step a document took, and who signed it (FoLT Approval Signature). Oldest first. */
+export type ApprovalStep = {
+  name: string;
+  action: string;
+  from_state: string;
+  to_state: string;
+  turn_down: number;
+  superseded: number;
+  reason: string | null;
+  approver: string;
+  approver_name: string | null;
+  designation: string | null;
+  role: string | null;
+  signed_on: string;
+  signature: string | null;
+  backfilled: number;
+};
+
 export type Doc = {
   doctype: string;
   name: string;
@@ -219,6 +239,9 @@ export type Doc = {
   tones: Record<string, Tone>;
   guide: Guide;
   actions: Action[];
+  approvals: ApprovalStep[];
+  /** The reader's own saved signature, to prefill the pad with. */
+  my_signature: string | null;
   form: Form;
   summary: SummarySection[];
   context: {

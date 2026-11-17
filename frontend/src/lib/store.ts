@@ -194,7 +194,7 @@ export async function saveDoc(doc: Doc, values: Patch): Promise<WriteResult> {
 }
 
 /** One call: edits (if any, and only where the actor holds the step), reason, transition. */
-export async function actOn(doc: Doc, action: string, reason?: string, values?: Patch): Promise<WriteResult> {
+export async function actOn(doc: Doc, action: string, reason?: string, values?: Patch, signature?: { image: string; remember: boolean }): Promise<WriteResult> {
   try {
     const { result, notices } = await callWithNotices<Doc>(`${SPA}.act`, {
       doctype: doc.doctype,
@@ -203,6 +203,8 @@ export async function actOn(doc: Doc, action: string, reason?: string, values?: 
       reason: reason ?? null,
       values: values && Object.keys(values).length ? values : null,
       modified: doc.modified,
+      signature: signature?.image ?? null,
+      remember: signature?.remember ? 1 : 0,
     });
     install(result);
     surface(notices);

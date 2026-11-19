@@ -145,8 +145,12 @@ def _system_time(timestamp: float) -> str:
 
 
 @frappe.whitelist(methods=["GET"])
-def my_holidays(from_date: str, to_date: str) -> dict:
+def my_holidays(from_date: str, to_date: str, employee: str | None = None) -> dict:
 	"""The session employee's holidays between two dates, from the list HRMS would apply on each day.
+
+	`employee` asks for someone else's: HR only (their attendance month needs the days off to show
+	the working days that are present by default). The answer also carries the employee's
+	date_of_joining and relieving_date, so no day outside employment is counted as present.
 
 	WHICH LIST IS HRMS'S ANSWER, NOT OURS. `get_holiday_list_for_employee(as_on=d)` takes the
 	latest submitted employee-level Holiday List Assignment starting on or before `d`, and falls
@@ -171,12 +175,22 @@ def my_holidays(from_date: str, to_date: str) -> dict:
 			title=_("Invalid range"),
 		)
 
-	employee = frappe.db.get_value(
-		"Employee", {"user_id": frappe.session.user, "status": "Active"}, ["name", "company"], as_dict=True
-	)
-	if not employee:
-		return {"employee": None, "holiday_lists": [], "holidays": []}
-	return holidays_for(employee, start, end)
+	fields = ["name", "company", "user_id", "date_of_joining", "relieving_date"]
+	if employee:
+		from folt_customizations.hr_attendance import is_hr
+
+		row = frappe.db.get_value("Employee", employee, fields, as_dict=True)
+		# Unknown to HR answers like "no employee" (the caller says 404); to anyone else, refused.
+		if (not row or row.user_id != frappe.session.user) and not is_hr():
+			frappe.throw(_("Only HR can see someone else's holidays."), frappe.PermissionError)
+	else:
+		row = frappe.db.get_value("Employee", {"user_id": frappe.session.user, "status": "Active"}, fields, as_dict=True)
+	if not row:
+		return {"employee": None, "holiday_lists": [], "holidays": [], "date_of_joining": None, "relieving_date": None}
+	out = holidays_for(row, start, end)
+	out["date_of_joining"] = str(row.date_of_joining) if row.date_of_joining else None
+	out["relieving_date"] = str(row.relieving_date) if row.relieving_date else None
+	return out
 
 
 def holidays_for(employee, start, end) -> dict:

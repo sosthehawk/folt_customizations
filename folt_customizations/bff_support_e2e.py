@@ -53,6 +53,7 @@ OPERATIONS = "oso.test@folt.test"
 FINANCE_MANAGER = "finmanager.test@folt.test"
 COMMITTEE = "committee.test@folt.test"
 PURCHASER = "purchaser.test@folt.test"
+HR_MANAGER = "hrmanager.test@folt.test"
 
 USERS = (
 	REQUESTER, HEAD_OF_PROGRAMS, HEAD_OF_FINANCE, FINANCE_OFFICER, FINANCE_ASSISTANT,
@@ -367,7 +368,7 @@ def _holidays(employee, month_start, horizon):
 	nobody = as_user(HEAD_OF_PROGRAMS, lambda: bff_support.my_holidays(month_start, horizon))
 	check(
 		"a user with no Employee gets employee None and no holidays",
-		nobody == {"employee": None, "holiday_lists": [], "holidays": []},
+		nobody == {"employee": None, "holiday_lists": [], "holidays": [], "date_of_joining": None, "relieving_date": None},
 		str(nobody),
 	)
 	if not employee:
@@ -381,6 +382,13 @@ def _holidays(employee, month_start, horizon):
 		and (live["holiday_lists"] or not expected),
 		f"{len(expected)} expected, lists {live['holiday_lists']}",
 	)
+	joined = frappe.db.get_value("Employee", employee, "date_of_joining")
+	check("and carries the employment dates", live["date_of_joining"] == (str(joined) if joined else None), live["date_of_joining"])
+	for_hr = as_user(HR_MANAGER, lambda: bff_support.my_holidays(month_start, horizon, employee))
+	check("HR reads the same days for that employee", for_hr["employee"] == employee and for_hr["holidays"] == live["holidays"])
+	check("asking for myself by ID is mine", as_user(REQUESTER, lambda: bff_support.my_holidays(month_start, horizon, employee))["employee"] == employee)
+	why = as_user(HEAD_OF_PROGRAMS, lambda: refused(lambda: bff_support.my_holidays(month_start, horizon, employee), frappe.PermissionError))
+	check("anyone else is refused someone's holidays", bool(why), why or "not refused")
 
 	print("\n--- 6  my_holidays: assignments starting inside the range ---")
 	company = frappe.db.get_value("Employee", employee, "company")

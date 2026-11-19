@@ -11,7 +11,10 @@ day is one of:
   Half day                    attendance Half Day                     half the standard hours
   Absent                      attendance Absent                       0
   Holiday / Day off           on the holiday list, nothing marked     0
-  Not marked                  a working day gone by with nothing      0 -- and it blocks sign-off
+  Worked (by default)         a working day, today or gone by, with   STANDARD_HOURS -- present
+                              nothing recorded                        unless assigned otherwise
+                                                                      (hr_attendance.register)
+  Not marked                  no longer produced; kept for timesheets signed before the default
   Upcoming                    a working day still to come
 
 The month is then signed in two steps, each recorded on a FoLT Timesheet (TS-<employee>-<month>):
@@ -40,6 +43,7 @@ from folt_customizations.hr_portal import MONTH
 TIMESHEET = "FoLT Timesheet"
 STANDARD_HOURS = 8.0
 EMPLOYEE_FIELDS = ["name", "employee_name", "department", "company", "leave_approver", "user_id", "date_of_joining", "relieving_date"]
+PRESENT_BY_DEFAULT = "Present by default"
 KIND = {"Present": "Worked", "Work From Home": "Worked from home", "On Leave": "Leave", "Half Day": "Half day", "Absent": "Absent"}
 
 
@@ -101,8 +105,9 @@ def month_days(employee, first, last) -> tuple[list[dict], dict]:
 		else:
 			s["working_days"] += 1
 			if day <= today:
-				kind = "Not marked"
-				s["not_marked"] += 1
+				# Present unless assigned otherwise: the same default the register shows.
+				kind, hours, note = KIND["Present"], STANDARD_HOURS, PRESENT_BY_DEFAULT
+				s["worked"] += 1
 			else:
 				kind = "Upcoming"
 		s["hours"] += hours

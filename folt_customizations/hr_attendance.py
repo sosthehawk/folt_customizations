@@ -13,6 +13,12 @@ when leave is approved. These are the missing halves:
                                 Work From Home, Half Day, or "" to clear it. A day that approved
                                 leave marked is the leave's to change (cancel the leave), not HR's.
   register(date, department)    HR's daily register: every active employee with that day's mark.
+                                PRESENT UNLESS ASSIGNED OTHERWISE: a working day (today or gone by)
+                                with nothing recorded reads as Present, `by_default`. Nothing is
+                                written for it -- a stored Present row would make HRMS refuse leave
+                                applied afterwards for that day (sick leave), and payroll here is
+                                leave-based, so an unrecorded day is already a paid day. HR records
+                                the exceptions; clearing a mark returns the day to the default.
   planned_activities(from, to)  The team calendar's activities: every Activity Requisition that is
                                 approved or on its way to approval and falls in the range, as a
                                 title, its dates, the place and who leads it -- never the budget.
@@ -172,7 +178,8 @@ def register(date: str | None = None, department: str | None = None) -> dict:
 		)
 	}
 	off_by_list: dict[str, bool] = {}
-	rows, counts = [], {"present": 0, "work_from_home": 0, "absent": 0, "on_leave": 0, "half_day": 0, "day_off": 0, "unmarked": 0}
+	future = day > getdate(nowdate())
+	rows, counts = [], {"present": 0, "work_from_home": 0, "absent": 0, "on_leave": 0, "half_day": 0, "day_off": 0, "unmarked": 0, "by_default": 0}
 	key = {"Present": "present", "Work From Home": "work_from_home", "Absent": "absent", "On Leave": "on_leave", "Half Day": "half_day"}
 	for emp in employees:
 		if emp.date_of_joining and getdate(emp.date_of_joining) > day:
@@ -184,10 +191,14 @@ def register(date: str | None = None, department: str | None = None) -> dict:
 				holiday_list and frappe.db.exists("Holiday", {"parent": holiday_list, "parenttype": "Holiday List", "holiday_date": day})
 			)
 		day_off = off_by_list[holiday_list]
+		by_default = not mark_row and not day_off and not future
 		if mark_row:
 			counts[key[mark_row.status]] += 1
 		elif day_off:
 			counts["day_off"] += 1
+		elif by_default:
+			counts["present"] += 1
+			counts["by_default"] += 1
 		else:
 			counts["unmarked"] += 1
 		rows.append(
@@ -195,10 +206,11 @@ def register(date: str | None = None, department: str | None = None) -> dict:
 				"employee": emp.name,
 				"employee_name": emp.employee_name,
 				"department": emp.department,
-				"status": mark_row.status if mark_row else None,
+				"status": mark_row.status if mark_row else ("Present" if by_default else None),
 				"leave_type": (mark_row.leave_type or None) if mark_row else None,
 				"from_leave": bool(mark_row and mark_row.leave_application),
 				"day_off": day_off,
+				"by_default": by_default,
 			}
 		)
 	return {"date": str(day), "today": nowdate(), "department": department or None, "rows": rows, "summary": counts}

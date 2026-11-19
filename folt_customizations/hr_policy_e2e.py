@@ -10,9 +10,9 @@ Claims (leave_policy.py, hr_attendance.py, hr_timesheet.py):
   morning reminder reaches the approver and the applicant of an undecided request about to start.
 - Attendance: an employee marks today once, as Present or Work From Home, and nothing else; HR
   marks, corrects and clears any day up to today, but not a day approved leave has marked; the
-  register lists everyone.
-- Timesheet: the month is the attendance, leave and holidays, day by day; it cannot be confirmed
-  with a working day unmarked; confirmed, it goes to the approver; approved, a later change to
+  register lists everyone, a working day with nothing recorded as present by default.
+- Timesheet: the month is the attendance, leave and holidays, day by day; a working day with
+  nothing recorded is worked by default, so nothing blocks it; confirmed, it goes to the approver; approved, a later change to
   attendance shows as a changed day; only HR reopens an approved one, with a reason.
 - Team calendar: planned activities are the requisitions that are approved or on their way, for
   staff only.
@@ -161,6 +161,12 @@ def _run():
 	row = next(r for r in register["rows"] if r["employee"] == other.name)
 	check("the register shows it", row["status"] == "Present" and register["summary"]["present"] >= 1, row)
 	check("and clears it", as_user(HR, lambda: hr_attendance.mark(other.name, str(workday), ""))["status"] is None and not hr_attendance._existing(other.name, workday))
+	register = as_user(HR, lambda: hr_attendance.register(str(workday)))
+	row = next(r for r in register["rows"] if r["employee"] == other.name)
+	check("a working day with nothing recorded is present by default", row["status"] == "Present" and row["by_default"] and register["summary"]["unmarked"] == 0, row)
+	check("and nothing is written for it", not hr_attendance._existing(other.name, workday))
+	future = as_user(HR, lambda: hr_attendance.register(str(add_days(today, 1))))
+	check("a day still to come is not defaulted", not any(r["by_default"] for r in future["rows"]), future["summary"])
 	expect_throw("never a future day", lambda: as_user(HR, lambda: hr_attendance.mark(other.name, str(add_days(today, 1)), "Present")), saying="future")
 
 	sick = as_user(HR, lambda: leave(other.name, workday, workday, other.leave_approver or approver, folt_emergency=1, folt_emergency_reason="Taken ill."))
@@ -173,16 +179,20 @@ def _run():
 	month = str(add_months(get_first_day(today), -1))[:7]
 	frappe.db.delete("FoLT Timesheet", {"employee": mate.name, "month": month})
 	sheet = as_user(HR, lambda: hr_timesheet.timesheet(month, mate.name))
-	unmarked = [d["date"] for d in sheet["days"] if d["kind"] == "Not marked"]
-	check("a month with unmarked working days cannot be confirmed", unmarked and not sheet["can_confirm"] and sheet["blockers"], sheet["summary"])
-	expect_throw("and confirming it is refused", lambda: as_user(HR, lambda: hr_timesheet.confirm_timesheet(month, mate.name)), saying="no attendance")
-	for d in unmarked[:-1]:
-		as_user(HR, lambda d=d: hr_attendance.mark(mate.name, d, "Present"))
+	unmarked = [d["date"] for d in sheet["days"] if d["note"] == hr_timesheet.PRESENT_BY_DEFAULT]
+	by_default = [d for d in sheet["days"] if d["date"] in unmarked]
+	check(
+		"working days with nothing recorded are worked by default",
+		unmarked and all(d["kind"] == "Worked" and d["hours"] == 8 for d in by_default) and sheet["summary"]["not_marked"] == 0,
+		sheet["summary"],
+	)
+	check("so they do not block confirming the month", sheet["can_confirm"] and not sheet["blockers"], sheet["blockers"])
+	before = sheet["summary"]
 	as_user(HR, lambda: hr_attendance.mark(mate.name, unmarked[-1], "Half Day"))
 	sheet = as_user(HR, lambda: hr_timesheet.timesheet(month, mate.name))
 	s = sheet["summary"]
-	check("marked days become the timesheet", s["not_marked"] == 0 and s["worked"] == len(unmarked) - 0.5 and s["absent"] == 0.5, s)
-	check("hours follow the days", s["hours"] == 8 * (len(unmarked) - 1) + 4, s["hours"])
+	check("an exception HR records replaces the default", s["not_marked"] == 0 and s["worked"] == before["worked"] - 0.5 and s["absent"] == before["absent"] + 0.5, s)
+	check("hours follow the days", s["hours"] == before["hours"] - 4, s["hours"])
 	check("holidays and days off are not working days", s["working_days"] + s["holidays"] + s["days_off"] == len(sheet["days"]) and s["days_off"] >= 4, s)
 	expect_throw("a colleague cannot see it", lambda: as_user(REQUESTER, lambda: hr_timesheet.timesheet(month, mate.name)), frappe.PermissionError)
 	expect_throw("or confirm it", lambda: as_user(REQUESTER, lambda: hr_timesheet.confirm_timesheet(month, mate.name)), frappe.PermissionError)
